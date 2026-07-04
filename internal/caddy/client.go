@@ -64,3 +64,21 @@ func (c *Client) RemoveRoute(host string) error {
 	}
 	return fmt.Errorf("caddy remove route: status %d", resp.StatusCode)
 }
+
+// LoadCert appends a PEM cert/key pair to Caddy's tls.certificates.load_pem so
+// Caddy serves it for matching SNI. Requires the tls app to exist (WithHTTPS).
+func (c *Client) LoadCert(certPEM, keyPEM string) error {
+	body, _ := json.Marshal([]map[string]string{{"certificate": certPEM, "key": keyPEM}})
+	url := c.base + "/config/apps/tls/certificates/load_pem"
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("caddy load cert: status %d", resp.StatusCode)
+	}
+	return nil
+}

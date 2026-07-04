@@ -13,17 +13,46 @@ import (
 
 type Manager struct{ cmd *exec.Cmd }
 
-// StartManager launches `caddy run` with an admin-enabled base config that has
-// one HTTP server named "piper" listening on httpListen with an empty routes list.
-func StartManager(ctx context.Context, adminBase, httpListen string) (*Manager, error) {
-	adminAddr := strings.TrimPrefix(adminBase, "http://")
-	base := map[string]any{
-		"admin": map[string]any{"listen": adminAddr},
-		"apps": map[string]any{"http": map[string]any{"servers": map[string]any{
-			"piper": map[string]any{"listen": []string{httpListen}, "routes": []any{}},
-		}}},
+type managerOpts struct {
+	httpListen  string
+	httpsListen string // "" ⇒ no TLS listener
+	adminAddr   string
+}
+
+// Option configures StartManager.
+type Option func(*managerOpts)
+
+// WithHTTPS adds a TLS listener on listen, disables Caddy's automatic HTTPS
+// (piperd owns certs), and enables the tls app so load_pem certs are served.
+func WithHTTPS(listen string) Option {
+	return func(o *managerOpts) { o.httpsListen = listen }
+}
+
+// baseConfig builds the Caddy JSON bootstrap config for these options.
+func (o *managerOpts) baseConfig() map[string]any {
+	listens := []string{o.httpListen}
+	piper := map[string]any{"listen": listens, "routes": []any{}}
+	apps := map[string]any{"http": map[string]any{"servers": map[string]any{"piper": piper}}}
+	if o.httpsListen != "" {
+		piper["listen"] = []string{o.httpListen, o.httpsListen}
+		piper["automatic_https"] = map[string]any{"disable": true}
+		apps["tls"] = map[string]any{"certificates": map[string]any{"load_pem": []any{}}}
 	}
-	cfg, _ := json.Marshal(base)
+	return map[string]any{
+		"admin": map[string]any{"listen": o.adminAddr},
+		"apps":  apps,
+	}
+}
+
+// StartManager launches `caddy run` with an admin-enabled base config: one HTTP
+// server named "piper" on httpListen with empty routes. Options can add a TLS
+// listener (WithHTTPS).
+func StartManager(ctx context.Context, adminBase, httpListen string, opts ...Option) (*Manager, error) {
+	o := &managerOpts{httpListen: httpListen, adminAddr: strings.TrimPrefix(adminBase, "http://")}
+	for _, opt := range opts {
+		opt(o)
+	}
+	cfg, _ := json.Marshal(o.baseConfig())
 	cmd := exec.CommandContext(ctx, "caddy", "run", "--config", "-", "--adapter", "")
 	cmd.Stdin = bytes.NewReader(cfg)
 	if err := cmd.Start(); err != nil {
