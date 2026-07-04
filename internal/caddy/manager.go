@@ -36,6 +36,7 @@ func (o *managerOpts) baseConfig() map[string]any {
 	if o.httpsListen != "" {
 		piper["listen"] = []string{o.httpListen, o.httpsListen}
 		piper["automatic_https"] = map[string]any{"disable": true}
+		piper["tls_connection_policies"] = []any{map[string]any{}}
 		apps["tls"] = map[string]any{"certificates": map[string]any{"load_pem": []any{}}}
 	}
 	return map[string]any{

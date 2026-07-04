@@ -30,6 +30,9 @@ func TestWithHTTPSBaseConfig(t *testing.T) {
 	if _, ok := base["apps"].(map[string]any)["tls"]; !ok {
 		t.Fatal("tls app should be present when TLS is enabled")
 	}
+	if srv["tls_connection_policies"] == nil {
+		t.Fatal("tls_connection_policies should be set when TLS is enabled")
+	}
 }
 
 func TestLoadCert(t *testing.T) {
