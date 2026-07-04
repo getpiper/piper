@@ -26,3 +26,8 @@ func Load() Config {
 		CaddyAdmin: env("PIPER_CADDY_ADMIN", "http://127.0.0.1:2019"),
 	}
 }
+
+// ClientAddr returns the piperd base URL used by the piper CLI.
+func ClientAddr() string {
+	return env("PIPER_ADDR", "http://127.0.0.1:8088")
+}

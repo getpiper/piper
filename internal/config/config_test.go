@@ -23,3 +23,14 @@ func TestLoadEnvOverride(t *testing.T) {
 		t.Errorf("APIAddr = %q, want 0.0.0.0:9000", got)
 	}
 }
+
+func TestClientAddr(t *testing.T) {
+	t.Setenv("PIPER_ADDR", "")
+	if got := ClientAddr(); got != "http://127.0.0.1:8088" {
+		t.Errorf("default ClientAddr = %q", got)
+	}
+	t.Setenv("PIPER_ADDR", "http://piper.test:9000")
+	if got := ClientAddr(); got != "http://piper.test:9000" {
+		t.Errorf("configured ClientAddr = %q", got)
+	}
+}
