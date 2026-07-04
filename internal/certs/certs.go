@@ -1,0 +1,72 @@
+package certs
+
+import (
+	"crypto"
+	"crypto/ecdsa"
+
+	"github.com/go-acme/lego/v4/certificate"
+	"github.com/go-acme/lego/v4/challenge"
+	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/registration"
+)
+
+// Config configures ACME DNS-01 issuance. DNSProvider is any lego challenge
+// provider (e.g. providers/dns/cloudflare); AccountKey is the persisted ACME
+// account key.
+type Config struct {
+	Email       string
+	CADirURL    string
+	DNSProvider challenge.Provider
+	AccountKey  *ecdsa.PrivateKey
+}
+
+// Manager obtains certificates via ACME DNS-01.
+type Manager struct {
+	client *lego.Client
+}
+
+// user implements lego's registration.User.
+type user struct {
+	email string
+	key   crypto.PrivateKey
+	reg   *registration.Resource
+}
+
+func (u *user) GetEmail() string                        { return u.email }
+func (u *user) GetRegistration() *registration.Resource { return u.reg }
+func (u *user) GetPrivateKey() crypto.PrivateKey        { return u.key }
+
+// New builds a Manager and registers the ACME account.
+func New(cfg Config) (*Manager, error) {
+	u := &user{email: cfg.Email, key: cfg.AccountKey}
+	lc := lego.NewConfig(u)
+	if cfg.CADirURL != "" {
+		lc.CADirURL = cfg.CADirURL
+	}
+	client, err := lego.NewClient(lc)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Challenge.SetDNS01Provider(cfg.DNSProvider); err != nil {
+		return nil, err
+	}
+	reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+	if err != nil {
+		return nil, err
+	}
+	u.reg = reg
+	return &Manager{client: client}, nil
+}
+
+// Obtain returns a PEM-encoded certificate chain and private key covering the
+// given domains (e.g. []string{"*.alice.example.com", "alice.example.com"}).
+func (m *Manager) Obtain(domains []string) (certPEM, keyPEM []byte, err error) {
+	res, err := m.client.Certificate.Obtain(certificate.ObtainRequest{
+		Domains: domains,
+		Bundle:  true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return res.Certificate, res.PrivateKey, nil
+}
