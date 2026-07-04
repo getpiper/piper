@@ -34,10 +34,21 @@ func RunTunnelClient(ctx context.Context, relayAddr, token, baseDomain string, d
 			continue
 		}
 		log.Printf("tunnel: connected to relay %s as %s", relayAddr, baseDomain)
-		backoff = time.Second
+		start := time.Now()
 		serveStreams(ctx, sess, dialLocal)
+		if time.Since(start) > healthyThreshold {
+			backoff = time.Second
+		}
+		sleep(ctx, backoff)
+		backoff = nextBackoff(backoff)
 	}
 }
+
+// healthyThreshold is how long a session must stay up before a subsequent
+// disconnect is treated as "was fine" and resets backoff to the floor. A
+// session that dies before this (e.g. relay rejects auth immediately) keeps
+// the backoff growing so a misconfigured token doesn't busy-spin reconnects.
+const healthyThreshold = 10 * time.Second
 
 func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func() (net.Conn, error)) {
 	defer sess.Close()
