@@ -1,0 +1,56 @@
+package runtime
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func dockerAvailable(t *testing.T) *DockerRuntime {
+	t.Helper()
+	r, err := NewDockerRuntime()
+	if err != nil {
+		t.Skipf("docker unavailable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := r.cli.Ping(ctx); err != nil {
+		t.Skipf("docker not reachable: %v", err)
+	}
+	return r
+}
+
+func TestDockerBuildRunHealthStop(t *testing.T) {
+	r := dockerAvailable(t)
+	dir := t.TempDir()
+	// busybox httpd stays foreground and listens on :8080 so WaitHealthy's
+	// TCP dial succeeds — no package install, minimal pull.
+	df := "FROM busybox:1.36\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	b, err := r.Build(ctx, dir, "piper-runtime-test:latest")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if b.ImageID == "" {
+		t.Fatal("empty image id")
+	}
+
+	run, err := r.Run(ctx, "piper-runtime-test:latest", 8080, map[string]string{"PORT": "8080"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() { r.Stop(context.Background(), run.ContainerID) })
+	if run.HostPort == 0 {
+		t.Fatal("no host port assigned")
+	}
+
+	if err := r.WaitHealthy(ctx, run.HostPort); err != nil {
+		t.Fatalf("WaitHealthy: %v", err)
+	}
+}
