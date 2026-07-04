@@ -2,7 +2,7 @@
 
 Coarse **map** of what's built vs. what's left — by design. Detail for any 🟡/⬜ item lives in its linked issue (`[#N]`), not here; entries stay to one line so they can't drift from the issue. Design lives in [`docs/superpowers/specs/`](docs/superpowers/specs/); plans in [`docs/superpowers/plans/`](docs/superpowers/plans/); how-to-work in [`CLAUDE.md`](CLAUDE.md).
 
-_Last updated: 2026-07-04 — foundation landed (module skeleton, config, CI); `main` protected. Plan 1 tasks next. Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-04 — foundation landed; Plan 1 `store` + `runtime` + `caddy` merged; `deploy` (#4) next. Live tracker: [issues](https://github.com/getpiper/piper/issues)._
 
 Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label conventions: [CLAUDE.md § Issue tracking](CLAUDE.md#issue-tracking--progress).
 
@@ -16,9 +16,9 @@ Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label c
 
 Goal: `piper deploy myapp --path .` → build Dockerfile → run container → health-check → serve at `http://myapp.piper.localhost` via managed Caddy; state in SQLite. No relay, no tunnel, no git.
 
-- ⬜ `store` — SQLite apps + deployments (pure-Go driver) — [#1](https://github.com/getpiper/piper/issues/1)
-- ⬜ `runtime` — Docker build/run/health/stop driver + fake — [#2](https://github.com/getpiper/piper/issues/2)
-- ⬜ `caddy` — admin-API client (upsert/remove route) + subprocess manager — [#3](https://github.com/getpiper/piper/issues/3)
+- ✅ `store` — SQLite apps + deployments (pure-Go driver) — [#17](https://github.com/getpiper/piper/pull/17)
+- ✅ `runtime` — Docker build/run/health/stop driver + fake — [#19](https://github.com/getpiper/piper/pull/19)
+- ✅ `caddy` — admin-API client (upsert/remove route) + subprocess manager — [#3](https://github.com/getpiper/piper/issues/3)
 - ⬜ `deploy` — orchestrator (build → run → health → record → route → retire) — [#4](https://github.com/getpiper/piper/issues/4)
 - ⬜ `api` — control-plane HTTP API (`/v1/apps`, `/v1/apps/{name}/deploy`) — [#5](https://github.com/getpiper/piper/issues/5)
 - ⬜ `client` + CLI — `piper create` / `deploy` / `list` — [#6](https://github.com/getpiper/piper/issues/6)
