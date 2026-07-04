@@ -2,19 +2,27 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/getpiper/piper/internal/agent"
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/caddy"
+	"github.com/getpiper/piper/internal/certs"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/deploy"
 	"github.com/getpiper/piper/internal/runtime"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 )
 
 func main() {
@@ -39,11 +47,24 @@ func main() {
 
 	// Unless PIPER_SKIP_CADDY is set (e.g. a caddy is already running), manage one.
 	if os.Getenv("PIPER_SKIP_CADDY") == "" {
-		mgr, err := caddy.StartManager(ctx, cfg.CaddyAdmin, ":80")
+		opts := []caddy.Option{}
+		if cfg.RelayAddr != "" {
+			opts = append(opts, caddy.WithHTTPS(":443"))
+		}
+		mgr, err := caddy.StartManager(ctx, cfg.CaddyAdmin, ":80", opts...)
 		if err != nil {
 			log.Fatalf("caddy: %v", err)
 		}
 		defer mgr.Stop()
+	}
+
+	// Relay mode: obtain/serve TLS on :443, dial the relay, register the base domain.
+	if cfg.RelayAddr != "" {
+		if err := setupRelayTLS(ctx, cfg); err != nil {
+			log.Fatalf("relay tls: %v", err)
+		}
+		go agent.RunTunnelClient(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain,
+			func() (net.Conn, error) { return net.Dial("tcp", "127.0.0.1:443") })
 	}
 
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
@@ -60,4 +81,66 @@ func main() {
 	<-ctx.Done()
 	log.Println("shutting down")
 	srv.Shutdown(context.Background())
+}
+
+// setupRelayTLS loads a wildcard cert into Caddy: a static PEM if configured
+// (tests / BYO), otherwise ACME DNS-01 via lego.
+func setupRelayTLS(ctx context.Context, cfg config.Config) error {
+	cc := caddy.NewClient(cfg.CaddyAdmin)
+	if cfg.TLSCertFile != "" {
+		certPEM, err := os.ReadFile(cfg.TLSCertFile)
+		if err != nil {
+			return err
+		}
+		keyPEM, err := os.ReadFile(cfg.TLSKeyFile)
+		if err != nil {
+			return err
+		}
+		return cc.LoadCert(string(certPEM), string(keyPEM))
+	}
+	provider, err := cloudflare.NewDNSProvider()
+	if err != nil {
+		return err
+	}
+	acctKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	mgr, err := certs.New(certs.Config{
+		Email: cfg.ACMEEmail, CADirURL: cfg.ACMECA,
+		DNSProvider: provider, AccountKey: acctKey,
+	})
+	if err != nil {
+		return err
+	}
+	certPEM, keyPEM, err := mgr.Obtain([]string{"*." + cfg.BaseDomain, cfg.BaseDomain})
+	if err != nil {
+		return err
+	}
+	go renewLoop(ctx, mgr, cc, cfg.BaseDomain, certPEM)
+	return cc.LoadCert(string(certPEM), string(keyPEM))
+}
+
+// renewLoop re-obtains and reloads the cert when it nears expiry.
+func renewLoop(ctx context.Context, mgr *certs.Manager, cc *caddy.Client, base string, certPEM []byte) {
+	ticker := time.NewTicker(12 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			due, err := certs.NeedsRenewal(certPEM, 30*24*time.Hour, time.Now())
+			if err != nil || !due {
+				continue
+			}
+			newCert, newKey, err := mgr.Obtain([]string{"*." + base, base})
+			if err != nil {
+				log.Printf("renew: %v", err)
+				continue
+			}
+			if err := cc.LoadCert(string(newCert), string(newKey)); err != nil {
+				log.Printf("renew load: %v", err)
+				continue
+			}
+			certPEM = newCert
+		}
+	}
 }
