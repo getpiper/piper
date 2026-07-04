@@ -1,0 +1,20 @@
+# dependencies / builds
+node_modules/
+dist/
+build/
+bin/
+*.exe
+
+# secrets / env
+.env
+.env.*
+!.env.example
+
+# local state
+*.sqlite
+*.sqlite-*
+*.db
+
+# os / editor
+.DS_Store
+*.log
