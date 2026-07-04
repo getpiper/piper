@@ -89,9 +89,9 @@ func Serve(conn net.Conn, auth Auth) (*Session, error) {
 	// Deadline the unauthenticated handshake read; clear it once the frame is in
 	// hand so the established yamux session isn't killed mid-traffic.
 	_ = conn.SetReadDeadline(time.Now().Add(preAuthReadTimeout))
-	defer conn.SetReadDeadline(time.Time{})
 
 	payload, err := readFrame(conn)
+	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		return nil, err
 	}

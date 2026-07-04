@@ -1,11 +1,32 @@
 package tunnel
 
 import (
+	"errors"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
+
+type deadlineRecordingConn struct {
+	net.Conn
+	mu           sync.Mutex
+	readDeadline time.Time
+}
+
+func (c *deadlineRecordingConn) SetReadDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.readDeadline = deadline
+	c.mu.Unlock()
+	return c.Conn.SetReadDeadline(deadline)
+}
+
+func (c *deadlineRecordingConn) currentReadDeadline() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.readDeadline
+}
 
 // handshake + a round-trip stream over an in-process pipe.
 func TestDialServeRoundTrip(t *testing.T) {
@@ -99,4 +120,36 @@ func TestServe_PreAuthDeadline(t *testing.T) {
 	if elapsed > time.Second {
 		t.Fatalf("Serve blocked %v (deadline not enforced)", elapsed)
 	}
+}
+
+func TestServeClearsPreAuthDeadlineBeforeAuth(t *testing.T) {
+	clientConn, rawServerConn := net.Pipe()
+	serverConn := &deadlineRecordingConn{Conn: rawServerConn}
+	t.Cleanup(func() { clientConn.Close(); serverConn.Close() })
+
+	previous := preAuthReadTimeout
+	preAuthReadTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { preAuthReadTimeout = previous })
+
+	clientResult := make(chan *Session, 1)
+	go func() {
+		session, _ := Dial(clientConn, "token", "example.com")
+		clientResult <- session
+	}()
+
+	errDeadlineActive := errors.New("pre-auth read deadline still active during auth")
+	serverSession, err := Serve(serverConn, func(_, _ string) error {
+		time.Sleep(2 * preAuthReadTimeout)
+		if !serverConn.currentReadDeadline().IsZero() {
+			return errDeadlineActive
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	t.Cleanup(func() { serverSession.Close() })
+
+	clientSession := <-clientResult
+	t.Cleanup(func() { clientSession.Close() })
 }
