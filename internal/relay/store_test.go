@@ -30,3 +30,17 @@ func TestEnrollAndAuthenticate(t *testing.T) {
 		t.Fatalf("bogus token err = %v; want ErrBadToken", err)
 	}
 }
+
+func TestEnrollRejectsDuplicateBaseDomain(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := st.Enroll("alice", "shared.example.com"); err != nil {
+		t.Fatalf("first Enroll: %v", err)
+	}
+	if _, err := st.Enroll("bob", "shared.example.com"); err == nil {
+		t.Fatal("second Enroll succeeded for duplicate base domain")
+	}
+}
