@@ -49,11 +49,11 @@ func TestLoadCert(t *testing.T) {
 	if gotPath != "/config/apps/tls/certificates/load_pem" {
 		t.Fatalf("path = %q", gotPath)
 	}
-	var got []map[string]string
+	var got map[string]string
 	if err := json.Unmarshal([]byte(gotBody), &got); err != nil {
-		t.Fatalf("body not a JSON array: %v (%s)", err, gotBody)
+		t.Fatalf("body not a JSON object: %v (%s)", err, gotBody)
 	}
-	if len(got) != 1 || got[0]["certificate"] != "CERTPEM" || got[0]["key"] != "KEYPEM" {
+	if got["certificate"] != "CERTPEM" || got["key"] != "KEYPEM" {
 		t.Fatalf("bad load_pem body: %s", gotBody)
 	}
 }

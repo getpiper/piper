@@ -68,7 +68,7 @@ func (c *Client) RemoveRoute(host string) error {
 // LoadCert appends a PEM cert/key pair to Caddy's tls.certificates.load_pem so
 // Caddy serves it for matching SNI. Requires the tls app to exist (WithHTTPS).
 func (c *Client) LoadCert(certPEM, keyPEM string) error {
-	body, _ := json.Marshal([]map[string]string{{"certificate": certPEM, "key": keyPEM}})
+	body, _ := json.Marshal(map[string]string{"certificate": certPEM, "key": keyPEM})
 	url := c.base + "/config/apps/tls/certificates/load_pem"
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
