@@ -60,3 +60,33 @@ func TestLoadCert(t *testing.T) {
 		t.Fatalf("bad load_pem body: %s", gotBody)
 	}
 }
+
+func TestReplaceCert(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL)
+	if err := c.ReplaceCert("CERTPEM", "KEYPEM"); err != nil {
+		t.Fatalf("ReplaceCert: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/config/apps/tls/certificates/load_pem" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	var got []map[string]string
+	if err := json.Unmarshal([]byte(gotBody), &got); err != nil {
+		t.Fatalf("body not a JSON array: %v (%s)", err, gotBody)
+	}
+	if len(got) != 1 || got[0]["certificate"] != "CERTPEM" || got[0]["key"] != "KEYPEM" {
+		t.Fatalf("bad replacement body: %s", gotBody)
+	}
+}

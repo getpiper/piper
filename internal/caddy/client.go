@@ -82,3 +82,24 @@ func (c *Client) LoadCert(certPEM, keyPEM string) error {
 	}
 	return nil
 }
+
+// ReplaceCert replaces Caddy's complete load_pem certificate list with one
+// cert/key pair. Renewal uses this instead of appending duplicate entries.
+func (c *Client) ReplaceCert(certPEM, keyPEM string) error {
+	body, _ := json.Marshal([]map[string]string{{
+		"certificate": certPEM,
+		"key":         keyPEM,
+	}})
+	url := c.base + "/config/apps/tls/certificates/load_pem"
+	req, _ := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("caddy replace cert: status %d", resp.StatusCode)
+	}
+	return nil
+}
