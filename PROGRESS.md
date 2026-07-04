@@ -2,15 +2,15 @@
 
 Coarse **map** of what's built vs. what's left — by design. Detail for any 🟡/⬜ item lives in its linked issue (`[#N]`), not here; entries stay to one line so they can't drift from the issue. Design lives in [`docs/superpowers/specs/`](docs/superpowers/specs/); plans in [`docs/superpowers/plans/`](docs/superpowers/plans/); how-to-work in [`CLAUDE.md`](CLAUDE.md).
 
-_Last updated: 2026-07-04 — pre-implementation. Design doc + Plan 1 written; issues opened; no code yet. Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-04 — foundation landed (module skeleton, config, CI); `main` protected. Plan 1 tasks next. Live tracker: [issues](https://github.com/getpiper/piper/issues)._
 
 Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label conventions: [CLAUDE.md § Issue tracking](CLAUDE.md#issue-tracking--progress).
 
 ## Foundation
 
-- ⬜ Go module skeleton + `piper version` + Makefile (build/test/cross) — folded into epic [#9](https://github.com/getpiper/piper/issues/9)
-- ⬜ Config loading from env with defaults — folded into epic [#9](https://github.com/getpiper/piper/issues/9)
-- ⬜ No-cgo arm64 cross-compile gate (`make cross`) green in CI
+- ✅ Go module skeleton + `piper version` + Makefile (build/test/cross) — [#12](https://github.com/getpiper/piper/pull/12)
+- ✅ Config loading from env with defaults — [#15](https://github.com/getpiper/piper/pull/15)
+- ✅ CI `verify` (gofmt/vet/test/cross) gates PRs; no-cgo arm64 cross-compile green — [#13](https://github.com/getpiper/piper/issues/13)
 
 ## Plan 1 — Agent core, LAN-only — epic [#9](https://github.com/getpiper/piper/issues/9) ([plan](docs/superpowers/plans/2026-07-04-piper-agent-core.md))
 

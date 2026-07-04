@@ -25,3 +25,14 @@ network — solving the NAT / CGNAT / dynamic-IP problem that kills most homelab
 - **What's built vs. left:** [`PROGRESS.md`](PROGRESS.md) — a coarse map linking each gap to its issue.
 - **Tracked work:** [GitHub issues](https://github.com/getpiper/piper/issues). Titles carry an `[area]` prefix (e.g. `[agent]`, `[cli]`, `[relay]`); `epic` issues track whole plans. New here? Look for [`good first issue`](https://github.com/getpiper/piper/labels/good%20first%20issue).
 - **How to work in this repo:** [`CLAUDE.md`](CLAUDE.md) — coding principles, branch workflow, and issue conventions.
+
+## Contributing
+
+Trunk-based: `main` is the only long-lived branch. Branch off `main`, open a PR back into it, and squash-merge. See [`CLAUDE.md`](CLAUDE.md) for the full workflow and coding principles.
+
+`main` is protected:
+
+- Changes land only via pull request (no direct pushes); squash-merge only, head branch auto-deleted.
+- The CI **`verify`** check (gofmt · `go vet` · `make test` · `make cross`) must pass, and the branch must be up to date, before merging.
+- Conversation resolution and linear history required; force-pushes and branch deletion blocked; rules apply to admins too.
+- Approving reviews are not yet required (single maintainer) — this bumps to 1 once there's a second reviewer.
