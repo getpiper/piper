@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/getpiper/piper/internal/deploy"
 	"github.com/getpiper/piper/internal/runtime"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 )
 
@@ -98,7 +100,7 @@ func setupRelayTLS(ctx context.Context, cfg config.Config) error {
 		}
 		return cc.LoadCert(string(certPEM), string(keyPEM))
 	}
-	provider, err := cloudflare.NewDNSProvider()
+	provider, err := newDNSProvider(cfg.DNSProvider)
 	if err != nil {
 		return err
 	}
@@ -116,6 +118,15 @@ func setupRelayTLS(ctx context.Context, cfg config.Config) error {
 	}
 	go renewLoop(ctx, mgr, cc, cfg.BaseDomain, certPEM)
 	return cc.LoadCert(string(certPEM), string(keyPEM))
+}
+
+func newDNSProvider(name string) (challenge.Provider, error) {
+	switch name {
+	case "", "cloudflare":
+		return cloudflare.NewDNSProvider()
+	default:
+		return nil, fmt.Errorf("unsupported DNS provider %q", name)
+	}
 }
 
 type certificateManager interface {

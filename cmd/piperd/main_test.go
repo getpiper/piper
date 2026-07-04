@@ -9,12 +9,38 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 )
 
 type fakeCertificateManager struct {
 	cert, key []byte
+}
+
+func TestNewDNSProviderRejectsUnsupportedProvider(t *testing.T) {
+	provider, err := newDNSProvider("route53")
+	if provider != nil {
+		t.Fatalf("provider = %T, want nil", provider)
+	}
+	if err == nil || !strings.Contains(err.Error(), `unsupported DNS provider "route53"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestNewDNSProviderSelectsCloudflare(t *testing.T) {
+	t.Setenv("CF_DNS_API_TOKEN", "test-token")
+	for _, name := range []string{"", "cloudflare"} {
+		t.Run(name, func(t *testing.T) {
+			provider, err := newDNSProvider(name)
+			if err != nil {
+				t.Fatalf("newDNSProvider(%q): %v", name, err)
+			}
+			if provider == nil {
+				t.Fatalf("newDNSProvider(%q) returned nil", name)
+			}
+		})
+	}
 }
 
 func (f fakeCertificateManager) Obtain([]string) ([]byte, []byte, error) {

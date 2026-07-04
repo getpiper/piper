@@ -1,9 +1,6 @@
 package config
 
-import (
-	"os"
-	"testing"
-)
+import "testing"
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("PIPER_API_ADDR", "")
@@ -39,14 +36,9 @@ func TestClientAddr(t *testing.T) {
 }
 
 func TestLoadRelayFields(t *testing.T) {
-	os.Setenv("PIPER_RELAY_ADDR", "relay.example.com:7000")
-	os.Setenv("PIPER_RELAY_TOKEN", "tok-xyz")
-	os.Setenv("PIPER_ACME_EMAIL", "me@example.com")
-	defer func() {
-		os.Unsetenv("PIPER_RELAY_ADDR")
-		os.Unsetenv("PIPER_RELAY_TOKEN")
-		os.Unsetenv("PIPER_ACME_EMAIL")
-	}()
+	t.Setenv("PIPER_RELAY_ADDR", "relay.example.com:7000")
+	t.Setenv("PIPER_RELAY_TOKEN", "tok-xyz")
+	t.Setenv("PIPER_ACME_EMAIL", "me@example.com")
 	cfg := Load()
 	if cfg.RelayAddr != "relay.example.com:7000" {
 		t.Errorf("RelayAddr = %q", cfg.RelayAddr)
