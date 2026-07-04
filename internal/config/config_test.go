@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("PIPER_API_ADDR", "")
@@ -32,5 +35,26 @@ func TestClientAddr(t *testing.T) {
 	t.Setenv("PIPER_ADDR", "http://piper.test:9000")
 	if got := ClientAddr(); got != "http://piper.test:9000" {
 		t.Errorf("configured ClientAddr = %q", got)
+	}
+}
+
+func TestLoadRelayFields(t *testing.T) {
+	os.Setenv("PIPER_RELAY_ADDR", "relay.example.com:7000")
+	os.Setenv("PIPER_RELAY_TOKEN", "tok-xyz")
+	os.Setenv("PIPER_ACME_EMAIL", "me@example.com")
+	defer func() {
+		os.Unsetenv("PIPER_RELAY_ADDR")
+		os.Unsetenv("PIPER_RELAY_TOKEN")
+		os.Unsetenv("PIPER_ACME_EMAIL")
+	}()
+	cfg := Load()
+	if cfg.RelayAddr != "relay.example.com:7000" {
+		t.Errorf("RelayAddr = %q", cfg.RelayAddr)
+	}
+	if cfg.RelayToken != "tok-xyz" {
+		t.Errorf("RelayToken = %q", cfg.RelayToken)
+	}
+	if cfg.ACMEEmail != "me@example.com" {
+		t.Errorf("ACMEEmail = %q", cfg.ACMEEmail)
 	}
 }
