@@ -52,6 +52,10 @@ const healthyThreshold = 10 * time.Second
 
 func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func() (net.Conn, error)) {
 	defer sess.Close()
+	stopCancel := context.AfterFunc(ctx, func() {
+		_ = sess.Close()
+	})
+	defer stopCancel()
 	for {
 		stream, err := sess.Accept()
 		if err != nil {

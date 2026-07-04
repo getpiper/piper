@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"sync/atomic"
@@ -68,6 +69,38 @@ func TestTunnelClientForwardsToLocal(t *testing.T) {
 	}
 	if string(buf) != "hello" {
 		t.Fatalf("echo = %q", buf)
+	}
+}
+
+func TestServeStreamsStopsOnContextCancellation(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close(); serverConn.Close() })
+
+	serverResult := make(chan *tunnel.Session, 1)
+	go func() {
+		sess, _ := tunnel.Serve(serverConn, func(_, _ string) error { return nil })
+		serverResult <- sess
+	}()
+	clientSession, err := tunnel.Dial(clientConn, "token", "example.com")
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	serverSession := <-serverResult
+	t.Cleanup(func() { serverSession.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		serveStreams(ctx, clientSession, func() (net.Conn, error) {
+			return nil, errors.New("unexpected local dial")
+		})
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("serveStreams did not stop after context cancellation")
 	}
 }
 

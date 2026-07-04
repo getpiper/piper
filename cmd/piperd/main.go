@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/getpiper/piper/internal/deploy"
 	"github.com/getpiper/piper/internal/runtime"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 )
 
@@ -98,7 +100,7 @@ func setupRelayTLS(ctx context.Context, cfg config.Config) error {
 		}
 		return cc.LoadCert(string(certPEM), string(keyPEM))
 	}
-	provider, err := cloudflare.NewDNSProvider()
+	provider, err := newDNSProvider(cfg.DNSProvider)
 	if err != nil {
 		return err
 	}
@@ -118,16 +120,37 @@ func setupRelayTLS(ctx context.Context, cfg config.Config) error {
 	return cc.LoadCert(string(certPEM), string(keyPEM))
 }
 
+func newDNSProvider(name string) (challenge.Provider, error) {
+	switch name {
+	case "", "cloudflare":
+		return cloudflare.NewDNSProvider()
+	default:
+		return nil, fmt.Errorf("unsupported DNS provider %q", name)
+	}
+}
+
+type certificateManager interface {
+	Obtain([]string) ([]byte, []byte, error)
+}
+
+type certificateReplacer interface {
+	ReplaceCert(certPEM, keyPEM string) error
+}
+
 // renewLoop re-obtains and reloads the cert when it nears expiry.
-func renewLoop(ctx context.Context, mgr *certs.Manager, cc *caddy.Client, base string, certPEM []byte) {
+func renewLoop(ctx context.Context, mgr certificateManager, cc certificateReplacer, base string, certPEM []byte) {
 	ticker := time.NewTicker(12 * time.Hour)
 	defer ticker.Stop()
+	runRenewLoop(ctx, mgr, cc, base, certPEM, ticker.C, time.Now)
+}
+
+func runRenewLoop(ctx context.Context, mgr certificateManager, cc certificateReplacer, base string, certPEM []byte, ticks <-chan time.Time, now func() time.Time) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			due, err := certs.NeedsRenewal(certPEM, 30*24*time.Hour, time.Now())
+		case <-ticks:
+			due, err := certs.NeedsRenewal(certPEM, 30*24*time.Hour, now())
 			if err != nil || !due {
 				continue
 			}
@@ -136,7 +159,7 @@ func renewLoop(ctx context.Context, mgr *certs.Manager, cc *caddy.Client, base s
 				log.Printf("renew: %v", err)
 				continue
 			}
-			if err := cc.LoadCert(string(newCert), string(newKey)); err != nil {
+			if err := cc.ReplaceCert(string(newCert), string(newKey)); err != nil {
 				log.Printf("renew load: %v", err)
 				continue
 			}
