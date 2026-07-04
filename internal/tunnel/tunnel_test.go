@@ -75,3 +75,28 @@ func TestServeRejectsBadAuth(t *testing.T) {
 		t.Fatal("expected Serve to reject bad auth")
 	}
 }
+
+// Serve must bound its unauthenticated handshake read: a client that connects
+// and sends nothing cannot pin a goroutine forever (slowloris / fd-exhaustion).
+func TestServe_PreAuthDeadline(t *testing.T) {
+	c, s := net.Pipe()
+	t.Cleanup(func() { c.Close(); s.Close() })
+
+	// Client never writes; the server-side read must time out, not block.
+	prev := preAuthReadTimeout
+	preAuthReadTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { preAuthReadTimeout = prev })
+
+	start := time.Now()
+	_, err := Serve(s, func(token, base string) error {
+		t.Error("auth called on a silent client")
+		return nil
+	})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected Serve to time out on a silent client")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("Serve blocked %v (deadline not enforced)", elapsed)
+	}
+}

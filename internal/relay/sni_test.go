@@ -7,6 +7,28 @@ import (
 	"time"
 )
 
+// readSNI must bound its unauthenticated ClientHello read: a client that
+// connects and sends nothing cannot pin a goroutine forever (slowloris).
+func TestReadSNI_PreAuthDeadline(t *testing.T) {
+	c, s := net.Pipe()
+	t.Cleanup(func() { c.Close(); s.Close() })
+
+	// Client never writes; the server-side read must time out, not block.
+	prev := preAuthReadTimeout
+	preAuthReadTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { preAuthReadTimeout = prev })
+
+	start := time.Now()
+	_, _, err := readSNI(s)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected readSNI to time out on a silent client")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("readSNI blocked %v (deadline not enforced)", elapsed)
+	}
+}
+
 // A real TLS client sends a ClientHello with ServerName; readSNI must recover
 // it and buffer the bytes it consumed.
 func TestReadSNI(t *testing.T) {

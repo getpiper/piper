@@ -9,9 +9,17 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/hashicorp/yamux"
 )
+
+// preAuthReadTimeout bounds the unauthenticated handshake read on the relay's
+// tunnel listener. Without it a client that connects and sends nothing pins a
+// goroutine + fd forever (slowloris / fd-exhaustion). Tests override it to a
+// tiny value. Cleared once the handshake is in hand. The trusted agent Dial
+// path is intentionally not deadlined.
+var preAuthReadTimeout = 10 * time.Second
 
 // Auth validates a client's presented token and claimed base domain. A non-nil
 // return rejects the connection.
@@ -29,10 +37,10 @@ type Session struct {
 	mux        *yamux.Session
 }
 
-func (s *Session) Open() (net.Conn, error)     { return s.mux.Open() }
-func (s *Session) Accept() (net.Conn, error)   { return s.mux.Accept() }
-func (s *Session) CloseChan() <-chan struct{}  { return s.mux.CloseChan() }
-func (s *Session) Close() error                { return s.mux.Close() }
+func (s *Session) Open() (net.Conn, error)    { return s.mux.Open() }
+func (s *Session) Accept() (net.Conn, error)  { return s.mux.Accept() }
+func (s *Session) CloseChan() <-chan struct{} { return s.mux.CloseChan() }
+func (s *Session) Close() error               { return s.mux.Close() }
 
 // writeFrame writes a uint16-length-prefixed payload. Length-prefixing (rather
 // than a json.Decoder) guarantees we consume exactly the handshake bytes and
@@ -78,6 +86,11 @@ func Dial(conn net.Conn, token, baseDomain string) (*Session, error) {
 // Serve reads the client handshake over conn, authorizes it, then starts a
 // yamux server. On auth failure it returns the auth error (caller closes conn).
 func Serve(conn net.Conn, auth Auth) (*Session, error) {
+	// Deadline the unauthenticated handshake read; clear it once the frame is in
+	// hand so the established yamux session isn't killed mid-traffic.
+	_ = conn.SetReadDeadline(time.Now().Add(preAuthReadTimeout))
+	defer conn.SetReadDeadline(time.Time{})
+
 	payload, err := readFrame(conn)
 	if err != nil {
 		return nil, err
