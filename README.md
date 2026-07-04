@@ -17,5 +17,11 @@ network — solving the NAT / CGNAT / dynamic-IP problem that kills most homelab
 ## Components
 
 - `piperd` — the agent that runs on your box (control-plane, deployer, tunnel-client).
-- `piper-relay` — the optional cloud relay (SNI passthrough + tunnel server).
+- `piper-relay` — the optional cloud relay (SNI passthrough + tunnel server). Always self-deployable; a hosted instance is offered purely for convenience and runs this same code.
 - `piper` — the CLI.
+
+## Progress & contributing
+
+- **What's built vs. left:** [`PROGRESS.md`](PROGRESS.md) — a coarse map linking each gap to its issue.
+- **Tracked work:** [GitHub issues](https://github.com/getpiper/piper/issues). Titles carry an `[area]` prefix (e.g. `[agent]`, `[cli]`, `[relay]`); `epic` issues track whole plans. New here? Look for [`good first issue`](https://github.com/getpiper/piper/labels/good%20first%20issue).
+- **How to work in this repo:** [`CLAUDE.md`](CLAUDE.md) — coding principles, branch workflow, and issue conventions.
