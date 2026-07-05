@@ -37,6 +37,9 @@ health-checks the container, and serves it at `https://myapp.<your-domain>`. The
 URL shows up on GitHub as a Deployment status. Webhooks ride the same tunnel as your
 traffic (delivered to `hooks.<your-domain>`); nothing else on the box is exposed.
 
+Standing this up against a real relay, domain, and GitHub App end-to-end:
+[`docs/runbooks/git-deploy-e2e.md`](docs/runbooks/git-deploy-e2e.md).
+
 ## Progress & contributing
 
 - **What's built vs. left:** [`PROGRESS.md`](PROGRESS.md) — a coarse map linking each gap to its issue.
