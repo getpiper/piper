@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -22,7 +23,9 @@ import (
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/deploy"
 	"github.com/getpiper/piper/internal/runtime"
+	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/getpiper/piper/internal/webhook"
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 )
@@ -67,10 +70,35 @@ func main() {
 		}
 		go agent.RunTunnelClient(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain,
 			func() (net.Conn, error) { return net.Dial("tcp", "127.0.0.1:443") })
+
+		if gh, err := st.GetGitHubApp(); err == nil {
+			prov, err := github.New(github.Config{
+				AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+			})
+			if err != nil {
+				log.Fatalf("github provider: %v", err)
+			}
+			wdep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
+			wh := webhook.New(prov, st, wdep, cfg.BaseDomain)
+			whSrv := &http.Server{Addr: cfg.WebhookAddr, Handler: wh}
+			go func() {
+				if err := whSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					log.Printf("webhook serve: %v", err)
+				}
+			}()
+			_, portStr, _ := net.SplitHostPort(cfg.WebhookAddr)
+			port, _ := strconv.Atoi(portStr)
+			if err := caddy.NewClient(cfg.CaddyAdmin).UpsertRoute("hooks."+cfg.BaseDomain, port); err != nil {
+				log.Printf("webhook route: %v", err)
+			}
+			log.Printf("webhook listening on %s (GitHub App %d)", cfg.WebhookAddr, gh.AppID)
+		} else {
+			log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
+		}
 	}
 
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
-	handler := api.New(st, dep)
+	handler := api.New(st, dep, cfg.BaseDomain, "")
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
 	go func() {
