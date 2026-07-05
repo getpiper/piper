@@ -57,7 +57,7 @@ func main() {
 		if cfg.RelayAddr != "" {
 			opts = append(opts, caddy.WithHTTPS(":443"))
 		}
-		mgr, err := caddy.StartManager(ctx, cfg.CaddyAdmin, ":80", opts...)
+		mgr, err := caddy.StartManager(cfg.CaddyAdmin, ":80", opts...)
 		if err != nil {
 			log.Fatalf("caddy: %v", err)
 		}

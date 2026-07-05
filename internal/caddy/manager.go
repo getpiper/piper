@@ -1,17 +1,21 @@
 package caddy
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/caddyserver/caddy/v2"
+	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp"              // http app, server, host matcher
+	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy" // reverse_proxy handler
+	_ "github.com/caddyserver/caddy/v2/modules/caddytls"               // tls app, load_pem
 )
 
-type Manager struct{ cmd *exec.Cmd }
+// Manager owns the in-process Caddy instance. Caddy is embedded as a library,
+// so no external `caddy` binary is required.
+type Manager struct{}
 
 type managerOpts struct {
 	httpListen  string
@@ -45,21 +49,19 @@ func (o *managerOpts) baseConfig() map[string]any {
 	}
 }
 
-// StartManager launches `caddy run` with an admin-enabled base config: one HTTP
+// StartManager runs Caddy in-process with an admin-enabled base config: one HTTP
 // server named "piper" on httpListen with empty routes. Options can add a TLS
-// listener (WithHTTPS).
-func StartManager(ctx context.Context, adminBase, httpListen string, opts ...Option) (*Manager, error) {
+// listener (WithHTTPS). Teardown is via Manager.Stop.
+func StartManager(adminBase, httpListen string, opts ...Option) (*Manager, error) {
 	o := &managerOpts{httpListen: httpListen, adminAddr: strings.TrimPrefix(adminBase, "http://")}
 	for _, opt := range opts {
 		opt(o)
 	}
 	cfg, _ := json.Marshal(o.baseConfig())
-	cmd := exec.CommandContext(ctx, "caddy", "run", "--config", "-", "--adapter", "")
-	cmd.Stdin = bytes.NewReader(cfg)
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start caddy (is it installed?): %w", err)
+	if err := caddy.Load(cfg, true); err != nil {
+		return nil, fmt.Errorf("start embedded caddy: %w", err)
 	}
-	m := &Manager{cmd: cmd}
+	m := &Manager{}
 	if err := waitAdmin(adminBase, 10*time.Second); err != nil {
 		m.Stop()
 		return nil, err
@@ -81,8 +83,5 @@ func waitAdmin(base string, d time.Duration) error {
 }
 
 func (m *Manager) Stop() {
-	if m.cmd != nil && m.cmd.Process != nil {
-		_ = m.cmd.Process.Kill()
-		_ = m.cmd.Wait()
-	}
+	_ = caddy.Stop()
 }
