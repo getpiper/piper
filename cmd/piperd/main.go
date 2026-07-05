@@ -31,6 +31,26 @@ import (
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 )
 
+const (
+	drainTimeout    = 15 * time.Second
+	shutdownTimeout = 20 * time.Second
+)
+
+type apiShutdowner interface {
+	Shutdown(context.Context) error
+	Close() error
+}
+
+type webhookLifecycle interface {
+	stop(context.Context)
+	close()
+	wait(context.Context) bool
+	cancel()
+}
+
+type listenerStopper interface{ Stop() }
+type storeCloser interface{ Close() error }
+
 func main() {
 	cfg := config.Load()
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
@@ -41,7 +61,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
-	defer st.Close()
 
 	rt, err := runtime.NewDockerRuntime()
 	if err != nil {
@@ -52,16 +71,16 @@ func main() {
 	defer stop()
 
 	// Unless PIPER_SKIP_CADDY is set (e.g. a caddy is already running), manage one.
+	var mgr *caddy.Manager
 	if os.Getenv("PIPER_SKIP_CADDY") == "" {
 		opts := []caddy.Option{}
 		if cfg.RelayAddr != "" {
 			opts = append(opts, caddy.WithHTTPS(":443"))
 		}
-		mgr, err := caddy.StartManager(cfg.CaddyAdmin, ":80", opts...)
+		mgr, err = caddy.StartManager(cfg.CaddyAdmin, ":80", opts...)
 		if err != nil {
 			log.Fatalf("caddy: %v", err)
 		}
-		defer mgr.Stop()
 	}
 
 	// Relay mode: obtain/serve TLS on :443, dial the relay, register the base domain.
@@ -100,17 +119,88 @@ func main() {
 
 	<-ctx.Done()
 	log.Println("shutting down")
-	srv.Shutdown(context.Background())
+	var mgrStop listenerStopper
+	if mgr != nil {
+		mgrStop = mgr
+	}
+	var whLifecycle webhookLifecycle
+	if wh != nil {
+		whLifecycle = wh
+	}
+	shutdown(srv, whLifecycle, mgrStop, st)
+	os.Exit(0)
+}
+
+func shutdown(api apiShutdowner, wh webhookLifecycle, mgr listenerStopper, st storeCloser) {
+	shutdownWithTimeouts(api, wh, mgr, st, drainTimeout, shutdownTimeout)
+}
+
+func shutdownWithTimeouts(api apiShutdowner, wh webhookLifecycle, mgr listenerStopper, st storeCloser, drain, overall time.Duration) {
+	overallCtx, cancelOverall := context.WithTimeout(context.Background(), overall)
+	defer cancelOverall()
+	drainCtx, cancelDrain := context.WithTimeout(overallCtx, drain)
+	defer cancelDrain()
+
+	var calls sync.WaitGroup
+	if api != nil {
+		calls.Add(1)
+		go func() { defer calls.Done(); _ = api.Shutdown(drainCtx) }()
+	}
+	if wh != nil {
+		calls.Add(1)
+		go func() { defer calls.Done(); wh.stop(drainCtx) }()
+	}
+	entryDone := make(chan struct{})
+	go func() { calls.Wait(); close(entryDone) }()
+
+	entryDrained := false
+	select {
+	case <-entryDone:
+		entryDrained = true
+	case <-drainCtx.Done():
+	}
+
+	workDrained := entryDrained
+	if wh != nil && entryDrained {
+		workDrained = wh.wait(drainCtx)
+	}
+	if !workDrained {
+		if api != nil {
+			_ = api.Close()
+		}
+		if wh != nil {
+			wh.close()
+		}
+	}
+	if wh != nil {
+		wh.cancel()
+		if !workDrained {
+			_ = wh.wait(overallCtx)
+		}
+	}
+	if !workDrained {
+		// API handlers are cancelled by Close but are not tracked separately.
+		// Keep shared infrastructure alive for their reserved cleanup window.
+		<-overallCtx.Done()
+	}
+	if mgr != nil {
+		mgr.Stop()
+	}
+	if st != nil {
+		_ = st.Close()
+	}
 }
 
 // webhookStarter brings up the webhook listener and its Caddy route exactly
 // once, from stored GitHub App creds. start() is safe to call both at boot (if
 // creds already exist) and later from the exchange endpoint.
 type webhookStarter struct {
-	cfg  config.Config
-	st   *store.Store
-	rt   *runtime.DockerRuntime
-	once sync.Once
+	cfg     config.Config
+	st      *store.Store
+	rt      *runtime.DockerRuntime
+	once    sync.Once
+	srv     *http.Server
+	handler *webhook.Handler
 }
 
 func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime) *webhookStarter {
@@ -133,10 +223,10 @@ func (w *webhookStarter) run() {
 		return
 	}
 	wdep := deploy.New(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain)
-	wh := webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
-	whSrv := &http.Server{Addr: w.cfg.WebhookAddr, Handler: wh}
+	w.handler = webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
+	w.srv = &http.Server{Addr: w.cfg.WebhookAddr, Handler: w.handler}
 	go func() {
-		if err := whSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := w.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("webhook serve: %v", err)
 		}
 	}()
@@ -146,6 +236,35 @@ func (w *webhookStarter) run() {
 		log.Printf("webhook route: %v", err)
 	}
 	log.Printf("webhook listening on %s (GitHub App %d)", w.cfg.WebhookAddr, gh.AppID)
+}
+
+func (w *webhookStarter) stop(ctx context.Context) {
+	if w == nil {
+		return
+	}
+	w.once.Do(func() {})
+	if w.handler != nil {
+		w.handler.StopAccepting()
+	}
+	if w.srv != nil {
+		_ = w.srv.Shutdown(ctx)
+	}
+}
+
+func (w *webhookStarter) close() {
+	if w != nil && w.srv != nil {
+		_ = w.srv.Close()
+	}
+}
+
+func (w *webhookStarter) wait(ctx context.Context) bool {
+	return w == nil || w.handler == nil || w.handler.WaitContext(ctx)
+}
+
+func (w *webhookStarter) cancel() {
+	if w != nil && w.handler != nil {
+		w.handler.Cancel()
+	}
 }
 
 // setupRelayTLS loads a wildcard cert into Caddy: a static PEM if configured

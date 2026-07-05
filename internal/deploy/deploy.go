@@ -11,6 +11,8 @@ import (
 	"github.com/getpiper/piper/internal/store"
 )
 
+const deploymentCleanupTimeout = 5 * time.Second
+
 type RouteSetter interface {
 	UpsertRoute(host string, upstreamHostPort int) error
 	RemoveRoute(host string) error
@@ -35,6 +37,15 @@ func (d *Deployer) hostForPreview(app string, pr int) string {
 	return fmt.Sprintf("pr-%d-%s.%s", pr, app, d.baseDom)
 }
 
+func (d *Deployer) stopPartial(ctx context.Context, containerID string) {
+	if containerID == "" {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deploymentCleanupTimeout)
+	defer cancel()
+	_ = d.runtime.Stop(cleanupCtx, containerID)
+}
+
 // buildRunHealthy builds, runs, and health-checks app.  On failure it invokes
 // recordFailed with whatever ids are known so the caller persists a "failed"
 // record for the right (app, pr) row, then returns a wrapped error.
@@ -47,11 +58,12 @@ func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir st
 	}
 	run, err := d.runtime.Run(ctx, tag, app.Port, map[string]string{"PORT": fmt.Sprint(app.Port)})
 	if err != nil {
+		d.stopPartial(ctx, run.ContainerID)
 		recordFailed(build.ImageID, run.ContainerID, run.HostPort)
 		return build, run, fmt.Errorf("run: %w", err)
 	}
 	if err := d.runtime.WaitHealthy(ctx, run.HostPort); err != nil {
-		_ = d.runtime.Stop(ctx, run.ContainerID)
+		d.stopPartial(ctx, run.ContainerID)
 		recordFailed(build.ImageID, run.ContainerID, run.HostPort)
 		return build, run, fmt.Errorf("health: %w", err)
 	}

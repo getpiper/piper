@@ -35,16 +35,33 @@ type Handler struct {
 	mu      sync.Mutex
 	locks   map[string]*sync.Mutex
 	lastSHA map[string]string
+
+	ctx         context.Context
+	cancel      context.CancelFunc
+	lifecycleMu sync.Mutex
+	accepting   bool
 }
 
 func New(p source.Provider, s *store.Store, d Deployer, baseDomain string) *Handler {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Handler{
 		prov: p, store: s, deploy: d, baseDom: baseDomain,
 		locks: map[string]*sync.Mutex{}, lastSHA: map[string]string{},
+		ctx: ctx, cancel: cancel, accepting: true,
 	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleMu.Lock()
+	if !h.accepting {
+		h.lifecycleMu.Unlock()
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	h.wg.Add(1)
+	h.lifecycleMu.Unlock()
+	defer h.wg.Done()
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
 	if err != nil {
 		http.Error(w, "read body", http.StatusBadRequest)
@@ -68,12 +85,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
-		h.process(context.Background(), ev)
+		h.process(h.ctx, ev)
 	}()
 }
 
-// Wait blocks until in-flight deploys finish. Test-only.
+// Wait blocks until all in-flight deploy goroutines finish.
 func (h *Handler) Wait() { h.wg.Wait() }
+
+// WaitContext waits for in-flight deploy goroutines until ctx expires. It
+// returns true when every goroutine finished and false when ctx expired first.
+func (h *Handler) WaitContext(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		h.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// Cancel asks all in-flight webhook work to stop. It is idempotent.
+func (h *Handler) Cancel() { h.cancel() }
+
+// StopAccepting rejects new webhook work and closes the WaitGroup admission
+// gate before shutdown starts waiting.
+func (h *Handler) StopAccepting() {
+	h.lifecycleMu.Lock()
+	h.accepting = false
+	h.lifecycleMu.Unlock()
+}
 
 func (h *Handler) appLock(name string) *sync.Mutex {
 	h.mu.Lock()

@@ -70,22 +70,24 @@ func (d *DockerRuntime) Run(ctx context.Context, imageTag string, containerPort 
 	if err != nil {
 		return RunResult{}, err
 	}
+	result := RunResult{ContainerID: created.ID}
 	if err := d.cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-		return RunResult{}, err
+		return result, err
 	}
 	insp, err := d.cli.ContainerInspect(ctx, created.ID)
 	if err != nil {
-		return RunResult{}, err
+		return result, err
 	}
 	bindings := insp.NetworkSettings.Ports[port]
 	if len(bindings) == 0 {
-		return RunResult{}, fmt.Errorf("no host port bound for %s", port)
+		return result, fmt.Errorf("no host port bound for %s", port)
 	}
 	hp, err := nat.ParsePort(bindings[0].HostPort)
 	if err != nil {
-		return RunResult{}, err
+		return result, err
 	}
-	return RunResult{ContainerID: created.ID, HostPort: hp}, nil
+	result.HostPort = hp
+	return result, nil
 }
 
 func (d *DockerRuntime) WaitHealthy(ctx context.Context, hostPort int) error {
