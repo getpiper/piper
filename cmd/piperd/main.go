@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -64,6 +65,7 @@ func main() {
 	}
 
 	// Relay mode: obtain/serve TLS on :443, dial the relay, register the base domain.
+	var wh *webhookStarter
 	if cfg.RelayAddr != "" {
 		if err := setupRelayTLS(ctx, cfg); err != nil {
 			log.Fatalf("relay tls: %v", err)
@@ -71,34 +73,22 @@ func main() {
 		go agent.RunTunnelClient(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain,
 			func() (net.Conn, error) { return net.Dial("tcp", "127.0.0.1:443") })
 
-		if gh, err := st.GetGitHubApp(); err == nil {
-			prov, err := github.New(github.Config{
-				AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
-			})
-			if err != nil {
-				log.Fatalf("github provider: %v", err)
-			}
-			wdep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
-			wh := webhook.New(prov, st, wdep, cfg.BaseDomain)
-			whSrv := &http.Server{Addr: cfg.WebhookAddr, Handler: wh}
-			go func() {
-				if err := whSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					log.Printf("webhook serve: %v", err)
-				}
-			}()
-			_, portStr, _ := net.SplitHostPort(cfg.WebhookAddr)
-			port, _ := strconv.Atoi(portStr)
-			if err := caddy.NewClient(cfg.CaddyAdmin).UpsertRoute("hooks."+cfg.BaseDomain, port); err != nil {
-				log.Printf("webhook route: %v", err)
-			}
-			log.Printf("webhook listening on %s (GitHub App %d)", cfg.WebhookAddr, gh.AppID)
+		wh = newWebhookStarter(cfg, st, rt)
+		if _, err := st.GetGitHubApp(); err == nil {
+			wh.start()
 		} else {
 			log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
 		}
 	}
 
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
-	handler := api.New(st, dep, cfg.BaseDomain, "")
+	// After `piper github setup` stores App creds at runtime, start serving
+	// webhooks immediately (relay mode only) instead of waiting for a restart.
+	handler := api.New(st, dep, cfg.BaseDomain, "", func() {
+		if wh != nil {
+			wh.start()
+		}
+	})
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
 	go func() {
@@ -111,6 +101,51 @@ func main() {
 	<-ctx.Done()
 	log.Println("shutting down")
 	srv.Shutdown(context.Background())
+}
+
+// webhookStarter brings up the webhook listener and its Caddy route exactly
+// once, from stored GitHub App creds. start() is safe to call both at boot (if
+// creds already exist) and later from the exchange endpoint.
+type webhookStarter struct {
+	cfg  config.Config
+	st   *store.Store
+	rt   *runtime.DockerRuntime
+	once sync.Once
+}
+
+func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime) *webhookStarter {
+	return &webhookStarter{cfg: cfg, st: st, rt: rt}
+}
+
+func (w *webhookStarter) start() { w.once.Do(w.run) }
+
+func (w *webhookStarter) run() {
+	gh, err := w.st.GetGitHubApp()
+	if err != nil {
+		log.Printf("webhook: no GitHub App configured: %v", err)
+		return
+	}
+	prov, err := github.New(github.Config{
+		AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+	})
+	if err != nil {
+		log.Printf("webhook: github provider: %v", err)
+		return
+	}
+	wdep := deploy.New(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain)
+	wh := webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
+	whSrv := &http.Server{Addr: w.cfg.WebhookAddr, Handler: wh}
+	go func() {
+		if err := whSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("webhook serve: %v", err)
+		}
+	}()
+	_, portStr, _ := net.SplitHostPort(w.cfg.WebhookAddr)
+	port, _ := strconv.Atoi(portStr)
+	if err := caddy.NewClient(w.cfg.CaddyAdmin).UpsertRoute("hooks."+w.cfg.BaseDomain, port); err != nil {
+		log.Printf("webhook route: %v", err)
+	}
+	log.Printf("webhook listening on %s (GitHub App %d)", w.cfg.WebhookAddr, gh.AppID)
 }
 
 // setupRelayTLS loads a wildcard cert into Caddy: a static PEM if configured

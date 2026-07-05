@@ -20,7 +20,9 @@ type Deployerer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
 }
 
-func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string) http.Handler {
+// onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
+// exchange endpoint, so the daemon can start serving webhooks without a restart.
+func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -152,6 +154,9 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string) http.Ha
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if onGitHubApp != nil {
+			onGitHubApp()
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})

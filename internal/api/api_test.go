@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,7 +43,7 @@ func newTestStore(t *testing.T) *store.Store {
 
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
-	return New(newTestStore(t), &fakeDeployer{}, "piper.localhost", "")
+	return New(newTestStore(t), &fakeDeployer{}, "piper.localhost", "", nil)
 }
 
 func TestCreateAndListApp(t *testing.T) {
@@ -141,7 +142,7 @@ func TestDeployUploadExtractsAndCallsDeployer(t *testing.T) {
 		t.Fatalf("CreateApp: %v", err)
 	}
 	deployer := &fakeDeployer{}
-	h := New(s, deployer, "piper.localhost", "")
+	h := New(s, deployer, "piper.localhost", "", nil)
 
 	var body bytes.Buffer
 	tw := tar.NewWriter(&body)
@@ -176,7 +177,7 @@ func TestDeployUploadExtractsAndCallsDeployer(t *testing.T) {
 }
 
 func TestReservedNameRejected(t *testing.T) {
-	h := New(newTestStore(t), &fakeDeployer{}, "piper.localhost", "")
+	h := New(newTestStore(t), &fakeDeployer{}, "piper.localhost", "", nil)
 	body := strings.NewReader(`{"name":"hooks","port":8080}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps", body))
@@ -188,7 +189,7 @@ func TestReservedNameRejected(t *testing.T) {
 func TestLinkApp(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)
-	h := New(s, &fakeDeployer{}, "piper.localhost", "")
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil)
 	body := strings.NewReader(`{"repo":"alice/blog","branch":"main"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
@@ -202,7 +203,7 @@ func TestLinkApp(t *testing.T) {
 }
 
 func TestManifestEndpoint(t *testing.T) {
-	h := New(newTestStore(t), &fakeDeployer{}, "alice.dev", "")
+	h := New(newTestStore(t), &fakeDeployer{}, "alice.dev", "", nil)
 	body := strings.NewReader(`{"redirect_url":"http://localhost:5000/cb"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/github/manifest", body))
@@ -211,6 +212,39 @@ func TestManifestEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "hooks.alice.dev") {
 		t.Fatalf("manifest missing webhook host: %s", rec.Body.String())
+	}
+}
+
+func TestExchangeSavesCredsAndInvokesCallback(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app-manifests/thecode/conversions" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, `{"id":42,"pem":"KEY","webhook_secret":"SEKRIT"}`)
+	}))
+	defer gh.Close()
+
+	s := newTestStore(t)
+	called := false
+	h := New(s, &fakeDeployer{}, "piper.localhost", gh.URL, func() { called = true })
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"code":"thecode"}`)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/github/exchange", body))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !called {
+		t.Fatal("onGitHubApp callback was not invoked after exchange")
+	}
+	saved, err := s.GetGitHubApp()
+	if err != nil {
+		t.Fatalf("GetGitHubApp: %v", err)
+	}
+	if saved.AppID != 42 || saved.WebhookSecret != "SEKRIT" {
+		t.Fatalf("creds not persisted: %+v", saved)
 	}
 }
 
