@@ -52,6 +52,34 @@ func TestUpdateAppRepoAndAppByRepo(t *testing.T) {
 	}
 }
 
+func TestGitHubAppRoundTrip(t *testing.T) {
+	s := openTemp(t)
+
+	if _, err := s.GetGitHubApp(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	want := GitHubApp{AppID: 42, PrivateKey: "-----KEY-----", WebhookSecret: "shh"}
+	if err := s.SaveGitHubApp(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetGitHubApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+	// Upsert replaces, not duplicates.
+	want.WebhookSecret = "newsecret"
+	if err := s.SaveGitHubApp(want); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetGitHubApp()
+	if got.WebhookSecret != "newsecret" {
+		t.Fatalf("upsert failed: %+v", got)
+	}
+}
+
 func TestGetAppNotFound(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.GetApp("nope"); !errors.Is(err, ErrNotFound) {

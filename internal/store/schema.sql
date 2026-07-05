@@ -15,3 +15,9 @@ CREATE TABLE IF NOT EXISTS deployments (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_deployments_app ON deployments(app, created_at);
+CREATE TABLE IF NOT EXISTS github_app (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    app_id         INTEGER NOT NULL,
+    private_key    TEXT NOT NULL,
+    webhook_secret TEXT NOT NULL
+);
