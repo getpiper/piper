@@ -29,6 +29,7 @@ type App struct {
 type Deployment struct {
 	ID          string
 	App         string
+	PR          int
 	ImageID     string
 	ContainerID string
 	HostPort    int
@@ -60,6 +61,7 @@ func migrate(db *sql.DB) error {
 	for _, stmt := range []string{
 		`ALTER TABLE apps ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE apps ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN pr INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") {
@@ -187,9 +189,44 @@ func (s *Store) LatestRunning(app string) (Deployment, error) {
 	var ts string
 	err := s.db.QueryRow(
 		`SELECT id, app, image_id, container_id, host_port, status, created_at
-		 FROM deployments WHERE app=? AND status='running'
+		 FROM deployments WHERE app=? AND status='running' AND pr=0
 		 ORDER BY created_at DESC LIMIT 1`, app).
 		Scan(&d.ID, &d.App, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Deployment{}, ErrNotFound
+	}
+	if err != nil {
+		return Deployment{}, err
+	}
+	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, ts)
+	return d, nil
+}
+
+func (s *Store) CreatePreviewDeployment(app string, pr int, imageID, containerID string, hostPort int, status string) (Deployment, error) {
+	d := Deployment{
+		ID: uuid.NewString(), App: app, PR: pr, ImageID: imageID,
+		ContainerID: containerID, HostPort: hostPort, Status: status,
+		CreatedAt: time.Now().UTC(),
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO deployments(id, app, image_id, container_id, host_port, status, created_at, pr)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		d.ID, d.App, d.ImageID, d.ContainerID, d.HostPort, d.Status,
+		d.CreatedAt.Format(time.RFC3339Nano), d.PR)
+	if err != nil {
+		return Deployment{}, err
+	}
+	return d, nil
+}
+
+func (s *Store) PreviewRunning(app string, pr int) (Deployment, error) {
+	var d Deployment
+	var ts string
+	err := s.db.QueryRow(
+		`SELECT id, app, image_id, container_id, host_port, status, created_at, pr
+		 FROM deployments WHERE app=? AND pr=? AND status='running'
+		 ORDER BY created_at DESC LIMIT 1`, app, pr).
+		Scan(&d.ID, &d.App, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts, &d.PR)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}

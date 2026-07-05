@@ -136,3 +136,37 @@ func TestUpdateDeploymentStatus(t *testing.T) {
 		t.Errorf("after status change to stopped, LatestRunning err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestPreviewDeploymentRoundTrip(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreatePreviewDeployment("blog", 7, "img", "cid", 41000, "running"); err != nil {
+		t.Fatalf("CreatePreviewDeployment: %v", err)
+	}
+	got, err := s.PreviewRunning("blog", 7)
+	if err != nil {
+		t.Fatalf("PreviewRunning: %v", err)
+	}
+	if got.PR != 7 || got.ContainerID != "cid" || got.HostPort != 41000 {
+		t.Errorf("got %+v", got)
+	}
+	if _, err := s.PreviewRunning("blog", 8); !errors.Is(err, ErrNotFound) {
+		t.Errorf("PreviewRunning(missing) err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLatestRunningIgnoresPreviews(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateDeployment("blog", "img", "main-c", 40000, "running"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePreviewDeployment("blog", 3, "img", "preview-c", 41000, "running"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LatestRunning("blog")
+	if err != nil {
+		t.Fatalf("LatestRunning: %v", err)
+	}
+	if got.ContainerID != "main-c" {
+		t.Errorf("LatestRunning returned %q, want main-c", got.ContainerID)
+	}
+}
