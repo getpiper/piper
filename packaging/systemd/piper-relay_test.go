@@ -64,6 +64,7 @@ func TestServiceDocumentation(t *testing.T) {
 		"systemd-run",
 		"PIPER_RELAY_DATA_DIR=/var/lib/piper-relay",
 		"systemctl enable --now piper-relay",
+		"systemctl clean --what=state piper-relay",
 		"journalctl -u piper-relay",
 		"ss -lnt",
 	} {

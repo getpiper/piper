@@ -295,7 +295,7 @@ rm -rf "$PIPER_DATA_DIR"          # drops apps, links, and stored GitHub App cre
 
 # Relay: stop and disable the service; remove its persistent enrollment state.
 sudo systemctl disable --now piper-relay
-sudo rm -rf /var/lib/piper-relay
+sudo systemctl clean --what=state piper-relay
 # GitHub: uninstall / delete the piper-<base> App from your account settings.
 # DNS: remove the A records if this was a throwaway.
 ```

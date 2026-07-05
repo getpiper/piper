@@ -288,7 +288,7 @@ In the runbook's teardown code block, replace the foreground relay comment with:
 ```bash
 # Relay: stop and disable the service; remove its persistent enrollment state.
 sudo systemctl disable --now piper-relay
-sudo rm -rf /var/lib/piper-relay
+sudo systemctl clean --what=state piper-relay
 ```
 
 In the troubleshooting row for `curl https://myapp.<base>`, replace the Fix cell with:
