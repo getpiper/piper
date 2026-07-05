@@ -18,3 +18,17 @@ func TestKindString(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusInactiveDistinct(t *testing.T) {
+	all := []source.Status{
+		source.StatusPending, source.StatusSuccess,
+		source.StatusFailure, source.StatusInactive,
+	}
+	seen := map[source.Status]bool{}
+	for _, s := range all {
+		if seen[s] {
+			t.Fatalf("duplicate status value %d", s)
+		}
+		seen[s] = true
+	}
+}

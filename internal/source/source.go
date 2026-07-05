@@ -42,6 +42,7 @@ const (
 	StatusPending Status = iota
 	StatusSuccess
 	StatusFailure
+	StatusInactive
 )
 
 // Event is a normalized git host event.
