@@ -1,0 +1,7 @@
+{
+  "action": "opened",
+  "number": 42,
+  "pull_request": { "head": { "ref": "feature-x", "sha": "prsha42" } },
+  "repository": { "full_name": "alice/blog" },
+  "installation": { "id": 99 }
+}

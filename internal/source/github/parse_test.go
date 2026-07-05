@@ -74,3 +74,33 @@ func TestParsePing(t *testing.T) {
 		t.Fatalf("kind = %v", ev.Kind)
 	}
 }
+
+func TestParsePullRequest(t *testing.T) {
+	cases := []struct {
+		file     string
+		wantKind source.Kind
+		wantSHA  string
+	}{
+		{"testdata/pr_opened.json", source.KindPROpened, "prsha42"},
+		{"testdata/pr_synchronize.json", source.KindPRSynced, "prsha43"},
+		{"testdata/pr_closed.json", source.KindPRClosed, "prsha43"},
+	}
+	p := newTestProvider(t, "s3cr3t")
+	for _, c := range cases {
+		body, _ := os.ReadFile(c.file)
+		h := http.Header{}
+		h.Set("X-GitHub-Event", "pull_request")
+		h.Set("X-Hub-Signature-256", sign("s3cr3t", string(body)))
+		ev, err := p.Parse(h, body)
+		if err != nil {
+			t.Fatalf("%s: Parse: %v", c.file, err)
+		}
+		want := source.Event{
+			Repo: "alice/blog", Ref: "feature-x", SHA: c.wantSHA,
+			Kind: c.wantKind, PR: 42, InstallationID: 99,
+		}
+		if ev != want {
+			t.Fatalf("%s: got %+v want %+v", c.file, ev, want)
+		}
+	}
+}

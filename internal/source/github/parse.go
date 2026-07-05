@@ -27,8 +27,16 @@ func (p *Provider) Parse(headers http.Header, body []byte) (source.Event, error)
 		return source.Event{}, err
 	}
 	var payload struct {
-		Ref        string `json:"ref"`
-		After      string `json:"after"`
+		Ref         string `json:"ref"`
+		After       string `json:"after"`
+		Action      string `json:"action"`
+		Number      int    `json:"number"`
+		PullRequest struct {
+			Head struct {
+				Ref string `json:"ref"`
+				SHA string `json:"sha"`
+			} `json:"head"`
+		} `json:"pull_request"`
 		Repository struct {
 			FullName string `json:"full_name"`
 		} `json:"repository"`
@@ -50,6 +58,20 @@ func (p *Provider) Parse(headers http.Header, body []byte) (source.Event, error)
 		ev.Kind = source.KindPush
 		ev.Ref = payload.Ref
 		ev.SHA = payload.After
+	case "pull_request":
+		ev.PR = payload.Number
+		ev.Ref = payload.PullRequest.Head.Ref
+		ev.SHA = payload.PullRequest.Head.SHA
+		switch payload.Action {
+		case "opened", "reopened":
+			ev.Kind = source.KindPROpened
+		case "synchronize":
+			ev.Kind = source.KindPRSynced
+		case "closed":
+			ev.Kind = source.KindPRClosed
+		default:
+			ev.Kind = source.KindOther
+		}
 	default:
 		ev.Kind = source.KindOther
 	}
