@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
-	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp"               // http app, server, host matcher
+	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp"              // http app, server, host matcher
 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy" // reverse_proxy handler
 	_ "github.com/caddyserver/caddy/v2/modules/caddytls"               // tls app, load_pem
 )
