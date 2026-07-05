@@ -172,6 +172,31 @@ func TestDeployRunFailureRecordsFailed(t *testing.T) {
 	}
 }
 
+func TestDeployCancelledRunCleansPartialContainerWithLiveContext(t *testing.T) {
+	s, path := newStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "partial-c"},
+		RunErr:         context.Canceled,
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(ctx, "blog", t.TempDir()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Deploy error = %v, want context.Canceled", err)
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "partial-c" {
+		t.Fatalf("stopped = %v, want [partial-c]", rt.Stopped)
+	}
+	if len(rt.StopContextErrs) != 1 || rt.StopContextErrs[0] != nil {
+		t.Fatalf("stop context errors = %v, want [nil]", rt.StopContextErrs)
+	}
+	if got := deploymentCountWithStatus(t, path, "failed"); got != 1 {
+		t.Fatalf("failed deployment count = %d, want 1", got)
+	}
+}
+
 func TestDeployPreviewRoutesFlattenedHostAndKeepsMain(t *testing.T) {
 	s, _ := newStore(t)
 	rt := &runtime.FakeRuntime{
