@@ -45,7 +45,7 @@ Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the
 - ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#11](https://github.com/getpiper/piper/issues/11)
 - ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#11](https://github.com/getpiper/piper/issues/11)
 - ✅ `piperd` — webhook served over the tunnel in relay mode — [#11](https://github.com/getpiper/piper/issues/11)
-- ⬜ PR-preview URLs + teardown (`pr-N.<app>.<base>`) — deferred behind the seam
+- ⬜ PR-preview URLs + teardown (`pr-N.<app>.<base>`) — deferred behind the seam — [#32](https://github.com/getpiper/piper/issues/32)
 
 ## Always-green gates
 
