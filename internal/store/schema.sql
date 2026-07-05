@@ -1,7 +1,9 @@
 CREATE TABLE IF NOT EXISTS apps (
-    name       TEXT PRIMARY KEY,
-    port       INTEGER NOT NULL,
-    created_at TEXT NOT NULL
+    name           TEXT PRIMARY KEY,
+    port           INTEGER NOT NULL,
+    repo           TEXT NOT NULL DEFAULT '',
+    branch         TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS deployments (
     id           TEXT PRIMARY KEY,

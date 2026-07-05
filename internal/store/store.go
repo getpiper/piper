@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,8 @@ var ErrNotFound = errors.New("not found")
 type App struct {
 	Name      string
 	Port      int
+	Repo      string
+	Branch    string
 	CreatedAt time.Time
 }
 
@@ -44,15 +47,34 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate applies additive column changes idempotently (pre-1.0, no migration
+// framework). ALTER ... ADD COLUMN errors if the column exists; we ignore that.
+func migrate(db *sql.DB) error {
+	for _, stmt := range []string{
+		`ALTER TABLE apps ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE apps ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(stmt); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) CreateApp(name string, port int) (App, error) {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO apps(name, port, created_at) VALUES(?,?,?)`,
-		name, port, now.Format(time.RFC3339Nano))
+	_, err := s.db.Exec(`INSERT INTO apps(name, port, repo, branch, created_at) VALUES(?,?,?,?,?)`,
+		name, port, "", "", now.Format(time.RFC3339Nano))
 	if err != nil {
 		return App{}, err
 	}
@@ -60,10 +82,32 @@ func (s *Store) CreateApp(name string, port int) (App, error) {
 }
 
 func (s *Store) GetApp(name string) (App, error) {
+	return s.scanApp(s.db.QueryRow(
+		`SELECT name, port, repo, branch, created_at FROM apps WHERE name=?`, name))
+}
+
+func (s *Store) AppByRepo(repo string) (App, error) {
+	return s.scanApp(s.db.QueryRow(
+		`SELECT name, port, repo, branch, created_at FROM apps WHERE repo=?`, repo))
+}
+
+func (s *Store) UpdateAppRepo(name, repo, branch string) error {
+	res, err := s.db.Exec(`UPDATE apps SET repo=?, branch=? WHERE name=?`, repo, branch, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+type rowScanner interface{ Scan(dest ...any) error }
+
+func (s *Store) scanApp(row rowScanner) (App, error) {
 	var a App
 	var ts string
-	err := s.db.QueryRow(`SELECT name, port, created_at FROM apps WHERE name=?`, name).
-		Scan(&a.Name, &a.Port, &ts)
+	err := row.Scan(&a.Name, &a.Port, &a.Repo, &a.Branch, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -75,19 +119,17 @@ func (s *Store) GetApp(name string) (App, error) {
 }
 
 func (s *Store) ListApps() ([]App, error) {
-	rows, err := s.db.Query(`SELECT name, port, created_at FROM apps ORDER BY name`)
+	rows, err := s.db.Query(`SELECT name, port, repo, branch, created_at FROM apps ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []App
 	for rows.Next() {
-		var a App
-		var ts string
-		if err := rows.Scan(&a.Name, &a.Port, &ts); err != nil {
+		a, err := s.scanApp(rows)
+		if err != nil {
 			return nil, err
 		}
-		a.CreatedAt, _ = time.Parse(time.RFC3339Nano, ts)
 		out = append(out, a)
 	}
 	return out, rows.Err()
