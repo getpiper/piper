@@ -177,9 +177,7 @@ func githubSetup(stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	formSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, page)
-	})}
+	formSrv := &http.Server{Handler: manifestFormHandler(page)}
 	go formSrv.Serve(formLn)
 	defer formSrv.Close()
 
@@ -200,6 +198,17 @@ func githubSetup(stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "GitHub App configured. Install it on your repo, then run: piper app link <name> --repo owner/name")
 	return 0
+}
+
+// manifestFormHandler serves the auto-submitting manifest form. The Content-Type
+// is set explicitly: the page starts with <form>, which Go's content sniffer does
+// not recognize as HTML, so it would otherwise be served as text/plain and the
+// browser would show the source instead of submitting it.
+func manifestFormHandler(page string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, page)
+	}
 }
 
 func htmlEscape(s string) string { return strings.ReplaceAll(s, "'", "&#39;") }
