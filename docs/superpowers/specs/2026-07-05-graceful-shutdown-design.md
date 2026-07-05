@@ -59,7 +59,10 @@ Shutdown uses a fixed 20-second application budget split into two phases:
    active requests and webhook deploys to finish normally.
 2. **Cancel and clean up (up to 5 seconds).** Cancel webhook deploy contexts,
    force-close HTTP servers that did not drain, and wait only until the overall
-   deadline for deployment cleanup. Then release Caddy and the store and exit.
+   deadline for deployment cleanup. On the forced-cancellation path, retain
+   Caddy and the store until that overall deadline even if tracked webhook work
+   returns earlier; this gives cancelled API handlers the same cleanup window.
+   Then release Caddy and the store and exit.
 
 This keeps the clean-state benefit of draining for work that finishes promptly,
 but makes the application timeout authoritative. A stuck deploy cannot keep
@@ -77,9 +80,18 @@ source provider, deploy orchestrator, and Docker runtime operations.
 
 Promote the existing drain hook into lifecycle API with two operations:
 
+- `StopAccepting()` atomically closes the handler's admission gate. Each HTTP
+  handler registers with the wait group while holding the same gate, so no
+  `WaitGroup.Add` can race with shutdown waiting. Requests arriving after the
+  gate closes receive `503 Service Unavailable`.
 - `WaitContext(ctx) bool` waits for all tracked goroutines and returns whether
   they drained before `ctx` expired.
 - `Cancel()` cancels the lifecycle context and is safe to call more than once.
+
+The wait group tracks both active HTTP handlers and detached deployment
+goroutines. A handler adds its deployment goroutine before releasing its own
+wait-group reference, so the counter cannot transiently reach zero during
+handoff.
 
 `WaitContext` must use a completion channel around `wg.Wait()` and select on the
 caller's context. It must never block shutdown after the caller's deadline.
@@ -91,6 +103,7 @@ Retain the `*http.Server` and `*webhook.Handler` currently created as locals in
 ```go
 func (w *webhookStarter) stop(ctx context.Context) {
     if w.srv == nil { return }   // never started (no GitHub App configured)
+    w.handler.StopAccepting()    // close admission before any shutdown wait
     _ = w.srv.Shutdown(ctx)      // stop accepting new webhook deliveries
 }
 ```
