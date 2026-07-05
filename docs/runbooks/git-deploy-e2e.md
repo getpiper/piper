@@ -93,24 +93,55 @@ dig +short hooks.<base>      # → <relay-public-ip>
 
 ## Part B — Relay
 
-On the relay host, enroll this agent for your base domain and start serving.
+On the relay host, install the binary and service unit:
 
 ```bash
-# 1. Enroll — prints a one-time token the box will present.
-./bin/piper-relay enroll alice --domain <base>
-#   enrolled alice for <base>
-#   token: rlyt_XXXXXXXXXXXXXXXX      ← copy this
-
-# 2. Serve. Defaults: TLS :443, tunnel :7000, data in ./relay-data.
-sudo ./bin/piper-relay
-#   piper-relay: TLS :443, tunnel :7000
+sudo install -m 0755 bin/piper-relay /usr/local/bin/piper-relay
+sudo install -m 0644 packaging/systemd/piper-relay.service \
+  /etc/systemd/system/piper-relay.service
+sudo systemctl daemon-reload
 ```
 
-`sudo` (or a `CAP_NET_BIND_SERVICE` capability) is only for binding privileged
-`:443`. Override addresses with `PIPER_RELAY_TLS_ADDR` / `PIPER_RELAY_TUNNEL_ADDR`
-if needed. Open the firewall for `443` and `7000`.
+Enrollment is a separate one-shot command, not the service. Run it through a
+transient unit so it writes to the same systemd-managed state directory as the
+service:
 
-Keep the token from step 1 — it goes to the box next.
+```bash
+sudo systemd-run --pipe --wait --collect \
+  --property=DynamicUser=yes \
+  --property=StateDirectory=piper-relay \
+  --setenv=PIPER_RELAY_DATA_DIR=/var/lib/piper-relay \
+  /usr/local/bin/piper-relay enroll alice --domain <base>
+#   enrolled alice for <base>
+#   token: rlyt_XXXXXXXXXXXXXXXX      ← copy this
+```
+
+Do not run enrollment directly as root with
+`PIPER_RELAY_DATA_DIR=/var/lib/piper-relay`; a root-owned `relay.db` may prevent the
+dynamic service user from opening it.
+
+Enable the relay at boot and start it now:
+
+```bash
+sudo systemctl enable --now piper-relay
+sudo systemctl status piper-relay
+sudo journalctl -u piper-relay -n 50 --no-pager
+sudo ss -lnt '( sport = :443 or sport = :7000 )'
+```
+
+The final command must show listeners on `:443` and `:7000`. Open inbound TCP ports
+`443` and `7000` in both the host firewall and the VPS provider firewall.
+
+To override listener addresses, create `/etc/piper-relay.env` before starting the
+service:
+
+```bash
+PIPER_RELAY_TLS_ADDR=:443
+PIPER_RELAY_TUNNEL_ADDR=:7000
+```
+
+Then apply changes with `sudo systemctl restart piper-relay`. Keep the enrollment
+token — it goes to the box next.
 
 ---
 
@@ -262,7 +293,9 @@ docker rm -f $(docker ps -aq --filter ancestor=piper/myapp) 2>/dev/null
 docker images --filter=reference='piper/*' -q | xargs -r docker rmi -f
 rm -rf "$PIPER_DATA_DIR"          # drops apps, links, and stored GitHub App creds
 
-# Relay: stop the process; rm -rf ./relay-data to forget enrollments.
+# Relay: stop and disable the service; remove its persistent enrollment state.
+sudo systemctl disable --now piper-relay
+sudo rm -rf /var/lib/piper-relay
 # GitHub: uninstall / delete the piper-<base> App from your account settings.
 # DNS: remove the A records if this was a throwaway.
 ```
@@ -274,7 +307,7 @@ rm -rf "$PIPER_DATA_DIR"          # drops apps, links, and stored GitHub App cre
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | piperd exits with `relay tls:` | DNS-01 failed (bad/missing `CLOUDFLARE_DNS_API_TOKEN`, token lacks DNS-edit on the zone), or LE rate limit | Verify the token edits the zone; watch for `_acme-challenge` TXT appearing; back off if rate-limited |
-| `curl https://myapp.<base>` hangs / conn refused | Relay `:443`/`:7000` not publicly open, or tunnel not connected | Check relay firewall; confirm relay logs a tunnel client; confirm `PIPER_RELAY_ADDR` host:7000 |
+| `curl https://myapp.<base>` hangs / conn refused | Relay `:443`/`:7000` not publicly open, or tunnel not connected | Check both firewalls; run `systemctl status piper-relay`, inspect `journalctl -u piper-relay`, and confirm listeners with `ss -lnt`; confirm `PIPER_RELAY_ADDR` uses host:7000 |
 | `curl` returns cert error | Wrong/missing wildcard, or staging/self-signed cert | Cert must cover `*.<base>` **and** `<base>` from a trusted CA |
 | `create`/`deploy` fails with "name reserved" | You used `hooks` as an app name | `hooks` is reserved for the webhook host; pick another |
 | GitHub `ping` delivery is red | `hooks.<base>` unreachable or untrusted cert | Same as the curl cert/tunnel checks — `hooks.<base>` rides the identical path |

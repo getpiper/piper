@@ -20,6 +20,33 @@ network — solving the NAT / CGNAT / dynamic-IP problem that kills most homelab
 - `piper-relay` — the optional cloud relay (SNI passthrough + tunnel server). Always self-deployable; a hosted instance is offered purely for convenience and runs this same code.
 - `piper` — the CLI.
 
+## Run the relay as a service
+
+On a Linux relay host, build or download the static `piper-relay` binary, then install
+the binary and the shipped systemd unit:
+
+```bash
+sudo install -m 0755 bin/piper-relay /usr/local/bin/piper-relay
+sudo install -m 0644 packaging/systemd/piper-relay.service \
+  /etc/systemd/system/piper-relay.service
+sudo systemctl daemon-reload
+```
+
+Enroll the box before starting the service, then enable it at boot:
+
+```bash
+sudo systemd-run --pipe --wait --collect \
+  --property=DynamicUser=yes \
+  --property=StateDirectory=piper-relay \
+  --setenv=PIPER_RELAY_DATA_DIR=/var/lib/piper-relay \
+  /usr/local/bin/piper-relay enroll <name> --domain <base-domain>
+sudo systemctl enable --now piper-relay
+```
+
+Open inbound TCP ports `443` and `7000`. See the
+[end-to-end runbook](docs/runbooks/git-deploy-e2e.md#part-b--relay) for verification,
+address overrides, logs, and teardown.
+
 ## Git deploys
 
 Once your box runs in relay mode, a `git push` can build and publish an app. Piper
