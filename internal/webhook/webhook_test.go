@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/getpiper/piper/internal/source"
 	"github.com/getpiper/piper/internal/store"
@@ -45,6 +46,24 @@ type fakeDeployer struct {
 	teardownCalls int
 	err           error
 }
+
+type blockingDeployer struct {
+	started  chan struct{}
+	finished chan struct{}
+}
+
+func (d *blockingDeployer) Deploy(ctx context.Context, _, _ string) (store.Deployment, error) {
+	close(d.started)
+	<-ctx.Done()
+	close(d.finished)
+	return store.Deployment{}, ctx.Err()
+}
+
+func (d *blockingDeployer) DeployPreview(context.Context, string, int, string) (store.Deployment, error) {
+	return store.Deployment{}, nil
+}
+
+func (d *blockingDeployer) TeardownPreview(context.Context, string, int) error { return nil }
 
 func (d *fakeDeployer) Deploy(context.Context, string, string) (store.Deployment, error) {
 	d.mu.Lock()
@@ -165,6 +184,53 @@ func TestDeployFailureReportsFailure(t *testing.T) {
 	got := p.statuses()
 	if len(got) != 2 || got[1] != source.StatusFailure {
 		t.Fatalf("statuses = %v", got)
+	}
+}
+
+func TestWaitContextTimesOutAndCancelStopsInFlightDeploy(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	p := &fakeProvider{ev: source.Event{
+		Kind: source.KindPush, Repo: "alice/blog", Ref: "refs/heads/main", SHA: "s1",
+	}}
+	d := &blockingDeployer{started: make(chan struct{}), finished: make(chan struct{})}
+	h := webhook.New(p, s, d, "piper.localhost")
+
+	if rec := post(h); rec.Code != http.StatusAccepted {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	<-d.started
+
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelWait()
+	if h.WaitContext(waitCtx) {
+		t.Fatal("WaitContext reported a drain while deploy was blocked")
+	}
+
+	h.Cancel()
+	if !h.WaitContext(context.Background()) {
+		t.Fatal("WaitContext did not report drain after cancellation")
+	}
+	select {
+	case <-d.finished:
+	default:
+		t.Fatal("deployment context was not cancelled")
+	}
+}
+
+func TestWaitContextReportsCompletedWork(t *testing.T) {
+	h := webhook.New(&fakeProvider{}, newStore(t), &fakeDeployer{}, "piper.localhost")
+	if !h.WaitContext(context.Background()) {
+		t.Fatal("WaitContext reported timeout with no in-flight work")
+	}
+}
+
+func TestStopAcceptingRejectsNewWork(t *testing.T) {
+	h := webhook.New(&fakeProvider{}, newStore(t), &fakeDeployer{}, "piper.localhost")
+	h.StopAccepting()
+	if rec := post(h); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }
 
