@@ -74,6 +74,17 @@ func TestRunDeploySupportsNameFirstFlags(t *testing.T) {
 	}
 }
 
+func TestManifestFormHandlerServesHTML(t *testing.T) {
+	// The manifest page starts with <form>; without an explicit Content-Type Go
+	// sniffs it as text/plain and the browser shows source instead of submitting
+	// the form to GitHub. Guard against that regression.
+	rec := httptest.NewRecorder()
+	manifestFormHandler(`<form id="f"></form>`).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", ct)
+	}
+}
+
 func TestRunList(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps" {
