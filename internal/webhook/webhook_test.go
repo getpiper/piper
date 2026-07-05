@@ -39,9 +39,11 @@ func (f *fakeProvider) statuses() []source.Status {
 }
 
 type fakeDeployer struct {
-	mu    sync.Mutex
-	calls int
-	err   error
+	mu            sync.Mutex
+	calls         int
+	previewCalls  int
+	teardownCalls int
+	err           error
 }
 
 func (d *fakeDeployer) Deploy(context.Context, string, string) (store.Deployment, error) {
@@ -50,7 +52,21 @@ func (d *fakeDeployer) Deploy(context.Context, string, string) (store.Deployment
 	d.mu.Unlock()
 	return store.Deployment{}, d.err
 }
-func (d *fakeDeployer) count() int { d.mu.Lock(); defer d.mu.Unlock(); return d.calls }
+func (d *fakeDeployer) DeployPreview(context.Context, string, int, string) (store.Deployment, error) {
+	d.mu.Lock()
+	d.previewCalls++
+	d.mu.Unlock()
+	return store.Deployment{}, d.err
+}
+func (d *fakeDeployer) TeardownPreview(context.Context, string, int) error {
+	d.mu.Lock()
+	d.teardownCalls++
+	d.mu.Unlock()
+	return d.err
+}
+func (d *fakeDeployer) count() int     { d.mu.Lock(); defer d.mu.Unlock(); return d.calls }
+func (d *fakeDeployer) previews() int  { d.mu.Lock(); defer d.mu.Unlock(); return d.previewCalls }
+func (d *fakeDeployer) teardowns() int { d.mu.Lock(); defer d.mu.Unlock(); return d.teardownCalls }
 
 func newStore(t *testing.T) *store.Store {
 	t.Helper()
@@ -149,5 +165,65 @@ func TestDeployFailureReportsFailure(t *testing.T) {
 	got := p.statuses()
 	if len(got) != 2 || got[1] != source.StatusFailure {
 		t.Fatalf("statuses = %v", got)
+	}
+}
+
+func TestPROpenedDeploysPreviewAndReports(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	p := &fakeProvider{ev: source.Event{
+		Kind: source.KindPROpened, Repo: "alice/blog", PR: 7, SHA: "s1", Ref: "feature",
+	}}
+	d := &fakeDeployer{}
+	h := webhook.New(p, s, d, "piper.localhost")
+
+	if rec := post(h); rec.Code != http.StatusAccepted {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	h.Wait()
+	if d.previews() != 1 || d.count() != 0 {
+		t.Fatalf("previews=%d deploys=%d", d.previews(), d.count())
+	}
+	got := p.statuses()
+	if len(got) != 2 || got[0] != source.StatusPending || got[1] != source.StatusSuccess {
+		t.Fatalf("statuses = %v", got)
+	}
+}
+
+func TestPRSyncedIsIdempotentOnSHA(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	ev := source.Event{Kind: source.KindPRSynced, Repo: "alice/blog", PR: 7, SHA: "s1"}
+	p := &fakeProvider{ev: ev}
+	d := &fakeDeployer{}
+	h := webhook.New(p, s, d, "piper.localhost")
+	post(h)
+	h.Wait()
+	post(h) // same SHA again
+	h.Wait()
+	if d.previews() != 1 {
+		t.Fatalf("previews = %d, want 1 (dedupe)", d.previews())
+	}
+}
+
+func TestPRClosedTearsDownAndReportsInactive(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	p := &fakeProvider{ev: source.Event{
+		Kind: source.KindPRClosed, Repo: "alice/blog", PR: 7, SHA: "s1",
+	}}
+	d := &fakeDeployer{}
+	h := webhook.New(p, s, d, "piper.localhost")
+	post(h)
+	h.Wait()
+	if d.teardowns() != 1 {
+		t.Fatalf("teardowns = %d, want 1", d.teardowns())
+	}
+	got := p.statuses()
+	if len(got) != 1 || got[0] != source.StatusInactive {
+		t.Fatalf("statuses = %v, want [inactive]", got)
 	}
 }
