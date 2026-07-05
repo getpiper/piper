@@ -4,10 +4,11 @@ package config
 import "os"
 
 type Config struct {
-	APIAddr    string // control API listen address
-	DataDir    string // directory for the SQLite file
-	BaseDomain string // apps served at <name>.<BaseDomain>
-	CaddyAdmin string // Caddy admin API base URL
+	APIAddr     string // control API listen address
+	WebhookAddr string // loopback webhook listener (relay mode)
+	DataDir     string // directory for the SQLite file
+	BaseDomain  string // apps served at <name>.<BaseDomain>
+	CaddyAdmin  string // Caddy admin API base URL
 
 	RelayAddr   string // relay tunnel endpoint; empty ⇒ LAN-only (Plan 1)
 	RelayToken  string // enrollment token presented to the relay
@@ -28,10 +29,11 @@ func env(key, def string) string {
 // Load builds a Config from env vars, applying defaults.
 func Load() Config {
 	return Config{
-		APIAddr:    env("PIPER_API_ADDR", "127.0.0.1:8088"),
-		DataDir:    env("PIPER_DATA_DIR", "./data"),
-		BaseDomain: env("PIPER_BASE_DOMAIN", "piper.localhost"),
-		CaddyAdmin: env("PIPER_CADDY_ADMIN", "http://127.0.0.1:2019"),
+		APIAddr:     env("PIPER_API_ADDR", "127.0.0.1:8088"),
+		WebhookAddr: env("PIPER_WEBHOOK_ADDR", "127.0.0.1:8089"),
+		DataDir:     env("PIPER_DATA_DIR", "./data"),
+		BaseDomain:  env("PIPER_BASE_DOMAIN", "piper.localhost"),
+		CaddyAdmin:  env("PIPER_CADDY_ADMIN", "http://127.0.0.1:2019"),
 
 		RelayAddr:   env("PIPER_RELAY_ADDR", ""),
 		RelayToken:  env("PIPER_RELAY_TOKEN", ""),
