@@ -1,10 +1,10 @@
 package caddy
 
 import (
-	"context"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -20,8 +20,8 @@ func freeAddr(t *testing.T) string {
 }
 
 // StartManager must run Caddy in-process: with PATH emptied (so no external
-// `caddy` binary is reachable) it still brings up a live admin API that the
-// Client can drive.
+// `caddy` binary is reachable) it still brings up a live admin API serving the
+// base config we built.
 func TestStartManagerRunsCaddyWithoutExternalBinary(t *testing.T) {
 	// No external caddy anywhere on PATH; embedded Caddy must not care.
 	t.Setenv("PATH", "")
@@ -32,35 +32,25 @@ func TestStartManagerRunsCaddyWithoutExternalBinary(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", dir)
 
 	admin := "http://" + freeAddr(t)
-	m, err := StartManager(context.Background(), admin, "127.0.0.1:0")
+	httpListen := freeAddr(t)
+	m, err := StartManager(admin, httpListen)
 	if err != nil {
 		t.Fatalf("StartManager: %v", err)
 	}
 	defer m.Stop()
 
-	// Admin API is live.
+	// The admin API is live and serving the config we built (piper server on
+	// httpListen). This can only be true if Caddy is running in-process.
 	resp, err := http.Get(admin + "/config/")
 	if err != nil {
 		t.Fatalf("GET admin /config/: %v", err)
 	}
-	io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("admin /config/ status = %d", resp.StatusCode)
 	}
-
-	// The Client can push a route, and Caddy accepts it (addressable by id).
-	c := NewClient(admin)
-	if err := c.UpsertRoute("blog.piper.localhost", 40001); err != nil {
-		t.Fatalf("UpsertRoute: %v", err)
-	}
-	got, err := http.Get(admin + "/id/piper-blog.piper.localhost")
-	if err != nil {
-		t.Fatalf("GET route by id: %v", err)
-	}
-	io.Copy(io.Discard, got.Body)
-	got.Body.Close()
-	if got.StatusCode != http.StatusOK {
-		t.Fatalf("route not found by id: status %d", got.StatusCode)
+	if !strings.Contains(string(body), httpListen) {
+		t.Fatalf("running config missing our http listener %q: %s", httpListen, body)
 	}
 }

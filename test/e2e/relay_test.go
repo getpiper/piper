@@ -27,7 +27,7 @@ import (
 // ACME, no real DNS. Uses :8443 and :7000 to avoid privileged :443.
 func TestRelayLoopback(t *testing.T) {
 	if os.Getenv("RUN_E2E") != "1" {
-		t.Skip("set RUN_E2E=1 to run (needs Docker + caddy on PATH)")
+		t.Skip("set RUN_E2E=1 to run (needs Docker; Caddy is embedded)")
 	}
 	repoRoot, _ := filepath.Abs("../..")
 	base := "alice.localhost"

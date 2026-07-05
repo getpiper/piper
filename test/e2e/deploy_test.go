@@ -17,10 +17,10 @@ import (
 
 // TestEndToEndDeploy builds piperd, runs it against real Docker + Caddy, deploys
 // the sample app, and fetches it through Caddy's :80 by Host header.
-// Skips unless RUN_E2E=1 and Docker + caddy are available.
+// Skips unless RUN_E2E=1 and Docker is available (Caddy is embedded in piperd).
 func TestEndToEndDeploy(t *testing.T) {
 	if os.Getenv("RUN_E2E") != "1" {
-		t.Skip("set RUN_E2E=1 to run (needs Docker + caddy on PATH + free :80/:8088/:2019)")
+		t.Skip("set RUN_E2E=1 to run (needs Docker + free :80/:8088/:2019)")
 	}
 	repoRoot, _ := filepath.Abs("../..")
 	dataDir := t.TempDir()
