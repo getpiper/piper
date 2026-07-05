@@ -2,7 +2,7 @@
 
 Coarse **map** of what's built vs. what's left — by design. Detail for any 🟡/⬜ item lives in its linked issue (`[#N]`), not here; entries stay to one line so they can't drift from the issue. Design lives in [`docs/superpowers/specs/`](docs/superpowers/specs/); plans in [`docs/superpowers/plans/`](docs/superpowers/plans/); how-to-work in [`CLAUDE.md`](CLAUDE.md).
 
-_Last updated: 2026-07-05 — Plan 3 push-to-deploy complete: per-user GitHub App, webhook over tunnel, GitHub Deployments status. PR previews next. Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-05 — Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
 
 Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label conventions: [CLAUDE.md § Issue tracking](CLAUDE.md#issue-tracking--progress).
 
@@ -45,7 +45,7 @@ Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the
 - ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#11](https://github.com/getpiper/piper/issues/11)
 - ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#11](https://github.com/getpiper/piper/issues/11)
 - ✅ `piperd` — webhook served over the tunnel in relay mode — [#11](https://github.com/getpiper/piper/issues/11)
-- ⬜ PR-preview URLs + teardown (`pr-N.<app>.<base>`) — deferred behind the seam — [#32](https://github.com/getpiper/piper/issues/32)
+- ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#32](https://github.com/getpiper/piper/issues/32)
 
 ## Always-green gates
 

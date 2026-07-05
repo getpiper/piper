@@ -25,8 +25,11 @@ func (p *Provider) Report(ctx context.Context, ev source.Event, status source.St
 		return err
 	}
 	state := "failure"
-	if status == source.StatusSuccess {
+	switch status {
+	case source.StatusSuccess:
 		state = "success"
+	case source.StatusInactive:
+		state = "inactive"
 	}
 	return p.postStatus(ctx, token, ev.Repo, id, state, url)
 }
@@ -65,6 +68,10 @@ func (p *Provider) createDeployment(ctx context.Context, token string, ev source
 		"auto_merge":        false,
 		"required_contexts": []string{},
 		"description":       "piper deploy",
+	}
+	if ev.PR > 0 {
+		in["environment"] = fmt.Sprintf("pr-%d", ev.PR)
+		in["transient_environment"] = true
 	}
 	var out struct {
 		ID int64 `json:"id"`

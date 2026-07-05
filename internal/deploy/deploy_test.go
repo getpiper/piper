@@ -13,6 +13,7 @@ import (
 
 type fakeCaddy struct {
 	upserts map[string]int
+	removes []string
 }
 
 func newFakeCaddy() *fakeCaddy {
@@ -24,7 +25,12 @@ func (f *fakeCaddy) UpsertRoute(host string, port int) error {
 	return nil
 }
 
-func (f *fakeCaddy) RemoveRoute(string) error { return nil }
+func (f *fakeCaddy) RemoveRoute(host string) error {
+	f.removes = append(f.removes, host)
+	return nil
+}
+
+func (f *fakeCaddy) removed() []string { return f.removes }
 
 func newStore(t *testing.T) (*store.Store, string) {
 	t.Helper()
@@ -163,5 +169,89 @@ func TestDeployRunFailureRecordsFailed(t *testing.T) {
 	}
 	if got := deploymentCountWithStatus(t, path, "failed"); got != 1 {
 		t.Errorf("failed deployment count = %d, want 1", got)
+	}
+}
+
+func TestDeployPreviewRoutesFlattenedHostAndKeepsMain(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "main-c", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	rt.RunResultVal = runtime.RunResult{ContainerID: "preview-c", HostPort: 40002}
+	if _, err := d.DeployPreview(context.Background(), "blog", 5, t.TempDir()); err != nil {
+		t.Fatalf("DeployPreview: %v", err)
+	}
+
+	if routes.upserts["pr-5-blog.piper.localhost"] != 40002 {
+		t.Errorf("routes = %+v, want pr-5-blog.piper.localhost -> 40002", routes.upserts)
+	}
+	if len(rt.Stopped) != 0 {
+		t.Errorf("stopped = %v, want none (main must survive)", rt.Stopped)
+	}
+	main, err := s.LatestRunning("blog")
+	if err != nil || main.ContainerID != "main-c" {
+		t.Errorf("main running = %+v (err %v), want main-c", main, err)
+	}
+}
+
+func TestDeployPreviewSecondStopsPreviousPreview(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "p1", HostPort: 40001},
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+	if _, err := d.DeployPreview(context.Background(), "blog", 5, t.TempDir()); err != nil {
+		t.Fatalf("first DeployPreview: %v", err)
+	}
+	rt.RunResultVal = runtime.RunResult{ContainerID: "p2", HostPort: 40002}
+	if _, err := d.DeployPreview(context.Background(), "blog", 5, t.TempDir()); err != nil {
+		t.Fatalf("second DeployPreview: %v", err)
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "p1" {
+		t.Errorf("stopped = %v, want [p1]", rt.Stopped)
+	}
+}
+
+func TestTeardownPreviewStopsAndUnroutes(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "p1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.DeployPreview(context.Background(), "blog", 5, t.TempDir()); err != nil {
+		t.Fatalf("DeployPreview: %v", err)
+	}
+
+	if err := d.TeardownPreview(context.Background(), "blog", 5); err != nil {
+		t.Fatalf("TeardownPreview: %v", err)
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "p1" {
+		t.Errorf("stopped = %v, want [p1]", rt.Stopped)
+	}
+	if len(routes.removed()) != 1 || routes.removed()[0] != "pr-5-blog.piper.localhost" {
+		t.Errorf("removed = %v, want [pr-5-blog.piper.localhost]", routes.removed())
+	}
+	if _, err := s.PreviewRunning("blog", 5); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("PreviewRunning after teardown err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestTeardownPreviewNoRunningIsNoOp(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+	if err := d.TeardownPreview(context.Background(), "blog", 99); err != nil {
+		t.Fatalf("TeardownPreview no-op err = %v, want nil", err)
 	}
 }

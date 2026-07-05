@@ -6,6 +6,7 @@ package webhook
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -20,6 +21,8 @@ const maxBody = 5 << 20 // 5 MiB
 
 type Deployer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
+	DeployPreview(ctx context.Context, app string, pr int, srcDir string) (store.Deployment, error)
+	TeardownPreview(ctx context.Context, app string, pr int) error
 }
 
 type Handler struct {
@@ -84,9 +87,17 @@ func (h *Handler) appLock(name string) *sync.Mutex {
 }
 
 func (h *Handler) process(ctx context.Context, ev source.Event) {
-	if ev.Kind != source.KindPush {
-		return // this slice acts only on push
+	switch ev.Kind {
+	case source.KindPush:
+		h.processPush(ctx, ev)
+	case source.KindPROpened, source.KindPRSynced:
+		h.processPreview(ctx, ev)
+	case source.KindPRClosed:
+		h.processPRClosed(ctx, ev)
 	}
+}
+
+func (h *Handler) processPush(ctx context.Context, ev source.Event) {
 	app, err := h.store.AppByRepo(ev.Repo)
 	if errors.Is(err, store.ErrNotFound) {
 		log.Printf("webhook: no app bound to %s", ev.Repo)
@@ -140,4 +151,84 @@ func (h *Handler) process(ctx context.Context, ev source.Event) {
 	h.mu.Lock()
 	h.lastSHA[app.Name] = ev.SHA
 	h.mu.Unlock()
+}
+
+func (h *Handler) processPreview(ctx context.Context, ev source.Event) {
+	app, err := h.store.AppByRepo(ev.Repo)
+	if errors.Is(err, store.ErrNotFound) {
+		log.Printf("webhook: no app bound to %s", ev.Repo)
+		return
+	}
+	if err != nil {
+		log.Printf("webhook: lookup %s: %v", ev.Repo, err)
+		return
+	}
+
+	lock := h.appLock(app.Name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	key := fmt.Sprintf("%s#%d", app.Name, ev.PR)
+	h.mu.Lock()
+	dup := h.lastSHA[key] == ev.SHA
+	h.mu.Unlock()
+	if dup {
+		log.Printf("webhook: %s PR %d already at %s, skipping", app.Name, ev.PR, ev.SHA)
+		return
+	}
+
+	_ = h.prov.Report(ctx, ev, source.StatusPending, "")
+
+	dir, err := os.MkdirTemp("", "piper-src-*")
+	if err != nil {
+		log.Printf("webhook: tmpdir: %v", err)
+		_ = h.prov.Report(ctx, ev, source.StatusFailure, "")
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	if err := h.prov.Fetch(ctx, ev, dir); err != nil {
+		log.Printf("webhook: fetch %s@%s: %v", ev.Repo, ev.SHA, err)
+		_ = h.prov.Report(ctx, ev, source.StatusFailure, "")
+		return
+	}
+	if _, err := h.deploy.DeployPreview(ctx, app.Name, ev.PR, dir); err != nil {
+		log.Printf("webhook: preview deploy %s PR %d: %v", app.Name, ev.PR, err)
+		_ = h.prov.Report(ctx, ev, source.StatusFailure, "")
+		return
+	}
+
+	url := fmt.Sprintf("https://pr-%d-%s.%s", ev.PR, app.Name, h.baseDom)
+	_ = h.prov.Report(ctx, ev, source.StatusSuccess, url)
+
+	h.mu.Lock()
+	h.lastSHA[key] = ev.SHA
+	h.mu.Unlock()
+}
+
+func (h *Handler) processPRClosed(ctx context.Context, ev source.Event) {
+	app, err := h.store.AppByRepo(ev.Repo)
+	if errors.Is(err, store.ErrNotFound) {
+		log.Printf("webhook: no app bound to %s", ev.Repo)
+		return
+	}
+	if err != nil {
+		log.Printf("webhook: lookup %s: %v", ev.Repo, err)
+		return
+	}
+
+	lock := h.appLock(app.Name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := h.deploy.TeardownPreview(ctx, app.Name, ev.PR); err != nil {
+		log.Printf("webhook: teardown %s PR %d: %v", app.Name, ev.PR, err)
+		return
+	}
+
+	h.mu.Lock()
+	delete(h.lastSHA, fmt.Sprintf("%s#%d", app.Name, ev.PR))
+	h.mu.Unlock()
+
+	_ = h.prov.Report(ctx, ev, source.StatusInactive, "")
 }
