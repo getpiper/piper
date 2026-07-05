@@ -76,3 +76,63 @@ func TestReportSuccessPostsStatus(t *testing.T) {
 		t.Fatalf("state=%q url=%q", gotState, gotURL)
 	}
 }
+
+func TestReportPendingUsesPREnvironment(t *testing.T) {
+	var gotEnv string
+	var gotTransient bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/99/access_tokens":
+			io.WriteString(w, `{"token":"ghs_x"}`)
+		case "/repos/alice/blog/deployments":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			gotEnv, _ = body["environment"].(string)
+			gotTransient, _ = body["transient_environment"].(bool)
+			w.WriteHeader(201)
+			io.WriteString(w, `{"id":1}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p, _ := New(Config{AppID: 1, PrivateKeyPEM: testKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL})
+	ev := source.Event{Repo: "alice/blog", SHA: "sha1", InstallationID: 99, PR: 42}
+	if err := p.Report(context.Background(), ev, source.StatusPending, ""); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if gotEnv != "pr-42" || !gotTransient {
+		t.Fatalf("environment=%q transient=%v, want pr-42/true", gotEnv, gotTransient)
+	}
+}
+
+func TestReportInactivePostsInactiveState(t *testing.T) {
+	var gotState string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/app/installations/99/access_tokens":
+			io.WriteString(w, `{"token":"ghs_x"}`)
+		case r.URL.Path == "/repos/alice/blog/deployments" && r.Method == http.MethodGet:
+			io.WriteString(w, `[{"id":555}]`)
+		case r.URL.Path == "/repos/alice/blog/deployments/555/statuses":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			gotState, _ = body["state"].(string)
+			w.WriteHeader(201)
+			io.WriteString(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p, _ := New(Config{AppID: 1, PrivateKeyPEM: testKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL})
+	ev := source.Event{Repo: "alice/blog", SHA: "sha1", InstallationID: 99, PR: 42}
+	if err := p.Report(context.Background(), ev, source.StatusInactive, ""); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if gotState != "inactive" {
+		t.Fatalf("state=%q, want inactive", gotState)
+	}
+}
