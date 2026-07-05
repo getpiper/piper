@@ -20,6 +20,23 @@ network — solving the NAT / CGNAT / dynamic-IP problem that kills most homelab
 - `piper-relay` — the optional cloud relay (SNI passthrough + tunnel server). Always self-deployable; a hosted instance is offered purely for convenience and runs this same code.
 - `piper` — the CLI.
 
+## Git deploys
+
+Once your box runs in relay mode, a `git push` can build and publish an app. Piper
+uses a **per-user GitHub App** you create yourself — the private key and webhook
+secret never leave your box.
+
+```
+piper github setup                                   # create the GitHub App (one-time)
+# install the App on your repo in GitHub, then:
+piper app link myapp --repo owner/name --branch main # bind the repo to an app
+```
+
+After that, every push to the tracked branch builds the Dockerfile at the repo root,
+health-checks the container, and serves it at `https://myapp.<your-domain>`. The live
+URL shows up on GitHub as a Deployment status. Webhooks ride the same tunnel as your
+traffic (delivered to `hooks.<your-domain>`); nothing else on the box is exposed.
+
 ## Progress & contributing
 
 - **What's built vs. left:** [`PROGRESS.md`](PROGRESS.md) — a coarse map linking each gap to its issue.

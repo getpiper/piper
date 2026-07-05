@@ -1,0 +1,69 @@
+// Package source defines the provider seam: normalizing a git host's webhook
+// into an Event, fetching the repo at a commit, and reporting status back.
+package source
+
+import (
+	"context"
+	"errors"
+	"net/http"
+)
+
+type Kind int
+
+const (
+	KindOther Kind = iota
+	KindPing
+	KindPush
+	KindPROpened
+	KindPRSynced
+	KindPRClosed
+)
+
+func (k Kind) String() string {
+	switch k {
+	case KindPing:
+		return "ping"
+	case KindPush:
+		return "push"
+	case KindPROpened:
+		return "pr_opened"
+	case KindPRSynced:
+		return "pr_synced"
+	case KindPRClosed:
+		return "pr_closed"
+	default:
+		return "other"
+	}
+}
+
+type Status int
+
+const (
+	StatusPending Status = iota
+	StatusSuccess
+	StatusFailure
+)
+
+// Event is a normalized git host event.
+type Event struct {
+	Repo           string // "owner/name"
+	Ref            string // "refs/heads/main"
+	SHA            string
+	Kind           Kind
+	PR             int
+	InstallationID int64
+}
+
+// Provider drives a deploy from a git host.
+type Provider interface {
+	// Parse verifies the signature and normalizes a raw webhook into an Event.
+	Parse(headers http.Header, body []byte) (Event, error)
+	// Fetch downloads the repo tree at ev.SHA into destDir.
+	Fetch(ctx context.Context, ev Event, destDir string) error
+	// Report posts a deploy status back to the git host (url set on success).
+	Report(ctx context.Context, ev Event, status Status, url string) error
+}
+
+// ErrBadSignature is returned by Parse when signature verification fails; the
+// webhook handler maps it to HTTP 401.
+var ErrBadSignature = errors.New("source: bad webhook signature")

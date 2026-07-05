@@ -4,7 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"time"
 
 	"github.com/getpiper/piper/internal/client"
 	"github.com/getpiper/piper/internal/config"
@@ -84,12 +90,132 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s\tport=%d\n", app.Name, app.Port)
 		}
 		return 0
+	case "app":
+		return cmdApp(args[1:], stdout, stderr)
+	case "github":
+		return cmdGithub(args[1:], stdout, stderr)
 	default:
 		return usage(stderr)
 	}
 }
 
+const appLinkUsage = "usage: piper app link <name> --repo owner/name [--branch main]"
+
+func cmdApp(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 || args[0] != "link" {
+		fmt.Fprintln(stderr, appLinkUsage)
+		return 2
+	}
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, appLinkUsage)
+		return 2
+	}
+	name := args[1]
+	fs := flag.NewFlagSet("link", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	repo := fs.String("repo", "", "GitHub repo, owner/name")
+	branch := fs.String("branch", "main", "tracked branch")
+	if err := fs.Parse(args[2:]); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || *repo == "" {
+		fmt.Fprintln(stderr, appLinkUsage)
+		return 2
+	}
+	if err := client.New(config.ClientAddr()).LinkApp(name, *repo, *branch); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "linked %s -> %s (%s)\n", name, *repo, *branch)
+	return 0
+}
+
+func cmdGithub(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 || args[0] != "setup" {
+		fmt.Fprintln(stderr, "usage: piper github setup")
+		return 2
+	}
+	return githubSetup(stdout, stderr)
+}
+
+// githubSetup drives the GitHub App manifest flow: it asks piperd for a manifest,
+// serves a tiny auto-submitting form that POSTs it to GitHub, catches the
+// redirect ?code=, and exchanges it for App credentials stored on the box.
+func githubSetup(stdout, stderr io.Writer) int {
+	c := client.New(config.ClientAddr())
+
+	codeCh := make(chan string, 1)
+	cbLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	defer cbLn.Close()
+	redirect := "http://" + cbLn.Addr().String() + "/cb"
+
+	manifest, err := c.Manifest(redirect)
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+
+	cbSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if code := r.URL.Query().Get("code"); code != "" {
+			fmt.Fprintln(w, "Piper GitHub App created. You can close this tab.")
+			codeCh <- code
+		}
+	})}
+	go cbSrv.Serve(cbLn)
+	defer cbSrv.Close()
+
+	// Auto-submitting form that POSTs the manifest to GitHub.
+	page := fmt.Sprintf(`<form id="f" action="https://github.com/settings/apps/new" method="post">`+
+		`<input type="hidden" name="manifest" value='%s'></form><script>document.getElementById('f').submit()</script>`,
+		htmlEscape(manifest))
+	formLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	formSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, page)
+	})}
+	go formSrv.Serve(formLn)
+	defer formSrv.Close()
+
+	formURL := "http://" + formLn.Addr().String()
+	fmt.Fprintf(stdout, "Opening %s — approve the App in your browser...\n", formURL)
+	_ = openBrowser(formURL)
+
+	var code string
+	select {
+	case code = <-codeCh:
+	case <-time.After(5 * time.Minute):
+		fmt.Fprintln(stderr, "error: timed out waiting for GitHub App approval")
+		return 1
+	}
+	if err := c.ExchangeGitHub(code); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "GitHub App configured. Install it on your repo, then run: piper app link <name> --repo owner/name")
+	return 0
+}
+
+func htmlEscape(s string) string { return strings.ReplaceAll(s, "'", "&#39;") }
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
+}
+
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper <version|create|deploy|list> [args]")
+	fmt.Fprintln(w, "usage: piper <version|create|deploy|list|app|github> [args]")
 	return 2
 }

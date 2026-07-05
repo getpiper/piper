@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -19,7 +20,9 @@ type Deployerer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
 }
 
-func New(s *store.Store, d Deployerer) http.Handler {
+// onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
+// exchange endpoint, so the daemon can start serving webhooks without a restart.
+func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -28,6 +31,10 @@ func New(s *store.Store, d Deployerer) http.Handler {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" {
 			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if in.Name == "hooks" {
+			http.Error(w, "name reserved", http.StatusBadRequest)
 			return
 		}
 		if in.Port == 0 {
@@ -95,6 +102,63 @@ func New(s *store.Store, d Deployerer) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, dep)
+	})
+	mux.HandleFunc("POST /v1/apps/{name}/link", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Repo   string `json:"repo"`
+			Branch string `json:"branch"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Repo == "" || in.Branch == "" {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := s.UpdateAppRepo(r.PathValue("name"), in.Repo, in.Branch); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /v1/github/manifest", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			RedirectURL string `json:"redirect_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.RedirectURL == "" {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		manifest, err := github.BuildManifest("piper-"+baseDomain, "https://hooks."+baseDomain, in.RedirectURL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"manifest": string(manifest)})
+	})
+	mux.HandleFunc("POST /v1/github/exchange", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Code string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Code == "" {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		creds, err := github.ExchangeCode(r.Context(), githubAPIBase, in.Code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if err := s.SaveGitHubApp(store.GitHubApp{
+			AppID: creds.AppID, PrivateKey: creds.PrivateKeyPEM, WebhookSecret: creds.WebhookSecret,
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if onGitHubApp != nil {
+			onGitHubApp()
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
 }
