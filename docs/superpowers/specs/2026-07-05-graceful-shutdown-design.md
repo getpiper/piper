@@ -51,21 +51,38 @@ Confirmed non-issues, recorded so they are not re-litigated:
   releases the `:80`/`:443` binds synchronously. The fix is to guarantee it runs
   in a deterministic order, not to change it.
 
-## Approach — drain, don't cancel
+## Approach — drain, then cancel
 
-On signal, **drain** in-flight deploys (let them reach a consistent recorded
-state) rather than hard-cancel them mid-container. The webhook path runs on
-`context.Background()` and isn't wired for cancellation anyway; draining is both
-simpler and produces a cleaner recorded state. Draining is bounded by a single
-shutdown budget — if a deploy overruns, the process exits regardless and the
-supervisor's `SIGKILL` (past `TimeoutStopSec`) is the backstop.
+Shutdown uses a fixed 20-second application budget split into two phases:
+
+1. **Drain (15 seconds).** Stop accepting API and webhook requests, then allow
+   active requests and webhook deploys to finish normally.
+2. **Cancel and clean up (up to 5 seconds).** Cancel webhook deploy contexts,
+   force-close HTTP servers that did not drain, and wait only until the overall
+   deadline for deployment cleanup. Then release Caddy and the store and exit.
+
+This keeps the clean-state benefit of draining for work that finishes promptly,
+but makes the application timeout authoritative. A stuck deploy cannot keep
+`piperd` alive indefinitely when it is run directly rather than by a supervisor.
+The supervisor's `SIGKILL` after `TimeoutStopSec` remains a final backstop, not
+the mechanism that normally enforces the application deadline.
 
 ## Changes
 
 ### `internal/webhook`
-Promote `Handler.Wait()` from "test-only" to real API — it already blocks on the
-`wg` that tracks in-flight deploy goroutines. No behavior change; only the doc
-comment and intent change.
+
+Give `Handler` a cancellable lifecycle context. Each deploy goroutine uses that
+context instead of `context.Background()`, so shutdown cancellation reaches the
+source provider, deploy orchestrator, and Docker runtime operations.
+
+Promote the existing drain hook into lifecycle API with two operations:
+
+- `WaitContext(ctx) bool` waits for all tracked goroutines and returns whether
+  they drained before `ctx` expired.
+- `Cancel()` cancels the lifecycle context and is safe to call more than once.
+
+`WaitContext` must use a completion channel around `wg.Wait()` and select on the
+caller's context. It must never block shutdown after the caller's deadline.
 
 ### `cmd/piperd` — `webhookStarter`
 Retain the `*http.Server` and `*webhook.Handler` currently created as locals in
@@ -75,37 +92,53 @@ Retain the `*http.Server` and `*webhook.Handler` currently created as locals in
 func (w *webhookStarter) stop(ctx context.Context) {
     if w.srv == nil { return }   // never started (no GitHub App configured)
     _ = w.srv.Shutdown(ctx)      // stop accepting new webhook deliveries
-    w.handler.Wait()             // drain in-flight deploys
 }
 ```
 
 `stop` is a no-op when the webhook was never started (relay-less mode, or no
-stored GitHub App).
+stored GitHub App). Draining and cancellation remain explicit operations on the
+handler so `cmd/piperd` can coordinate them against the two shutdown phases.
+
+### `internal/deploy` — cancellation cleanup
+
+Deployment already passes its context through build, run, health-check, source,
+and reporting operations. Preserve that propagation. When cancellation happens
+after a container may have been created, stop that partial container with a
+short cleanup context derived with `context.WithoutCancel` and bounded by the
+remaining cleanup phase. Do not reuse the already-cancelled deployment context
+for cleanup.
+
+Persist a terminal `"failed"` deployment when the existing identifiers permit
+it. Do not add a `"building"` state or change the status vocabulary.
 
 ### `cmd/piperd` — ordered, bounded shutdown
 Extract the teardown into a testable helper (mirroring the existing
 `runRenewLoop` seam), invoked from `main()` after `<-ctx.Done()`:
 
 ```go
-const shutdownTimeout = 20 * time.Second
+const (
+    shutdownTimeout = 20 * time.Second
+    drainTimeout    = 15 * time.Second
+)
 
 func shutdown(api *http.Server, wh *webhookStarter, mgr *caddy.Manager, st *store.Store) {
-    ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-    defer cancel()
-    _ = api.Shutdown(ctx) // stop accepting API requests, drain in-flight
-    wh.stop(ctx)          // stop accepting webhooks, drain in-flight deploys
-    mgr.Stop()            // release :80/:443
-    _ = st.Close()        // close SQLite
+    // Establish one overall deadline and a shorter graceful-drain deadline.
+    // Stop both HTTP entry points, wait for webhook work during the drain
+    // phase, then cancel and wait only for the time remaining overall.
+    // Finally release Caddy and SQLite even if a worker did not cooperate.
 }
 ```
 
 `main()` replaces the current trailing `srv.Shutdown(context.Background())` +
 `defer mgr.Stop()` / `defer st.Close()` with a single `shutdown(...)` call, then
-`os.Exit(0)`. Ordering is now explicit: accept-stop and deploy-drain happen
-before Caddy and the store are torn down, so nothing races a live deploy.
+`os.Exit(0)`. Ordering is now explicit: stop accepting, attempt a graceful
+drain, cancel remaining work, then release Caddy and the store. Cooperative
+workers finish before teardown; a worker that ignores cancellation cannot delay
+process exit beyond the application budget.
 
-`shutdownTimeout` is a **fixed 20s constant**, comfortably under systemd's
-default `TimeoutStopSec=90s`. **No new env var or config** — honoring the epic's
+`shutdownTimeout` remains a **fixed 20s constant**, comfortably under systemd's
+default `TimeoutStopSec=90s`. `drainTimeout` reserves the final 5 seconds for
+cancellation and cleanup. **No new env var or config** — honoring the epic's
 "config unchanged" constraint.
 
 Callers that started Caddy conditionally (`PIPER_SKIP_CADDY`) or ran without the
@@ -114,14 +147,16 @@ the absent pieces.
 
 ## Testing (TDD, failing test first)
 
-1. **`internal/webhook`** — dispatch a deploy backed by a fake `Deployer` that
-   blocks on a channel; assert `Wait()` does not return until the deploy
-   completes (drain, not drop). Unblock the fake, then confirm `Wait()` returns
-   and the deploy ran to its terminal state.
-2. **`cmd/piperd`** — unit-test the extracted `shutdown` helper with fakes/stubs
-   for the API server, webhook starter, Caddy manager, and store: assert each is
-   torn down in order, in-flight work is drained, and the helper returns within
-   the budget.
+1. **`internal/webhook`** — prove `WaitContext` reports a normal drain, reports
+   deadline expiry without blocking, and `Cancel` reaches a blocking fake
+   deployer's context.
+2. **`internal/deploy`** — cancel during health-check/run and prove a partial
+   container is stopped with a live, bounded cleanup context and a terminal
+   failure is recorded.
+3. **`cmd/piperd`** — unit-test the extracted shutdown coordinator with an
+   injectable clock/timeouts: normal work drains before cancellation; stuck
+   work is cancelled at the drain deadline; Caddy/store teardown still occurs;
+   and the coordinator returns at the overall deadline.
 
 `make test` and `make cross` must stay green.
 
