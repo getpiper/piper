@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/getpiper/piper/internal/client"
 	"github.com/getpiper/piper/internal/config"
@@ -186,7 +187,13 @@ func githubSetup(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "Opening %s — approve the App in your browser...\n", formURL)
 	_ = openBrowser(formURL)
 
-	code := <-codeCh
+	var code string
+	select {
+	case code = <-codeCh:
+	case <-time.After(5 * time.Minute):
+		fmt.Fprintln(stderr, "error: timed out waiting for GitHub App approval")
+		return 1
+	}
 	if err := c.ExchangeGitHub(code); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1

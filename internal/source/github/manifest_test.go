@@ -35,6 +35,27 @@ func TestBuildManifest(t *testing.T) {
 	}
 }
 
+func TestBuildManifestSlugsName(t *testing.T) {
+	raw, err := BuildManifest("piper-apps.example.com", "https://hooks.apps.example.com", "http://localhost/cb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := m["name"].(string)
+	if strings.ContainsAny(name, ".") {
+		t.Errorf("name %q contains a dot; GitHub App names must be slugged", name)
+	}
+	if name != "piper-apps-example-com" {
+		t.Errorf("name = %q, want piper-apps-example-com", name)
+	}
+	if len(name) > 34 {
+		t.Errorf("name %q exceeds GitHub's 34-char limit", name)
+	}
+}
+
 func TestExchangeCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/app-manifests/") || !strings.HasSuffix(r.URL.Path, "/conversions") {
