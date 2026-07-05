@@ -40,12 +40,12 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
 
 Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the Plan-2 tunnel to `hooks.<base>`; status reported to GitHub.
 
-- ✅ `source` — provider seam (Event/Kind/Status + Provider interface) — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `source/github` — App JWT + installation token, webhook parse (HMAC), tarball fetch, Deployments API, manifest onboarding — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `piperd` — webhook served over the tunnel in relay mode — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#32](https://github.com/getpiper/piper/issues/32)
+- ✅ `source` — provider seam (Event/Kind/Status + Provider interface) — [#31](https://github.com/getpiper/piper/pull/31)
+- ✅ `source/github` — App JWT + installation token, webhook parse (HMAC), tarball fetch, Deployments API, manifest onboarding — [#31](https://github.com/getpiper/piper/pull/31)
+- ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#31](https://github.com/getpiper/piper/pull/31)
+- ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#31](https://github.com/getpiper/piper/pull/31)
+- ✅ `piperd` — webhook served over the tunnel in relay mode — [#31](https://github.com/getpiper/piper/pull/31)
+- ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#50](https://github.com/getpiper/piper/pull/50)
 
 ## Always-green gates
 
