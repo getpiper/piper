@@ -79,6 +79,51 @@ func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 	return dep, nil
 }
 
+func (c *Client) LinkApp(name, repo, branch string) error {
+	body, _ := json.Marshal(map[string]string{"repo": repo, "branch": branch})
+	resp, err := c.http.Post(c.base+"/v1/apps/"+name+"/link", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("link", resp)
+	}
+	return nil
+}
+
+func (c *Client) Manifest(redirectURL string) (string, error) {
+	body, _ := json.Marshal(map[string]string{"redirect_url": redirectURL})
+	resp, err := c.http.Post(c.base+"/v1/github/manifest", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", responseError("manifest", resp)
+	}
+	var out struct {
+		Manifest string `json:"manifest"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Manifest, nil
+}
+
+func (c *Client) ExchangeGitHub(code string) error {
+	body, _ := json.Marshal(map[string]string{"code": code})
+	resp, err := c.http.Post(c.base+"/v1/github/exchange", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("exchange", resp)
+	}
+	return nil
+}
+
 func responseError(action string, resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

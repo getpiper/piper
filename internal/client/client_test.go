@@ -130,6 +130,51 @@ func TestDeploy(t *testing.T) {
 	}
 }
 
+func TestLinkApp(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	if err := c.LinkApp("blog", "alice/blog", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v1/apps/blog/link" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if !strings.Contains(gotBody, `"alice/blog"`) || !strings.Contains(gotBody, `"main"`) {
+		t.Fatalf("body = %s", gotBody)
+	}
+}
+
+func TestManifestAndExchange(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/github/manifest":
+			io.WriteString(w, `{"manifest":"{\"name\":\"x\"}"}`)
+		case "/v1/github/exchange":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	m, err := c.Manifest("http://localhost:5000/cb")
+	if err != nil || !strings.Contains(m, `"name"`) {
+		t.Fatalf("Manifest m=%q err=%v", m, err)
+	}
+	if err := c.ExchangeGitHub("thecode"); err != nil {
+		t.Fatalf("ExchangeGitHub: %v", err)
+	}
+}
+
 func TestClientMethodsReportHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusTeapot)
