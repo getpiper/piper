@@ -41,7 +41,7 @@ posted back to GitHub as a Deployment status.
 | Role | What it needs |
 | --- | --- |
 | **Relay** | A host with a **public IP**, inbound `:443` and `:7000` open. A cheap VPS is fine. |
-| **Box** (`piperd`) | Docker running, `caddy` on `PATH`. A Pi, a laptop, anything. Does **not** need a public IP. |
+| **Box** (`piperd`) | Docker running. A Pi, a laptop, anything. Does **not** need a public IP. (Caddy is embedded in `piperd` — nothing to install.) |
 | **Operator** | The `piper` CLI + a browser (for the GitHub App approval redirect). Usually the box itself. |
 
 **Accounts / assets:**
