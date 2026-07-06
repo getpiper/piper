@@ -282,3 +282,26 @@ func TestAgentInstallDropsUnitAndEnv(t *testing.T) {
 		t.Errorf("env file was clobbered on re-run: got %q", string(got))
 	}
 }
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Dir(scriptPath(t))
+}
+
+func TestInstallDocumentation(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(b)
+	for _, want := range []string{
+		"raw.githubusercontent.com/getpiper/piper/main/install.sh",
+		"--cli-only",
+		"--rc",
+		"PIPER_ADDR",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README missing %q", want)
+		}
+	}
+}

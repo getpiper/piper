@@ -20,6 +20,45 @@ network — solving the NAT / CGNAT / dynamic-IP problem that kills most homelab
 - `piper-relay` — the optional cloud relay (SNI passthrough + tunnel server). Always self-deployable; a hosted instance is offered purely for convenience and runs this same code.
 - `piper` — the CLI.
 
+## Install
+
+One line gets a Linux box to a running `piperd` service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+```
+
+It detects your OS/arch, downloads the matching release binaries, verifies their
+`checksums.txt`, installs `piperd` + `piper` to `/usr/local/bin`, drops the
+systemd unit and an `/etc/piper/piperd.env` skeleton (never overwriting an edited
+one), and runs `systemctl enable --now piperd`. Re-run any time to upgrade.
+
+Install just the CLI (Linux or macOS) — for driving a remote daemon from your
+workstation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --cli-only
+```
+
+As root this installs `piper` to `/usr/local/bin`; unprivileged, to
+`~/.local/bin`. Point it at your box with `PIPER_ADDR`:
+
+```bash
+PIPER_ADDR=http://your-box:8088 piper list
+```
+
+Only pre-release builds exist for now, so add `--rc` to install the latest
+release candidate:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --rc
+```
+
+The full service install is Linux + systemd; on macOS use `--cli-only` (a
+launchd unit is tracked in [#56](https://github.com/getpiper/piper/issues/56)).
+Shell completions and a Homebrew tap are planned follow-ups. Prefer to build from
+source, or wire your own automation? The manual steps below still work.
+
 ## Run the agent as a service
 
 On the box that runs your apps (a Pi, a VPS, a laptop), install the static `piperd`
