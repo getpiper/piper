@@ -225,3 +225,60 @@ func TestDefaultNoStableReleaseErrors(t *testing.T) {
 		t.Errorf("expected message pointing to --rc, got:\n%s", out)
 	}
 }
+
+func TestAgentInstallDropsUnitAndEnv(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("agent install path targets Linux/systemd")
+	}
+	osTok, archTok := hostOSArch()
+	tag := "v9.9.9"
+	ver := strings.TrimPrefix(tag, "v")
+	assets := map[string][]byte{
+		fmt.Sprintf("piperd_%s_%s_%s.tar.gz", ver, osTok, archTok): tarGz(t, "piperd", "fake-piperd"),
+		fmt.Sprintf("piper_%s_%s_%s.tar.gz", ver, osTok, archTok):  tarGz(t, "piper", "fake-piper"),
+		"piperd.service":     []byte("[Service]\nExecStart=/usr/local/bin/piperd\n"),
+		"piperd.env.example": []byte("#PIPER_API_ADDR=127.0.0.1:8088\n"),
+	}
+	srv := newReleaseServer(t, assets, nil)
+
+	prefix := t.TempDir()
+	unitDir := t.TempDir()
+	envDir := t.TempDir()
+	env := map[string]string{
+		"PIPER_BASE_URL":    srv.URL,
+		"PIPER_VERSION":     tag,
+		"PIPER_PREFIX":      prefix,
+		"PIPER_SYSTEMD_DIR": unitDir,
+		"PIPER_ENV_DIR":     envDir,
+	}
+	out, err := run(t, []string{"--no-enable"}, env)
+	if err != nil {
+		t.Fatalf("agent install failed: %v\n%s", err, out)
+	}
+	for _, p := range []string{
+		filepath.Join(prefix, "piperd"),
+		filepath.Join(prefix, "piper"),
+		filepath.Join(unitDir, "piperd.service"),
+		filepath.Join(envDir, "piperd.env"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("missing %s: %v\n%s", p, err, out)
+		}
+	}
+
+	// Re-run must not clobber an operator-edited env file.
+	edited := "PIPER_BASE_DOMAIN=example.com\n"
+	if err := os.WriteFile(filepath.Join(envDir, "piperd.env"), []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, []string{"--no-enable"}, env); err != nil {
+		t.Fatalf("re-run failed: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(filepath.Join(envDir, "piperd.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != edited {
+		t.Errorf("env file was clobbered on re-run: got %q", string(got))
+	}
+}

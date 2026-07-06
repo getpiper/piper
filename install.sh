@@ -125,11 +125,44 @@ install_cli() { # install_cli OS ARCH TAG
 	esac
 }
 
+install_agent() { # install_agent OS ARCH TAG
+	os="$1"; arch="$2"; tag="$3"
+	[ "$os" = linux ] || die "the full agent install needs Linux + systemd; on macOS use --cli-only (launchd support tracked in #56)"
+	prefix="${PIPER_PREFIX:-/usr/local/bin}"
+	if [ -z "$PIPER_PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
+		die "the full agent install needs root — re-run with sudo, or use --cli-only"
+	fi
+	mkdir -p "$prefix"
+	download_verify piperd "$tag" "$os" "$arch" "$prefix"
+	download_verify piper "$tag" "$os" "$arch" "$prefix"
+
+	mkdir -p "$PIPER_SYSTEMD_DIR"
+	fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.service" \
+		"$PIPER_SYSTEMD_DIR/piperd.service" || die "download failed: piperd.service"
+
+	mkdir -p "$PIPER_ENV_DIR"
+	chmod 0700 "$PIPER_ENV_DIR" 2>/dev/null || true
+	if [ ! -f "$PIPER_ENV_DIR/piperd.env" ]; then
+		fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.env.example" \
+			"$PIPER_ENV_DIR/piperd.env" || die "download failed: piperd.env.example"
+		chmod 0600 "$PIPER_ENV_DIR/piperd.env" 2>/dev/null || true
+	fi
+	echo "installed piperd + piper $tag -> $prefix"
+
+	if [ -z "$no_enable" ] && have systemctl; then
+		systemctl daemon-reload
+		systemctl enable --now piperd
+		echo "piperd service enabled and started"
+	else
+		echo "note: service not enabled (no systemctl or --no-enable); start with: systemctl enable --now piperd"
+	fi
+}
+
 os="$(detect_os)"
 arch="$(detect_arch)"
 tag="$(resolve_version)"
 if [ -n "$cli_only" ]; then
 	install_cli "$os" "$arch" "$tag"
 else
-	die "full agent install not implemented yet"
+	install_agent "$os" "$arch" "$tag"
 fi
