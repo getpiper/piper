@@ -64,8 +64,8 @@ The full service install is Linux + systemd; on macOS use `--cli-only` (a
 launchd unit is tracked in [#56](https://github.com/getpiper/piper/issues/56)).
 Shell completions and a Homebrew tap are planned follow-ups.
 
-Prefer to build from source, run the relay as a service, or wire your own automation?
-See [`docs/manual-setup.md`](docs/manual-setup.md).
+Prefer to build from source, run piperd in Docker via Compose, run the relay as a
+service, or wire your own automation? See [`docs/manual-setup.md`](docs/manual-setup.md).
 
 ## Git deploys
 
