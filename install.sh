@@ -67,10 +67,25 @@ sha256_of() { # sha256_of FILE -> hash
 	else die "need sha256sum or shasum"; fi
 }
 
-# resolve_version echoes the release tag to install (stub: explicit only).
+# first_tag reads a GitHub releases JSON body on stdin and echoes the first
+# tag_name. grep -o isolates each match (robust to pretty or compact JSON);
+# head -n1 takes the newest (GitHub lists newest first).
+first_tag() {
+	grep -o '"tag_name": *"[^"]*"' | head -n1 | sed -E 's/.*"([^"]+)"$/\1/'
+}
+
+# resolve_version echoes the release tag to install.
 resolve_version() {
-	[ -n "$PIPER_VERSION" ] || die "no version set"
-	echo "$PIPER_VERSION"
+	[ -n "$PIPER_VERSION" ] && { echo "$PIPER_VERSION"; return; }
+	if [ -n "$use_rc" ]; then
+		tag="$(fetch_stdout "$PIPER_API_URL/repos/$PIPER_REPO/releases" | first_tag)" || true
+		[ -n "${tag:-}" ] || die "could not resolve latest pre-release from GitHub"
+		echo "$tag"
+	else
+		tag="$(fetch_stdout "$PIPER_API_URL/repos/$PIPER_REPO/releases/latest" | first_tag)" || true
+		[ -n "${tag:-}" ] || die "no stable release yet — re-run with --rc to install the latest pre-release"
+		echo "$tag"
+	fi
 }
 
 # download_verify NAME TAG OS ARCH DESTDIR

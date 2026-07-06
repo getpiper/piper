@@ -162,3 +162,66 @@ func TestChecksumMismatchAborts(t *testing.T) {
 		t.Errorf("expected checksum error message, got:\n%s", out)
 	}
 }
+
+// newAPIServer serves GitHub-shaped release JSON at /repos/{repo}/releases and
+// /repos/{repo}/releases/latest. latestTag may be "" to simulate no stable
+// release (404 on /latest). allTags lists newest-first for the /releases list.
+func newAPIServer(t *testing.T, latestTag string, allTags []string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			if latestTag == "" {
+				http.NotFound(w, r)
+				return
+			}
+			fmt.Fprintf(w, `{"tag_name": %q}`, latestTag)
+		case strings.HasSuffix(r.URL.Path, "/releases"):
+			parts := make([]string, len(allTags))
+			for i, tg := range allTags {
+				parts[i] = fmt.Sprintf(`{"tag_name": %q, "prerelease": true}`, tg)
+			}
+			fmt.Fprintf(w, "[%s]", strings.Join(parts, ","))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestResolveRCPicksNewestPrerelease(t *testing.T) {
+	osTok, archTok := hostOSArch()
+	tag := "v0.2.0-rc.1"
+	archive := fmt.Sprintf("piper_%s_%s_%s.tar.gz", strings.TrimPrefix(tag, "v"), osTok, archTok)
+	dl := newReleaseServer(t, map[string][]byte{archive: tarGz(t, "piper", "x")}, nil)
+	api := newAPIServer(t, "", []string{tag, "v0.1.0-rc.1"})
+
+	prefix := t.TempDir()
+	out, err := run(t, []string{"--cli-only", "--rc", "--no-enable"}, map[string]string{
+		"PIPER_BASE_URL": dl.URL,
+		"PIPER_API_URL":  api.URL,
+		"PIPER_PREFIX":   prefix,
+	})
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(prefix, "piper")); err != nil {
+		t.Fatalf("piper (from %s) not installed: %v\n%s", tag, err, out)
+	}
+}
+
+func TestDefaultNoStableReleaseErrors(t *testing.T) {
+	api := newAPIServer(t, "", []string{"v0.1.0-rc.1"}) // no stable
+	out, err := run(t, []string{"--cli-only", "--no-enable"}, map[string]string{
+		"PIPER_BASE_URL": "http://127.0.0.1:0",
+		"PIPER_API_URL":  api.URL,
+		"PIPER_PREFIX":   t.TempDir(),
+	})
+	if err == nil {
+		t.Fatalf("expected error when no stable release exists:\n%s", out)
+	}
+	if !strings.Contains(out, "--rc") {
+		t.Errorf("expected message pointing to --rc, got:\n%s", out)
+	}
+}
