@@ -19,6 +19,48 @@ func freeAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
+// The base (LAN, non-WithHTTPS) config is plain HTTP: automatic HTTPS must be
+// disabled so adding a host-matched route provisions no internal cert and
+// stands up no :80 redirect server. Plan 1 is HTTP-only on :80.
+func TestBaseConfigDisablesAutomaticHTTPSOnLAN(t *testing.T) {
+	o := &managerOpts{httpListen: ":80"}
+	base := o.baseConfig()
+
+	srv := base["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)["piper"].(map[string]any)
+	ah, ok := srv["automatic_https"].(map[string]any)
+	if !ok {
+		t.Fatalf("base config should set automatic_https on the piper server, got %v", srv["automatic_https"])
+	}
+	if ah["disable"] != true {
+		t.Fatalf("automatic_https.disable should be true on the LAN path, got %v", ah["disable"])
+	}
+}
+
+// A host-matched route must apply on a non-:80 http port without Caddy trying
+// to bind :80 for an auto-HTTPS redirect server — the exact case #40's test had
+// to sidestep. With automatic HTTPS disabled the reload succeeds regardless of
+// whether :80 is bindable.
+func TestUpsertRouteOnNon80PortApplies(t *testing.T) {
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	admin := "http://" + freeAddr(t)
+	httpListen := freeAddr(t) // non-:80
+	m, err := StartManager(admin, httpListen)
+	if err != nil {
+		t.Fatalf("StartManager: %v", err)
+	}
+	defer m.Stop()
+
+	c := NewClient(admin)
+	if err := c.UpsertRoute("app.piper.localhost", 8080); err != nil {
+		t.Fatalf("UpsertRoute on non-:80 port: %v", err)
+	}
+}
+
 // StartManager must run Caddy in-process: with PATH emptied (so no external
 // `caddy` binary is reachable) it still brings up a live admin API serving the
 // base config we built.
