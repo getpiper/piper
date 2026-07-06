@@ -54,7 +54,7 @@ uses a **per-user GitHub App** you create yourself — the private key and webho
 secret never leave your box.
 
 ```
-piper github setup                                   # create the GitHub App (one-time)
+piper github setup [--org name]                      # create the GitHub App (one-time; use --org for org-owned apps)
 # install the App on your repo in GitHub, then:
 piper app link myapp --repo owner/name --branch main # bind the repo to an app
 ```

@@ -225,11 +225,12 @@ doesn't, fix it here before adding GitHub — the git path rides these same rail
 
 Run this **as the operator, with a browser available** (typically on the box, or
 tunnel `127.0.0.1:8088` to your laptop). It asks piperd for a GitHub App manifest,
-opens a browser to create the App under *your* account, catches the redirect, and
+opens a browser to create the App under *your* account (or under an organization if
+`--org <name>` is passed), catches the redirect, and
 stores the App ID + private key + webhook secret **on the box** (they never leave it).
 
 ```bash
-./bin/piper github setup
+./bin/piper github setup [--org <name>]
 #   Opening http://127.0.0.1:xxxxx — approve the App in your browser...
 #   (browser: GitHub "Create App" screen → Create; it redirects back)
 #   GitHub App configured. Install it on your repo, then run: piper app link <name> --repo owner/name

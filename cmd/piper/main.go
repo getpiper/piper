@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -16,6 +17,8 @@ import (
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/version"
 )
+
+var openBrowserFn = openBrowser
 
 func main() {
 	if code := run(os.Args[1:], os.Stdout, os.Stderr); code != 0 {
@@ -132,16 +135,26 @@ func cmdApp(args []string, stdout, stderr io.Writer) int {
 
 func cmdGithub(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "setup" {
-		fmt.Fprintln(stderr, "usage: piper github setup")
+		fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
 		return 2
 	}
-	return githubSetup(stdout, stderr)
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	org := fs.String("org", "", "GitHub organization name")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
+		return 2
+	}
+	return githubSetup(*org, stdout, stderr)
 }
 
 // githubSetup drives the GitHub App manifest flow: it asks piperd for a manifest,
 // serves a tiny auto-submitting form that POSTs it to GitHub, catches the
 // redirect ?code=, and exchanges it for App credentials stored on the box.
-func githubSetup(stdout, stderr io.Writer) int {
+func githubSetup(org string, stdout, stderr io.Writer) int {
 	c := client.New(config.ClientAddr())
 
 	codeCh := make(chan string, 1)
@@ -168,10 +181,15 @@ func githubSetup(stdout, stderr io.Writer) int {
 	go cbSrv.Serve(cbLn)
 	defer cbSrv.Close()
 
+	actionURL := "https://github.com/settings/apps/new"
+	if org != "" {
+		actionURL = fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new", url.PathEscape(org))
+	}
+
 	// Auto-submitting form that POSTs the manifest to GitHub.
-	page := fmt.Sprintf(`<form id="f" action="https://github.com/settings/apps/new" method="post">`+
+	page := fmt.Sprintf(`<form id="f" action="%s" method="post">`+
 		`<input type="hidden" name="manifest" value='%s'></form><script>document.getElementById('f').submit()</script>`,
-		htmlEscape(manifest))
+		htmlEscape(actionURL), htmlEscape(manifest))
 	formLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -183,7 +201,7 @@ func githubSetup(stdout, stderr io.Writer) int {
 
 	formURL := "http://" + formLn.Addr().String()
 	fmt.Fprintf(stdout, "Opening %s — approve the App in your browser...\n", formURL)
-	_ = openBrowser(formURL)
+	_ = openBrowserFn(formURL)
 
 	var code string
 	select {
