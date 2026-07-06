@@ -26,6 +26,7 @@ jobs:
               - 'go.sum'
               - 'Makefile'
               - '.github/workflows/ci.yml'
+              - '.goreleaser.yaml'
 
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.code == 'true'
@@ -53,3 +54,11 @@ jobs:
       - name: cross-compile (no-cgo arm64)
         if: steps.changes.outputs.code == 'true'
         run: make cross
+
+      - name: goreleaser check
+        if: steps.changes.outputs.code == 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
