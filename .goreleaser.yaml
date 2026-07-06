@@ -1,0 +1,73 @@
+version: 2
+
+project_name: piper
+
+builds:
+  - id: piperd
+    main: ./cmd/piperd
+    binary: piperd
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: piper
+    main: ./cmd/piper
+    binary: piper
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: piper-relay
+    main: ./cmd/piper-relay
+    binary: piper-relay
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: piperd
+    ids: [piperd]
+    name_template: "piperd_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+  - id: piper
+    ids: [piper]
+    name_template: "piper_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+  - id: piper-relay
+    ids: [piper-relay]
+    name_template: "piper-relay_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  extra_files:
+    - glob: packaging/systemd/piperd.service
+    - glob: packaging/systemd/piper-relay.service
+    - glob: packaging/systemd/piperd.env.example

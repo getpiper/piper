@@ -151,7 +151,10 @@ token — it goes to the box next.
 wildcard cert, loads it into Caddy on `:443`, dials the relay tunnel, and (once a
 GitHub App exists) serves webhooks at `hooks.<base>`.
 
-Pick **one** TLS path.
+Pick **one** TLS path. The env vars below can be exported for a foreground run
+(handy while walking this runbook, since logs stream to your terminal) or, for a
+box that should survive reboots, dropped into `/etc/piper/piperd.env` and started
+via the systemd unit (see [Run as a service](#run-piperd-as-a-service) below).
 
 ### Option 1 — ACME DNS-01 (Cloudflare), the real path
 
@@ -182,6 +185,29 @@ export PIPER_DATA_DIR=$HOME/.piper
 
 ./bin/piperd
 ```
+
+### Run piperd as a service
+
+For anything past a one-off test, run `piperd` under systemd so it comes back on
+boot and restarts on failure. Put the TLS/relay env from the option above into
+`/etc/piper/piperd.env` (mode `0600`) instead of exporting it, then install the
+unit. State lives at `PIPER_DATA_DIR=/var/lib/piper` (set by the unit, not `$HOME`):
+
+```bash
+sudo install -m 0755 bin/piperd /usr/local/bin/piperd
+sudo install -m 0644 packaging/systemd/piperd.service /etc/systemd/system/piperd.service
+sudo install -d -m 0700 /etc/piper
+sudo install -m 0600 packaging/systemd/piperd.env.example /etc/piper/piperd.env
+# edit /etc/piper/piperd.env — add PIPER_RELAY_ADDR, PIPER_ACME_EMAIL, etc.
+sudo systemctl daemon-reload
+sudo systemctl enable --now piperd
+sudo systemctl status piperd
+sudo journalctl -u piperd -n 50 --no-pager
+```
+
+The unit runs as a `DynamicUser` in the `docker` group and binds `:80`/`:443` via
+`CAP_NET_BIND_SERVICE` — no root. Apply later env edits with
+`sudo systemctl restart piperd`.
 
 **Health checks before moving on:**
 
@@ -288,11 +314,14 @@ should appear.
 ## Teardown
 
 ```bash
-# Box: stop piperd (Ctrl-C). Piper images are tagged piper/<app>:<ts>; containers
-# get auto-generated names, so clean up by image ancestor, per app:
+# Box: stop piperd. Foreground run: Ctrl-C. Managed service:
+sudo systemctl disable --now piperd
+sudo systemctl clean --what=state piperd    # drops /var/lib/piper
+# Piper images are tagged piper/<app>:<ts>; containers get auto-generated names,
+# so clean up by image ancestor, per app:
 docker rm -f $(docker ps -aq --filter ancestor=piper/myapp) 2>/dev/null
 docker images --filter=reference='piper/*' -q | xargs -r docker rmi -f
-rm -rf "$PIPER_DATA_DIR"          # drops apps, links, and stored GitHub App creds
+rm -rf "$PIPER_DATA_DIR"          # foreground run only; drops apps, links, and stored GitHub App creds
 
 # Relay: stop and disable the service; remove its persistent enrollment state.
 sudo systemctl disable --now piper-relay
