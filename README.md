@@ -59,10 +59,14 @@ launchd unit is tracked in [#56](https://github.com/getpiper/piper/issues/56)).
 Shell completions and a Homebrew tap are planned follow-ups. Prefer to build from
 source, or wire your own automation? The manual steps below still work.
 
-## Run the agent as a service
+## Run the agent as a service (manual / from source)
 
-On the box that runs your apps (a Pi, a VPS, a laptop), install the static `piperd`
-binary and the shipped systemd unit so the agent runs headless and comes back on boot:
+**Skip this if you used the one-liner above** — it already does everything here for
+you. This is the manual equivalent, for building from source or wiring your own
+automation. On the box that runs your apps (a Pi, a VPS, a laptop), install the static
+`piperd` binary and the shipped systemd unit so the agent runs headless and comes back
+on boot (`install` is the coreutils command — copy-into-place with a mode, needing root
+to write these system paths):
 
 ```bash
 sudo install -m 0755 bin/piperd /usr/local/bin/piperd
