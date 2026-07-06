@@ -35,11 +35,18 @@ func WithHTTPS(listen string) Option {
 // baseConfig builds the Caddy JSON bootstrap config for these options.
 func (o *managerOpts) baseConfig() map[string]any {
 	listens := []string{o.httpListen}
-	piper := map[string]any{"listen": listens, "routes": []any{}}
+	// LAN mode is plain HTTP on :80: disable automatic HTTPS so a host-matched
+	// route provisions no internal cert and stands up no :80 redirect server.
+	// The relay/TLS path (WithHTTPS) owns certs and disables it for the same
+	// reason.
+	piper := map[string]any{
+		"listen":          listens,
+		"routes":          []any{},
+		"automatic_https": map[string]any{"disable": true},
+	}
 	apps := map[string]any{"http": map[string]any{"servers": map[string]any{"piper": piper}}}
 	if o.httpsListen != "" {
 		piper["listen"] = []string{o.httpListen, o.httpsListen}
-		piper["automatic_https"] = map[string]any{"disable": true}
 		piper["tls_connection_policies"] = []any{map[string]any{}}
 		apps["tls"] = map[string]any{"certificates": map[string]any{"load_pem": []any{}}}
 	}
