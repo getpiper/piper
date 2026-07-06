@@ -103,3 +103,164 @@ func TestRunList(t *testing.T) {
 		t.Errorf("stdout = %q", got)
 	}
 }
+
+func TestRunGithubSetupWithOrg(t *testing.T) {
+	// Mock backend endpoints
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/github/manifest" {
+			var body struct {
+				RedirectURL string `json:"redirect_url"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			// Return a fake manifest and store redirect_url for callback trigger
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"manifest": `{"name":"testapp","url":"` + body.RedirectURL + `"}`,
+			})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/github/exchange" {
+			var body struct {
+				Code string `json:"code"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Code != "testcode" {
+				t.Errorf("exchange code = %q, want testcode", body.Code)
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		t.Errorf("unexpected backend request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	// Save and restore openBrowserFn
+	oldOpenBrowser := openBrowserFn
+	defer func() { openBrowserFn = oldOpenBrowser }()
+
+	// Mock openBrowserFn to assert the form action URL and simulate redirection
+	openBrowserFn = func(url string) error {
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Errorf("Get form: %v", err)
+			return err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Errorf("Read form body: %v", err)
+			return err
+		}
+
+		// Ensure the form action targets the org settings apps endpoint
+		expectedAction := `action="https://github.com/organizations/myorg/settings/apps/new"`
+		if !strings.Contains(string(body), expectedAction) {
+			t.Errorf("form HTML does not contain action targeting org: %s", string(body))
+		}
+
+		// Parse the redirect URL from the manifest body
+		bodyStr := string(body)
+		startIdx := strings.Index(bodyStr, `"url":"`)
+		if startIdx == -1 {
+			t.Errorf("form HTML missing redirect url: %s", bodyStr)
+			return nil
+		}
+		endIdx := strings.Index(bodyStr[startIdx+7:], `"`)
+		if endIdx == -1 {
+			t.Errorf("form HTML malformed redirect url: %s", bodyStr)
+			return nil
+		}
+		redirectURL := bodyStr[startIdx+7 : startIdx+7+endIdx]
+
+		// Call the callback endpoint on the server to simulate GitHub redirecting back with ?code=testcode
+		cbResp, err := http.Get(redirectURL + "?code=testcode")
+		if err != nil {
+			t.Errorf("callback GET failed: %v", err)
+			return err
+		}
+		cbResp.Body.Close()
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"github", "setup", "--org", "myorg"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "GitHub App configured") {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+func TestRunGithubSetupDefault(t *testing.T) {
+	// Mock backend endpoints
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/github/manifest" {
+			var body struct {
+				RedirectURL string `json:"redirect_url"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"manifest": `{"name":"testapp","url":"` + body.RedirectURL + `"}`,
+			})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/github/exchange" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	oldOpenBrowser := openBrowserFn
+	defer func() { openBrowserFn = oldOpenBrowser }()
+
+	openBrowserFn = func(url string) error {
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Errorf("Get form: %v", err)
+			return err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Errorf("Read form body: %v", err)
+			return err
+		}
+
+		// Ensure the form action targets the personal settings apps endpoint by default
+		expectedAction := `action="https://github.com/settings/apps/new"`
+		if !strings.Contains(string(body), expectedAction) {
+			t.Errorf("form HTML does not contain action targeting personal: %s", string(body))
+		}
+
+		bodyStr := string(body)
+		startIdx := strings.Index(bodyStr, `"url":"`)
+		if startIdx == -1 {
+			t.Errorf("form HTML missing redirect url: %s", bodyStr)
+			return nil
+		}
+		endIdx := strings.Index(bodyStr[startIdx+7:], `"`)
+		if endIdx == -1 {
+			t.Errorf("form HTML malformed redirect url: %s", bodyStr)
+			return nil
+		}
+		redirectURL := bodyStr[startIdx+7 : startIdx+7+endIdx]
+
+		cbResp, err := http.Get(redirectURL + "?code=testcode")
+		if err != nil {
+			t.Errorf("callback GET failed: %v", err)
+			return err
+		}
+		cbResp.Body.Close()
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"github", "setup"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "GitHub App configured") {
+		t.Errorf("stdout = %q", got)
+	}
+}
