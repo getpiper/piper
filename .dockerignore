@@ -1,0 +1,8 @@
+.git
+bin
+data
+*.sqlite
+*.sqlite-*
+*.db
+*.log
+.DS_Store
