@@ -49,13 +49,13 @@ func repositoryFile(t *testing.T, parts ...string) string {
 }
 
 func TestServiceDocumentation(t *testing.T) {
-	readme := repositoryFile(t, "README.md")
+	manual := repositoryFile(t, "docs", "manual-setup.md")
 	for _, text := range []string{
 		"packaging/systemd/piper-relay.service",
 		"systemctl enable --now piper-relay",
 	} {
-		if !strings.Contains(readme, text) {
-			t.Errorf("README missing %q", text)
+		if !strings.Contains(manual, text) {
+			t.Errorf("docs/manual-setup.md missing %q", text)
 		}
 	}
 
