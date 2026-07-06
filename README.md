@@ -131,15 +131,13 @@ traffic (delivered to `hooks.<your-domain>`); nothing else on the box is exposed
 Standing this up against a real relay, domain, and GitHub App end-to-end:
 [`docs/runbooks/git-deploy-e2e.md`](docs/runbooks/git-deploy-e2e.md).
 
-## Progress & contributing
+## Contributing
 
 - **What's built vs. left:** [`PROGRESS.md`](PROGRESS.md) — a coarse map linking each gap to its issue.
 - **Tracked work:** [GitHub issues](https://github.com/getpiper/piper/issues). Titles carry an `[area]` prefix (e.g. `[agent]`, `[cli]`, `[relay]`); `epic` issues track whole plans. New here? Look for [`good first issue`](https://github.com/getpiper/piper/labels/good%20first%20issue).
 - **How to work in this repo:** [`CLAUDE.md`](CLAUDE.md) — coding principles, branch workflow, and issue conventions.
 
-## Contributing
-
-Trunk-based: `main` is the only long-lived branch. Branch off `main`, open a PR back into it, and squash-merge. See [`CLAUDE.md`](CLAUDE.md) for the full workflow and coding principles.
+Trunk-based: `main` is the only long-lived branch. Branch off `main`, open a PR back into it, and squash-merge.
 
 `main` is protected:
 
