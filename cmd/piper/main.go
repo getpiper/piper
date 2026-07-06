@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -189,7 +190,7 @@ func githubSetup(org string, stdout, stderr io.Writer) int {
 	// Auto-submitting form that POSTs the manifest to GitHub.
 	page := fmt.Sprintf(`<form id="f" action="%s" method="post">`+
 		`<input type="hidden" name="manifest" value='%s'></form><script>document.getElementById('f').submit()</script>`,
-		htmlEscape(actionURL), htmlEscape(manifest))
+		html.EscapeString(actionURL), htmlEscape(manifest))
 	formLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)

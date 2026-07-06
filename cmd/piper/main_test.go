@@ -260,4 +260,7 @@ func TestRunGithubSetupDefault(t *testing.T) {
 	if code := run([]string{"github", "setup"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
+	if got := stdout.String(); !strings.Contains(got, "GitHub App configured") {
+		t.Errorf("stdout = %q", got)
+	}
 }
