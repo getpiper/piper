@@ -67,6 +67,8 @@ snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
 release:
+  # rc/beta/alpha tags publish as pre-releases; a clean vX.Y.Z is the Latest release.
+  prerelease: auto
   extra_files:
     - glob: packaging/systemd/piperd.service
     - glob: packaging/systemd/piper-relay.service
