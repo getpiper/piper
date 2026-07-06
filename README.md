@@ -33,19 +33,25 @@ It detects your OS/arch, downloads the matching release binaries, verifies their
 systemd unit and an `/etc/piper/piperd.env` skeleton (never overwriting an edited
 one), and runs `systemctl enable --now piperd`. Re-run any time to upgrade.
 
-Install just the CLI (Linux or macOS) — for driving a remote daemon from your
-workstation:
+Install just the CLI (Linux or macOS) — for driving `piperd` from another
+machine on the same network (e.g. your laptop and a Pi on the same LAN):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --cli-only
 ```
 
 As root this installs `piper` to `/usr/local/bin`; unprivileged, to
-`~/.local/bin`. Point it at your box with `PIPER_ADDR`:
+`~/.local/bin`. Point it at your box with `PIPER_ADDR` (the daemon's control
+API binds to loopback by default — override `PIPER_API_ADDR` on the box to
+reach it from elsewhere on your LAN):
 
 ```bash
 PIPER_ADDR=http://your-box:8088 piper list
 ```
+
+True remote/internet access — driving a box through the relay tunnel instead
+of a directly reachable address, with real API auth — isn't built yet; see
+[#49](https://github.com/getpiper/piper/issues/49).
 
 Only pre-release builds exist for now, so add `--rc` to install the latest
 release candidate:
@@ -118,6 +124,7 @@ uses a **per-user GitHub App** you create yourself — the private key and webho
 secret never leave your box.
 
 ```
+piper create myapp --port 8080                       # register the app (needed before it can be linked)
 piper github setup [--org name]                      # create the GitHub App (one-time; use --org for org-owned apps)
 # install the App on your repo in GitHub, then:
 piper app link myapp --repo owner/name --branch main # bind the repo to an app

@@ -57,7 +57,7 @@ Goal: piperd installable and self-sustaining on the box (Pi/VPS/laptop) — serv
 - ✅ Native systemd unit (`DynamicUser`+`docker` group, `CAP_NET_BIND_SERVICE`, `StateDirectory`) — [#44](https://github.com/getpiper/piper/issues/44)
 - ⬜ Container image + compose (host `docker.sock`; publish blocked on release pipeline) — [#45](https://github.com/getpiper/piper/issues/45)
 - ✅ One-line `curl … | sh` installer (OS/arch detect, checksum-verified, `--cli-only`/`--rc`) — [#46](https://github.com/getpiper/piper/issues/46)
-- ✅ Standalone `piper` CLI on PATH (`--cli-only`; drives a remote daemon via `PIPER_ADDR`) — [#47](https://github.com/getpiper/piper/issues/47)
+- ✅ Standalone `piper` CLI on PATH (`--cli-only`; drives a `piperd` on another host on the same network via `PIPER_ADDR`) — [#47](https://github.com/getpiper/piper/issues/47)
 - ⬜ launchd plist (best-effort macOS) — [#56](https://github.com/getpiper/piper/issues/56)
 
 ## Always-green gates
