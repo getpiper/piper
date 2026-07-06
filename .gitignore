@@ -9,6 +9,7 @@ bin/
 .env
 .env.*
 !.env.example
+deploy/compose/piperd.env
 
 # local state
 *.sqlite
