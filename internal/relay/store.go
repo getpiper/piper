@@ -37,6 +37,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := ensureAgentAccountColumn(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate agents: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -76,4 +80,32 @@ func (s *Store) Authenticate(token string) (Agent, error) {
 		return Agent{}, err
 	}
 	return ag, nil
+}
+
+// ensureAgentAccountColumn adds agents.account_id if an older DB predates it.
+// CREATE TABLE IF NOT EXISTS can't alter an existing table, so we add the column
+// idempotently and tolerate the "duplicate column" error on already-migrated DBs.
+func ensureAgentAccountColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "account_id" {
+			return nil // already migrated
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE agents ADD COLUMN account_id TEXT`)
+	return err
 }
