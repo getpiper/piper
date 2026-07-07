@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
@@ -15,7 +16,17 @@ import (
 
 // Manager owns the in-process Caddy instance. Caddy is embedded as a library,
 // so no external `caddy` binary is required.
+//
+// Caddy runs as a process-global singleton: caddy.Load and caddy.Stop act on
+// one shared instance, so there can be at most one live Manager per process. A
+// second StartManager would clobber the first's config, and any Stop tears down
+// the shared global — so StartManager enforces the invariant (see managerActive).
 type Manager struct{}
+
+// managerActive is true while a Manager is live. It guards the process-global
+// Caddy singleton so a second StartManager fails loudly instead of silently
+// replacing a running Manager's config.
+var managerActive atomic.Bool
 
 type managerOpts struct {
 	httpListen  string
@@ -59,13 +70,20 @@ func (o *managerOpts) baseConfig() map[string]any {
 // StartManager runs Caddy in-process with an admin-enabled base config: one HTTP
 // server named "piper" on httpListen with empty routes. Options can add a TLS
 // listener (WithHTTPS). Teardown is via Manager.Stop.
+//
+// Caddy is process-global, so at most one Manager may be live at a time;
+// StartManager returns an error if another is already active (see Manager).
 func StartManager(adminBase, httpListen string, opts ...Option) (*Manager, error) {
+	if !managerActive.CompareAndSwap(false, true) {
+		return nil, fmt.Errorf("caddy Manager already active: Caddy is process-global, at most one per process")
+	}
 	o := &managerOpts{httpListen: httpListen, adminAddr: strings.TrimPrefix(adminBase, "http://")}
 	for _, opt := range opts {
 		opt(o)
 	}
 	cfg, _ := json.Marshal(o.baseConfig())
 	if err := caddy.Load(cfg, true); err != nil {
+		managerActive.Store(false)
 		return nil, fmt.Errorf("start embedded caddy: %w", err)
 	}
 	m := &Manager{}
@@ -91,4 +109,5 @@ func waitAdmin(base string, d time.Duration) error {
 
 func (m *Manager) Stop() {
 	_ = caddy.Stop()
+	managerActive.Store(false)
 }
