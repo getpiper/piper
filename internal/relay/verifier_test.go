@@ -34,3 +34,13 @@ func TestFakeVerifierStartPollApprove(t *testing.T) {
 		t.Fatal("Poll(unknown) succeeded, want error")
 	}
 }
+
+func TestGoogleVerifierPollUnknownHandle(t *testing.T) {
+	v, err := NewGoogleVerifier(context.Background(), "client-id.apps.googleusercontent.com", "secret")
+	if err != nil {
+		t.Fatalf("NewGoogleVerifier: %v", err)
+	}
+	if _, err := v.Poll(context.Background(), "never-started"); err == nil {
+		t.Fatal("Poll(unknown) succeeded, want error")
+	}
+}
