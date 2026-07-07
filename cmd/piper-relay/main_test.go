@@ -35,3 +35,22 @@ func TestRunAdminUsage(t *testing.T) {
 		t.Fatal("runAdmin with no username succeeded, want usage error")
 	}
 }
+
+func TestApiAddrIsLoopback(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{":8080", false},
+		{"0.0.0.0:8080", false},
+		{"127.0.0.1:8080", true},
+		{"localhost:8080", true},
+		{"[::1]:8080", true},
+		{"192.168.1.5:8080", false},
+	}
+	for _, c := range cases {
+		if got := apiAddrIsLoopback(c.addr); got != c.want {
+			t.Errorf("apiAddrIsLoopback(%q) = %v, want %v", c.addr, got, c.want)
+		}
+	}
+}

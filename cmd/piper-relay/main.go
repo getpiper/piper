@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,6 +32,27 @@ func atoiOr(s string, def int) int {
 // adminStore is the slice of *relay.Store the admin subcommands need.
 type adminStore interface {
 	DisableAccount(username string) error
+}
+
+// apiAddrIsLoopback reports whether addr binds only the loopback interface.
+// A bare ":8080" or "0.0.0.0:8080" binds all interfaces; "127.0.0.1:8080" /
+// "[::1]:8080" / "localhost:8080" are loopback-only.
+func apiAddrIsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// No port present; treat the whole string as the host.
+		host = addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // runAdmin handles "piper-relay admin <cmd> ...". Currently: disable <username>.
@@ -110,6 +132,10 @@ func main() {
 	} else {
 		log.Print("piper-relay: no PIPER_RELAY_GOOGLE_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
+	}
+
+	if !apiAddrIsLoopback(apiAddr) {
+		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
 	}
 
 	go func() {
