@@ -43,7 +43,10 @@ type Deployment struct {
 type Store struct{ db *sql.DB }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout makes a second writer (e.g. `piperd token create` run
+	// against a live daemon's piper.db) wait for the lock instead of
+	// failing immediately with SQLITE_BUSY.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}

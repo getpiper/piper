@@ -211,6 +211,17 @@ func TestTokenDuplicateLabelRejected(t *testing.T) {
 	}
 }
 
+func TestOpenSetsBusyTimeout(t *testing.T) {
+	s := openTemp(t)
+	var timeout int
+	if err := s.db.QueryRow(`PRAGMA busy_timeout`).Scan(&timeout); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if timeout != 5000 {
+		t.Errorf("busy_timeout = %d, want 5000", timeout)
+	}
+}
+
 func TestListTokens(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.CreateToken("a", "admin"); err != nil {
