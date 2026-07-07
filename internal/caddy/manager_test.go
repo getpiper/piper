@@ -61,6 +61,37 @@ func TestUpsertRouteOnNon80PortApplies(t *testing.T) {
 	}
 }
 
+// Caddy is a process-global singleton (caddy.Load/caddy.Stop act on it), so a
+// second StartManager while one is live would silently clobber the first's
+// config. StartManager must refuse it, and a fresh Start must succeed once the
+// first is Stopped.
+func TestStartManagerRefusesSecondWhileActive(t *testing.T) {
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	m, err := StartManager("http://"+freeAddr(t), freeAddr(t))
+	if err != nil {
+		t.Fatalf("first StartManager: %v", err)
+	}
+
+	if _, err := StartManager("http://"+freeAddr(t), freeAddr(t)); err == nil {
+		m.Stop()
+		t.Fatal("second StartManager while one is active should error, got nil")
+	}
+
+	m.Stop()
+
+	// After Stop the invariant is cleared: a fresh Manager starts fine.
+	m2, err := StartManager("http://"+freeAddr(t), freeAddr(t))
+	if err != nil {
+		t.Fatalf("StartManager after Stop: %v", err)
+	}
+	m2.Stop()
+}
+
 // StartManager must run Caddy in-process: with PATH emptied (so no external
 // `caddy` binary is reachable) it still brings up a live admin API serving the
 // base config we built.
