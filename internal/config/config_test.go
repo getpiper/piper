@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("PIPER_API_ADDR", "")
@@ -48,5 +51,59 @@ func TestLoadRelayFields(t *testing.T) {
 	}
 	if cfg.ACMEEmail != "me@example.com" {
 		t.Errorf("ACMEEmail = %q", cfg.ACMEEmail)
+	}
+}
+
+func TestDefaultDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PIPER_DATA_DIR", "")
+	got := Load().DataDir
+	want := filepath.Join(home, ".piper", "piperd")
+	if got != want {
+		t.Fatalf("DataDir = %q, want %q", got, want)
+	}
+}
+
+func TestLoadClientDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	cc, err := LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.Addr != "http://127.0.0.1:8088" || cc.Token != "" {
+		t.Fatalf("cc = %+v", cc)
+	}
+}
+
+func TestSaveAndLoadClient(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	if err := SaveClient(ClientConfig{Addr: "http://box:8088", Token: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	cc, err := LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.Addr != "http://box:8088" || cc.Token != "secret" {
+		t.Fatalf("cc = %+v", cc)
+	}
+}
+
+func TestLoadClientEnvOverridesFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	if err := SaveClient(ClientConfig{Addr: "http://box:8088", Token: "filetok"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_TOKEN", "envtok")
+	cc, _ := LoadClient()
+	if cc.Token != "envtok" {
+		t.Fatalf("token = %q, want envtok", cc.Token)
 	}
 }

@@ -41,16 +41,27 @@ curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 ```
 
 As root this installs `piper` to `/usr/local/bin`; unprivileged, to
-`~/.local/bin`. Point it at your box with `PIPER_ADDR` (the daemon's control
-API binds to loopback by default — override `PIPER_API_ADDR` on the box to
-reach it from elsewhere on your LAN):
+`~/.local/bin`. The control API requires a bearer token, so mint one on the
+box and log the CLI in first (running `piperd token create` on the box is
+itself the proof you own it — no auth needed for that step). The control API
+binds to loopback by default — override `PIPER_API_ADDR` on the box to reach
+it from elsewhere on your LAN:
 
 ```bash
-PIPER_ADDR=http://your-box:8088 piper list
+# on the box:
+piperd token create --name laptop              # prints a token once
+# on the client:
+piper login --token <token> --addr http://your-box:8088
+piper list                                     # now authenticated
 ```
 
+`piper login` verifies the token against the box and saves it (with the
+address) to `~/.piper/piper/config.json`, mode `0600`; `PIPER_TOKEN` /
+`PIPER_ADDR` override the saved values per command. Manage tokens on the box
+with `piperd token list` and `piperd token revoke <name>`.
+
 True remote/internet access — driving a box through the relay tunnel instead
-of a directly reachable address, with real API auth — isn't built yet; see
+of a directly reachable address — isn't built yet; see
 [#49](https://github.com/getpiper/piper/issues/49).
 
 Only pre-release builds exist for now, so add `--rc` to install the latest

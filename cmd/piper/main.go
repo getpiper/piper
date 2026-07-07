@@ -21,6 +21,42 @@ import (
 
 var openBrowserFn = openBrowser
 
+func dialClient(stderr io.Writer) (*client.Client, bool) {
+	cc, err := config.LoadClient()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return nil, false
+	}
+	return client.New(cc.Addr, cc.Token), true
+}
+
+// login verifies token against the target (GET /v1/apps) and, on success,
+// saves it to ~/.piper/piper/config.json.
+func login(addr, token string, stdout, stderr io.Writer) int {
+	if token == "" {
+		fmt.Fprintln(stderr, "usage: piper login --token <token>  (create one with `piperd token create`)")
+		return 2
+	}
+	if addr == "" {
+		cc, err := config.LoadClient()
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		addr = cc.Addr
+	}
+	if _, err := client.New(addr, token).ListApps(); err != nil {
+		fmt.Fprintln(stderr, "error: token rejected:", err)
+		return 1
+	}
+	if err := config.SaveClient(config.ClientConfig{Addr: addr, Token: token}); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "logged in to %s\n", addr)
+	return 0
+}
+
 func main() {
 	if code := run(os.Args[1:], os.Stdout, os.Stderr); code != 0 {
 		os.Exit(code)
@@ -35,6 +71,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintln(stdout, version.String())
 		return 0
+	case "login":
+		fs := flag.NewFlagSet("login", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		token := fs.String("token", "", "API token from `piperd token create`")
+		addr := fs.String("addr", "", "piperd address (default http://127.0.0.1:8088)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		return login(*addr, *token, stdout, stderr)
 	case "create":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
@@ -51,7 +96,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
 			return 2
 		}
-		if err := client.New(config.ClientAddr()).CreateApp(name, *port); err != nil {
+		c, ok := dialClient(stderr)
+		if !ok {
+			return 1
+		}
+		if err := c.CreateApp(name, *port); err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
@@ -73,7 +122,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR]")
 			return 2
 		}
-		dep, err := client.New(config.ClientAddr()).Deploy(name, *path)
+		c, ok := dialClient(stderr)
+		if !ok {
+			return 1
+		}
+		dep, err := c.Deploy(name, *path)
 		if err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
@@ -85,7 +138,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper list")
 			return 2
 		}
-		apps, err := client.New(config.ClientAddr()).ListApps()
+		c, ok := dialClient(stderr)
+		if !ok {
+			return 1
+		}
+		apps, err := c.ListApps()
 		if err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
@@ -126,7 +183,11 @@ func cmdApp(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, appLinkUsage)
 		return 2
 	}
-	if err := client.New(config.ClientAddr()).LinkApp(name, *repo, *branch); err != nil {
+	c, ok := dialClient(stderr)
+	if !ok {
+		return 1
+	}
+	if err := c.LinkApp(name, *repo, *branch); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -156,7 +217,10 @@ func cmdGithub(args []string, stdout, stderr io.Writer) int {
 // serves a tiny auto-submitting form that POSTs it to GitHub, catches the
 // redirect ?code=, and exchanges it for App credentials stored on the box.
 func githubSetup(org string, stdout, stderr io.Writer) int {
-	c := client.New(config.ClientAddr())
+	c, ok := dialClient(stderr)
+	if !ok {
+		return 1
+	}
 
 	codeCh := make(chan string, 1)
 	cbLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -244,6 +308,6 @@ func openBrowser(url string) error {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper <version|create|deploy|list|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper <version|login|create|deploy|list|app|github> [args]")
 	return 2
 }

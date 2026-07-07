@@ -2,8 +2,11 @@
 package store
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,7 +43,10 @@ type Deployment struct {
 type Store struct{ db *sql.DB }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout makes a second writer (e.g. `piperd token create` run
+	// against a live daemon's piper.db) wait for the lock instead of
+	// failing immediately with SQLITE_BUSY.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -235,4 +241,103 @@ func (s *Store) PreviewRunning(app string, pr int) (Deployment, error) {
 	}
 	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, ts)
 	return d, nil
+}
+
+// ErrBadToken is returned when a token is unknown or has been revoked.
+var ErrBadToken = errors.New("bad token")
+
+type Token struct {
+	ID        string
+	Label     string
+	Scope     string
+	CreatedAt time.Time
+	RevokedAt *time.Time
+}
+
+// hashToken is the at-rest representation of an API token. Duplicated from
+// internal/relay (store must not import relay); it is a three-line helper.
+func hashToken(tok string) string {
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:])
+}
+
+// CreateToken mints a random token with the given label and scope, stores only
+// its hash, and returns the plaintext once.
+func (s *Store) CreateToken(label, scope string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	tok := hex.EncodeToString(raw)
+	_, err := s.db.Exec(
+		`INSERT INTO tokens(id, label, token_hash, scope, created_at) VALUES(?,?,?,?,?)`,
+		uuid.NewString(), label, hashToken(tok), scope,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
+// AuthenticateToken resolves a plaintext token to its Token, or ErrBadToken if
+// the token is unknown or revoked.
+func (s *Store) AuthenticateToken(tok string) (Token, error) {
+	var t Token
+	var created string
+	var revoked sql.NullString
+	err := s.db.QueryRow(
+		`SELECT id, label, scope, created_at, revoked_at FROM tokens WHERE token_hash=?`,
+		hashToken(tok)).Scan(&t.ID, &t.Label, &t.Scope, &created, &revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Token{}, ErrBadToken
+	}
+	if err != nil {
+		return Token{}, err
+	}
+	if revoked.Valid {
+		return Token{}, ErrBadToken
+	}
+	t.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	return t, nil
+}
+
+// ListTokens returns all tokens (metadata only; never the plaintext or hash).
+func (s *Store) ListTokens() ([]Token, error) {
+	rows, err := s.db.Query(
+		`SELECT id, label, scope, created_at, revoked_at FROM tokens ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Token
+	for rows.Next() {
+		var t Token
+		var created string
+		var revoked sql.NullString
+		if err := rows.Scan(&t.ID, &t.Label, &t.Scope, &created, &revoked); err != nil {
+			return nil, err
+		}
+		t.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		if revoked.Valid {
+			rt, _ := time.Parse(time.RFC3339Nano, revoked.String)
+			t.RevokedAt = &rt
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// RevokeToken marks the token with the given label revoked. ErrNotFound if no
+// active token with that label exists.
+func (s *Store) RevokeToken(label string) error {
+	res, err := s.db.Exec(
+		`UPDATE tokens SET revoked_at=? WHERE label=? AND revoked_at IS NULL`,
+		time.Now().UTC().Format(time.RFC3339Nano), label)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

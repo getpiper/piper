@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -51,7 +53,74 @@ type webhookLifecycle interface {
 type listenerStopper interface{ Stop() }
 type storeCloser interface{ Close() error }
 
+type tokenStore interface {
+	CreateToken(label, scope string) (string, error)
+	ListTokens() ([]store.Token, error)
+	RevokeToken(label string) error
+}
+
+// runTokenCmd implements `piperd token <create|list|revoke>`, writing directly
+// to the on-box store. It needs no auth: running it is proof of box ownership.
+func runTokenCmd(st tokenStore, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: piperd token <create|list|revoke>")
+	}
+	switch args[0] {
+	case "create":
+		fs := flag.NewFlagSet("token create", flag.ContinueOnError)
+		name := fs.String("name", "", "label for the token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *name == "" {
+			return fmt.Errorf("token create: --name is required")
+		}
+		tok, err := st.CreateToken(*name, "admin")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, tok)
+		return nil
+	case "list":
+		toks, err := st.ListTokens()
+		if err != nil {
+			return err
+		}
+		for _, tk := range toks {
+			status := "active"
+			if tk.RevokedAt != nil {
+				status = "revoked"
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\n", tk.Label, tk.Scope, status)
+		}
+		return nil
+	case "revoke":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: piperd token revoke <name>")
+		}
+		return st.RevokeToken(args[1])
+	default:
+		return fmt.Errorf("unknown token subcommand %q", args[0])
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "token" {
+		dataDir := config.Load().DataDir
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			log.Fatalf("data dir: %v", err)
+		}
+		st, err := store.Open(filepath.Join(dataDir, "piper.db"))
+		if err != nil {
+			log.Fatalf("store: %v", err)
+		}
+		defer st.Close()
+		if err := runTokenCmd(st, os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("token: %v", err)
+		}
+		return
+	}
+
 	cfg := config.Load()
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		log.Fatalf("data dir: %v", err)
@@ -103,11 +172,11 @@ func main() {
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
 	// After `piper github setup` stores App creds at runtime, start serving
 	// webhooks immediately (relay mode only) instead of waiting for a restart.
-	handler := api.New(st, dep, cfg.BaseDomain, "", func() {
+	handler := api.RequireToken(st, api.New(st, dep, cfg.BaseDomain, "", func() {
 		if wh != nil {
 			wh.start()
 		}
-	})
+	}))
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
 	go func() {

@@ -62,7 +62,7 @@ func TestListApps(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	apps, err := New(srv.URL).ListApps()
+	apps, err := New(srv.URL, "").ListApps()
 	if err != nil {
 		t.Fatalf("ListApps: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestCreateApp(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := New(srv.URL).CreateApp("blog", 3000); err != nil {
+	if err := New(srv.URL, "").CreateApp("blog", 3000); err != nil {
 		t.Fatalf("CreateApp: %v", err)
 	}
 }
@@ -121,7 +121,7 @@ func TestDeploy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	dep, err := New(srv.URL).Deploy("blog", srcDir)
+	dep, err := New(srv.URL, "").Deploy("blog", srcDir)
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestLinkApp(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL)
+	c := New(srv.URL, "")
 	if err := c.LinkApp("blog", "alice/blog", "main"); err != nil {
 		t.Fatal(err)
 	}
@@ -165,13 +165,29 @@ func TestManifestAndExchange(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL)
+	c := New(srv.URL, "")
 	m, err := c.Manifest("http://localhost:5000/cb")
 	if err != nil || !strings.Contains(m, `"name"`) {
 		t.Fatalf("Manifest m=%q err=%v", m, err)
 	}
 	if err := c.ExchangeGitHub("thecode"); err != nil {
 		t.Fatalf("ExchangeGitHub: %v", err)
+	}
+}
+
+func TestSetsAuthorizationHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode([]store.App{})
+	}))
+	defer srv.Close()
+
+	if _, err := New(srv.URL, "s3cr3t").ListApps(); err != nil {
+		t.Fatalf("ListApps: %v", err)
+	}
+	if gotAuth != "Bearer s3cr3t" {
+		t.Fatalf("Authorization = %q, want Bearer s3cr3t", gotAuth)
 	}
 }
 
@@ -184,7 +200,7 @@ func TestClientMethodsReportHTTPError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	c := New(srv.URL)
+	c := New(srv.URL, "")
 	tests := map[string]func() error{
 		"create": func() error { return c.CreateApp("blog", 8080) },
 		"list": func() error {

@@ -170,3 +170,71 @@ func TestLatestRunningIgnoresPreviews(t *testing.T) {
 		t.Errorf("LatestRunning returned %q, want main-c", got.ContainerID)
 	}
 }
+
+func TestTokenCreateAuthenticateRevoke(t *testing.T) {
+	s := openTemp(t)
+	tok, err := s.CreateToken("laptop", "admin")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	if tok == "" {
+		t.Fatal("empty token")
+	}
+	got, err := s.AuthenticateToken(tok)
+	if err != nil {
+		t.Fatalf("AuthenticateToken: %v", err)
+	}
+	if got.Label != "laptop" || got.Scope != "admin" {
+		t.Errorf("got %+v", got)
+	}
+	if _, err := s.AuthenticateToken("nope"); !errors.Is(err, ErrBadToken) {
+		t.Fatalf("unknown token: want ErrBadToken, got %v", err)
+	}
+	if err := s.RevokeToken("laptop"); err != nil {
+		t.Fatalf("RevokeToken: %v", err)
+	}
+	if _, err := s.AuthenticateToken(tok); !errors.Is(err, ErrBadToken) {
+		t.Fatalf("after revoke: want ErrBadToken, got %v", err)
+	}
+	if err := s.RevokeToken("ghost"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoke unknown: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestTokenDuplicateLabelRejected(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateToken("laptop", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateToken("laptop", "admin"); err == nil {
+		t.Fatal("want error on duplicate label")
+	}
+}
+
+func TestOpenSetsBusyTimeout(t *testing.T) {
+	s := openTemp(t)
+	var timeout int
+	if err := s.db.QueryRow(`PRAGMA busy_timeout`).Scan(&timeout); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if timeout != 5000 {
+		t.Errorf("busy_timeout = %d, want 5000", timeout)
+	}
+}
+
+func TestListTokens(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateToken("a", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateToken("b", "readonly"); err != nil {
+		t.Fatal(err)
+	}
+	toks, err := s.ListTokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(toks) != 2 {
+		t.Fatalf("len = %d, want 2", len(toks))
+	}
+}
