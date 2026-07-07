@@ -30,6 +30,33 @@ func dialClient(stderr io.Writer) (*client.Client, bool) {
 	return client.New(cc.Addr, cc.Token), true
 }
 
+// login verifies token against the target (GET /v1/apps) and, on success,
+// saves it to ~/.piper/piper/config.json.
+func login(addr, token string, stdout, stderr io.Writer) int {
+	if token == "" {
+		fmt.Fprintln(stderr, "usage: piper login --token <token>  (create one with `piperd token create`)")
+		return 2
+	}
+	if addr == "" {
+		cc, err := config.LoadClient()
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		addr = cc.Addr
+	}
+	if _, err := client.New(addr, token).ListApps(); err != nil {
+		fmt.Fprintln(stderr, "error: token rejected:", err)
+		return 1
+	}
+	if err := config.SaveClient(config.ClientConfig{Addr: addr, Token: token}); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "logged in to %s\n", addr)
+	return 0
+}
+
 func main() {
 	if code := run(os.Args[1:], os.Stdout, os.Stderr); code != 0 {
 		os.Exit(code)
@@ -44,6 +71,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintln(stdout, version.String())
 		return 0
+	case "login":
+		fs := flag.NewFlagSet("login", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		token := fs.String("token", "", "API token from `piperd token create`")
+		addr := fs.String("addr", "", "piperd address (default http://127.0.0.1:8088)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		return login(*addr, *token, stdout, stderr)
 	case "create":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
@@ -272,6 +308,6 @@ func openBrowser(url string) error {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper <version|create|deploy|list|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper <version|login|create|deploy|list|app|github> [args]")
 	return 2
 }
