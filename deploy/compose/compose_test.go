@@ -21,7 +21,7 @@ func TestDockerfileContract(t *testing.T) {
 	dockerfile := repositoryFile(t, "Dockerfile")
 
 	required := []string{
-		"FROM golang:1.26 AS build",
+		"FROM --platform=$BUILDPLATFORM golang:1.26 AS build",
 		"ARG TARGETOS",
 		"ARG TARGETARCH",
 		"GOOS=$TARGETOS GOARCH=$TARGETARCH",

@@ -6,3 +6,4 @@ data
 *.db
 *.log
 .DS_Store
+deploy/compose/piperd.env

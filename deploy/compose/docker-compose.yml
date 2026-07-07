@@ -10,6 +10,8 @@ services:
       - piper_data:/var/lib/piper
     environment:
       - PIPER_DATA_DIR=/var/lib/piper
+      - XDG_DATA_HOME=/var/lib/piper
+      - XDG_CONFIG_HOME=/var/lib/piper
     env_file:
       - ../../packaging/systemd/piperd.env.example
 
