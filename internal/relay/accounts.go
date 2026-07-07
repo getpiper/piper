@@ -148,3 +148,60 @@ func (s *Store) DisableAccount(username string) error {
 	}
 	return nil
 }
+
+// Enrollment is the result of a self-service claim: an enrollment token plus the
+// single-label base domain the relay assigned the agent under the apex.
+type Enrollment struct {
+	Token      string
+	BaseDomain string
+}
+
+// ErrQuotaExceeded is returned when an account is already at its agent cap.
+var ErrQuotaExceeded = errors.New("account agent quota exceeded")
+
+// EnrollForAccount mints an enrollment token for a new agent bound to accountID,
+// assigning it "<hash>-<username>.<apex>". Enforces the per-account agent cap.
+func (s *Store) EnrollForAccount(accountID string) (Enrollment, error) {
+	var username string
+	if err := s.db.QueryRow(`SELECT username FROM accounts WHERE id=?`, accountID).Scan(&username); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Enrollment{}, ErrBadCredential
+		}
+		return Enrollment{}, err
+	}
+
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE account_id=?`, accountID).Scan(&count); err != nil {
+		return Enrollment{}, err
+	}
+	if count >= s.maxAgentsOrDefault() {
+		return Enrollment{}, ErrQuotaExceeded
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for attempt := 0; attempt < 5; attempt++ {
+		hash := make([]byte, 4)
+		if _, err := rand.Read(hash); err != nil {
+			return Enrollment{}, err
+		}
+		base := hex.EncodeToString(hash) + "-" + username + "." + s.apexOrDefault()
+
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			return Enrollment{}, err
+		}
+		tok := hex.EncodeToString(raw)
+
+		_, err := s.db.Exec(
+			`INSERT INTO agents(name, token_hash, base_domain, account_id, created_at) VALUES(?,?,?,?,?)`,
+			base, hashToken(tok), base, accountID, now)
+		if err == nil {
+			return Enrollment{Token: tok, BaseDomain: base}, nil
+		}
+		if isUniqueViolation(err) {
+			continue // hash collided with an existing base_domain; retry
+		}
+		return Enrollment{}, err
+	}
+	return Enrollment{}, errors.New("could not assign a unique base domain")
+}

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,59 @@ func TestDisabledAccountCredentialRejected(t *testing.T) {
 	}
 	if _, err := st.AuthenticateAccount(cred); err != ErrBadCredential {
 		t.Fatalf("disabled cred err = %v, want ErrBadCredential", err)
+	}
+}
+
+func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3)
+	acc, _ := st.UpsertAccount("sub-1", "erin@x.com")
+
+	en, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatalf("EnrollForAccount: %v", err)
+	}
+	if en.Token == "" {
+		t.Fatal("empty enrollment token")
+	}
+	if !strings.HasSuffix(en.BaseDomain, "-erin.public.getpiper.co") {
+		t.Fatalf("base domain = %q, want <hash>-erin.public.getpiper.co", en.BaseDomain)
+	}
+	// The enrollment token authenticates as an agent bound to this base domain.
+	ag, err := st.Authenticate(en.Token)
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if ag.BaseDomain != en.BaseDomain {
+		t.Fatalf("agent base = %q, want %q", ag.BaseDomain, en.BaseDomain)
+	}
+}
+
+func TestEnrollForAccountEnforcesCap(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 2)
+	acc, _ := st.UpsertAccount("sub-1", "frank@x.com")
+
+	for i := 0; i < 2; i++ {
+		if _, err := st.EnrollForAccount(acc.ID); err != nil {
+			t.Fatalf("enroll %d: %v", i, err)
+		}
+	}
+	if _, err := st.EnrollForAccount(acc.ID); err != ErrQuotaExceeded {
+		t.Fatalf("over-cap err = %v, want ErrQuotaExceeded", err)
+	}
+}
+
+func TestAuthenticateRejectsDisabledAccountAgent(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3)
+	acc, _ := st.UpsertAccount("sub-1", "grace@x.com")
+	en, _ := st.EnrollForAccount(acc.ID)
+
+	if err := st.DisableAccount(acc.Username); err != nil {
+		t.Fatalf("DisableAccount: %v", err)
+	}
+	if _, err := st.Authenticate(en.Token); err != ErrBadToken {
+		t.Fatalf("disabled agent auth err = %v, want ErrBadToken", err)
 	}
 }

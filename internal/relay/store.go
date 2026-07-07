@@ -26,7 +26,32 @@ type Agent struct {
 	BaseDomain string
 }
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db        *sql.DB
+	apex      string
+	maxAgents int
+}
+
+// Configure sets the free-tier apex domain and the per-account agent cap used by
+// EnrollForAccount. Safe to call once after Open.
+func (s *Store) Configure(apex string, maxAgents int) {
+	s.apex = apex
+	s.maxAgents = maxAgents
+}
+
+func (s *Store) apexOrDefault() string {
+	if s.apex == "" {
+		return "public.getpiper.co"
+	}
+	return s.apex
+}
+
+func (s *Store) maxAgentsOrDefault() int {
+	if s.maxAgents <= 0 {
+		return 3
+	}
+	return s.maxAgents
+}
 
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
@@ -68,16 +93,24 @@ func (s *Store) Enroll(name, baseDomain string) (string, error) {
 	return tok, nil
 }
 
-// Authenticate resolves a plaintext token to its Agent, or ErrBadToken.
+// Authenticate resolves a plaintext token to its Agent, or ErrBadToken. An agent
+// whose owning account has been disabled is rejected as ErrBadToken.
 func (s *Store) Authenticate(token string) (Agent, error) {
 	var ag Agent
-	err := s.db.QueryRow(`SELECT name, base_domain FROM agents WHERE token_hash=?`, hashToken(token)).
-		Scan(&ag.Name, &ag.BaseDomain)
+	var disabled sql.NullInt64
+	err := s.db.QueryRow(
+		`SELECT ag.name, ag.base_domain, acc.disabled
+		   FROM agents ag LEFT JOIN accounts acc ON acc.id = ag.account_id
+		  WHERE ag.token_hash = ?`, hashToken(token)).
+		Scan(&ag.Name, &ag.BaseDomain, &disabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Agent{}, ErrBadToken
 	}
 	if err != nil {
 		return Agent{}, err
+	}
+	if disabled.Valid && disabled.Int64 != 0 {
+		return Agent{}, ErrBadToken
 	}
 	return ag, nil
 }
