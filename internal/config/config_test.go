@@ -107,3 +107,22 @@ func TestLoadClientEnvOverridesFile(t *testing.T) {
 		t.Fatalf("token = %q, want envtok", cc.Token)
 	}
 }
+
+func TestClientConfigRoundTripsRelayFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	if err := SaveClient(ClientConfig{
+		Addr: "http://127.0.0.1:8088", RelayAPI: "https://api.public.getpiper.co",
+		AccountCredential: "cred-xyz",
+	}); err != nil {
+		t.Fatalf("SaveClient: %v", err)
+	}
+	cc, err := LoadClient()
+	if err != nil {
+		t.Fatalf("LoadClient: %v", err)
+	}
+	if cc.RelayAPI != "https://api.public.getpiper.co" || cc.AccountCredential != "cred-xyz" {
+		t.Fatalf("cc = %+v", cc)
+	}
+}

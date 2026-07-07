@@ -65,10 +65,14 @@ func defaultDataDir() string {
 	return filepath.Join(home, ".piper", "piperd")
 }
 
-// ClientConfig is the piper CLI's saved credentials/target.
+// ClientConfig is the piper CLI's saved credentials/target. Addr/Token are the
+// LAN path (bearer to piperd); RelayAPI/AccountCredential are the relay path
+// (device-flow login), written by `piper login` and read by `piper connect`.
 type ClientConfig struct {
-	Addr  string `json:"addr"`
-	Token string `json:"token"`
+	Addr              string `json:"addr"`
+	Token             string `json:"token"`
+	RelayAPI          string `json:"relay_api,omitempty"`
+	AccountCredential string `json:"account_credential,omitempty"`
 }
 
 func clientConfigPath() (string, error) {
