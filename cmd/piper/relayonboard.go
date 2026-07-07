@@ -68,3 +68,40 @@ func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
 		return 0
 	}
 }
+
+// connect claims this box: it enrolls with the relay using the stored account
+// credential and writes a relay.json into piperd's data dir. piperd reads that
+// file at startup and dials the tunnel; connect does not restart piperd.
+func connect(dataDir string, stdout, stderr io.Writer) int {
+	cc, err := config.LoadClient()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	if cc.RelayAPI == "" || cc.AccountCredential == "" {
+		fmt.Fprintln(stderr, "error: not logged in to a relay; run `piper login` first")
+		return 1
+	}
+	en, err := relayclient.New(cc.RelayAPI).Enroll(cc.AccountCredential)
+	switch {
+	case errors.Is(err, relayclient.ErrBadCredential):
+		fmt.Fprintln(stderr, "error: relay rejected your account credential; run `piper login` again")
+		return 1
+	case errors.Is(err, relayclient.ErrQuotaExceeded):
+		fmt.Fprintln(stderr, "error: account agent quota exceeded; remove an existing box or upgrade")
+		return 1
+	case err != nil:
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	if err := config.SaveRelayFile(dataDir, config.RelayFile{
+		RelayAddr:  en.TunnelEndpoint,
+		RelayToken: en.EnrollmentToken,
+		BaseDomain: en.BaseDomain,
+	}); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "box claimed: %s\nrestart piperd to connect, e.g.:\n\n    sudo systemctl restart piperd\n", en.BaseDomain)
+	return 0
+}

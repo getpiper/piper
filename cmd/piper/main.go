@@ -84,6 +84,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return login(*addr, *token, stdout, stderr)
 		}
 		return relayLogin(*relay, stdout, stderr)
+	case "connect":
+		fs := flag.NewFlagSet("connect", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		def := os.Getenv("PIPER_DATA_DIR")
+		if def == "" {
+			def = config.DefaultDataDir()
+		}
+		dataDir := fs.String("data-dir", def, "piperd data directory (where relay.json is written)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		return connect(*dataDir, stdout, stderr)
 	case "create":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
@@ -312,6 +324,6 @@ func openBrowser(url string) error {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper <version|login|create|deploy|list|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper <version|login|connect|create|deploy|list|app|github> [args]")
 	return 2
 }
