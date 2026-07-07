@@ -54,7 +54,10 @@ func (s *Store) maxAgentsOrDefault() int {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout makes a second writer (e.g. an overlapping control API
+	// request) wait for the lock instead of failing immediately with
+	// SQLITE_BUSY.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}

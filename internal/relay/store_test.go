@@ -31,6 +31,22 @@ func TestEnrollAndAuthenticate(t *testing.T) {
 	}
 }
 
+func TestOpenSetsBusyTimeout(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	var timeout int
+	if err := st.db.QueryRow(`PRAGMA busy_timeout`).Scan(&timeout); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if timeout != 5000 {
+		t.Errorf("busy_timeout = %d, want 5000", timeout)
+	}
+}
+
 func TestEnrollRejectsDuplicateBaseDomain(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
 	if err != nil {
