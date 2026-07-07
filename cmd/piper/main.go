@@ -74,12 +74,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "login":
 		fs := flag.NewFlagSet("login", flag.ContinueOnError)
 		fs.SetOutput(stderr)
-		token := fs.String("token", "", "API token from `piperd token create`")
-		addr := fs.String("addr", "", "piperd address (default http://127.0.0.1:8088)")
+		token := fs.String("token", "", "API token from `piperd token create` (LAN login)")
+		addr := fs.String("addr", "", "piperd address (LAN login)")
+		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL (device-flow login)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
-		return login(*addr, *token, stdout, stderr)
+		if *token != "" {
+			return login(*addr, *token, stdout, stderr)
+		}
+		return relayLogin(*relay, stdout, stderr)
 	case "create":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
