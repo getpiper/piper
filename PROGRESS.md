@@ -2,7 +2,7 @@
 
 Coarse **map** of what's built vs. what's left — by design. Detail for any 🟡/⬜ item lives in its linked issue (`[#N]`), not here; entries stay to one line so they can't drift from the issue. Design lives in [`docs/superpowers/specs/`](docs/superpowers/specs/); plans in [`docs/superpowers/plans/`](docs/superpowers/plans/); how-to-work in [`CLAUDE.md`](CLAUDE.md).
 
-_Last updated: 2026-07-07 — piperd ships a container image + Compose file (epic #43); registry publish remains a follow-up. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-07 — epic #43 (install & run piperd as a service) closed; registry publish and macOS launchd ([#56](https://github.com/getpiper/piper/issues/56)) tracked as standalone follow-ups. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
 
 Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label conventions: [CLAUDE.md § Issue tracking](CLAUDE.md#issue-tracking--progress).
 
@@ -49,7 +49,7 @@ Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the
 - ✅ `piperd` — webhook served over the tunnel in relay mode — [#31](https://github.com/getpiper/piper/pull/31)
 - ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#50](https://github.com/getpiper/piper/pull/50)
 
-## Install & run piperd as a service — epic [#43](https://github.com/getpiper/piper/issues/43)
+## Install & run piperd as a service — epic [#43](https://github.com/getpiper/piper/issues/43) ✅ closed
 
 Goal: piperd installable and self-sustaining on the box (Pi/VPS/laptop) — service unit, container image, one-line installer — without changing how it uses Docker for apps.
 
@@ -58,6 +58,8 @@ Goal: piperd installable and self-sustaining on the box (Pi/VPS/laptop) — serv
 - ✅ Container image + compose (host `docker.sock`; registry publish tracked separately) — [#45](https://github.com/getpiper/piper/issues/45)
 - ✅ One-line `curl … | sh` installer (OS/arch detect, checksum-verified, `--cli-only`/`--rc`) — [#46](https://github.com/getpiper/piper/issues/46)
 - ✅ Standalone `piper` CLI on PATH (`--cli-only`; drives a `piperd` on another host on the same network via `PIPER_ADDR`) — [#47](https://github.com/getpiper/piper/issues/47)
+
+Descoped from the epic, tracked standalone:
 - ⬜ launchd plist (best-effort macOS) — [#56](https://github.com/getpiper/piper/issues/56)
 
 ## Always-green gates
