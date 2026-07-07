@@ -21,3 +21,11 @@ CREATE TABLE IF NOT EXISTS github_app (
     private_key    TEXT NOT NULL,
     webhook_secret TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tokens (
+    id         TEXT PRIMARY KEY,
+    label      TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
+    scope      TEXT NOT NULL DEFAULT 'admin',
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
+);
