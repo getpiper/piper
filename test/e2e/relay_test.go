@@ -72,10 +72,24 @@ func TestRelayLoopback(t *testing.T) {
 	defer relay.Process.Kill()
 	waitPort(t, "127.0.0.1:7000", 10*time.Second)
 
+	// Mint a control-API token before starting piperd, so there's only one
+	// writer to piper.db at a time.
+	piperdDataDir := t.TempDir()
+	tokenCmd := exec.Command(filepath.Join(binDir, "piperd"), "token", "create", "--name", "e2e")
+	tokenCmd.Env = append(os.Environ(), "PIPER_DATA_DIR="+piperdDataDir)
+	tokenOut, err := tokenCmd.Output()
+	if err != nil {
+		t.Fatalf("token create: %v", err)
+	}
+	apiToken := strings.TrimSpace(string(tokenOut))
+	if apiToken == "" {
+		t.Fatal("token create: empty token")
+	}
+
 	// Start piperd in relay mode with the static cert.
 	pd := exec.CommandContext(ctx, filepath.Join(binDir, "piperd"))
 	pd.Env = append(os.Environ(),
-		"PIPER_DATA_DIR="+t.TempDir(),
+		"PIPER_DATA_DIR="+piperdDataDir,
 		"PIPER_API_ADDR=127.0.0.1:8088",
 		"PIPER_BASE_DOMAIN="+base,
 		"PIPER_RELAY_ADDR=127.0.0.1:7000",
@@ -91,7 +105,7 @@ func TestRelayLoopback(t *testing.T) {
 	waitPort(t, "127.0.0.1:8088", 15*time.Second)
 
 	// Deploy the sample app.
-	c := client.New("http://127.0.0.1:8088")
+	c := client.New("http://127.0.0.1:8088", apiToken)
 	if err := c.CreateApp("blog", 8080); err != nil {
 		t.Fatalf("CreateApp: %v", err)
 	}

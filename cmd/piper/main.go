@@ -21,6 +21,15 @@ import (
 
 var openBrowserFn = openBrowser
 
+func dialClient(stderr io.Writer) (*client.Client, bool) {
+	cc, err := config.LoadClient()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return nil, false
+	}
+	return client.New(cc.Addr, cc.Token), true
+}
+
 func main() {
 	if code := run(os.Args[1:], os.Stdout, os.Stderr); code != 0 {
 		os.Exit(code)
@@ -51,7 +60,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
 			return 2
 		}
-		if err := client.New(config.ClientAddr()).CreateApp(name, *port); err != nil {
+		c, ok := dialClient(stderr)
+		if !ok {
+			return 1
+		}
+		if err := c.CreateApp(name, *port); err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
@@ -73,7 +86,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR]")
 			return 2
 		}
-		dep, err := client.New(config.ClientAddr()).Deploy(name, *path)
+		c, ok := dialClient(stderr)
+		if !ok {
+			return 1
+		}
+		dep, err := c.Deploy(name, *path)
 		if err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
@@ -85,7 +102,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper list")
 			return 2
 		}
-		apps, err := client.New(config.ClientAddr()).ListApps()
+		c, ok := dialClient(stderr)
+		if !ok {
+			return 1
+		}
+		apps, err := c.ListApps()
 		if err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
@@ -126,7 +147,11 @@ func cmdApp(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, appLinkUsage)
 		return 2
 	}
-	if err := client.New(config.ClientAddr()).LinkApp(name, *repo, *branch); err != nil {
+	c, ok := dialClient(stderr)
+	if !ok {
+		return 1
+	}
+	if err := c.LinkApp(name, *repo, *branch); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -156,7 +181,10 @@ func cmdGithub(args []string, stdout, stderr io.Writer) int {
 // serves a tiny auto-submitting form that POSTs it to GitHub, catches the
 // redirect ?code=, and exchanges it for App credentials stored on the box.
 func githubSetup(org string, stdout, stderr io.Writer) int {
-	c := client.New(config.ClientAddr())
+	c, ok := dialClient(stderr)
+	if !ok {
+		return 1
+	}
 
 	codeCh := make(chan string, 1)
 	cbLn, err := net.Listen("tcp", "127.0.0.1:0")

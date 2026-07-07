@@ -16,15 +16,32 @@ import (
 )
 
 type Client struct {
-	base string
-	http *http.Client
+	base  string
+	token string
+	http  *http.Client
 }
 
-func New(base string) *Client {
+func New(base, token string) *Client {
 	if base == "" {
 		base = "http://127.0.0.1:8088"
 	}
-	return &Client{base: base, http: &http.Client{}}
+	return &Client{base: base, token: token, http: &http.Client{}}
+}
+
+// do builds a request to c.base+path, attaches the auth header (when set) and
+// the content type (when non-empty), and sends it.
+func (c *Client) do(method, path, contentType string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, c.base+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return c.http.Do(req)
 }
 
 func (c *Client) CreateApp(name string, port int) error {
@@ -32,7 +49,7 @@ func (c *Client) CreateApp(name string, port int) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.http.Post(c.base+"/v1/apps", "application/json", bytes.NewReader(body))
+	resp, err := c.do(http.MethodPost, "/v1/apps", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -44,7 +61,7 @@ func (c *Client) CreateApp(name string, port int) error {
 }
 
 func (c *Client) ListApps() ([]store.App, error) {
-	resp, err := c.http.Get(c.base + "/v1/apps")
+	resp, err := c.do(http.MethodGet, "/v1/apps", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +81,7 @@ func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 	if err := TarDir(srcDir, &body); err != nil {
 		return store.Deployment{}, err
 	}
-	resp, err := c.http.Post(c.base+"/v1/apps/"+name+"/deploy", "application/x-tar", &body)
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -81,7 +98,7 @@ func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 
 func (c *Client) LinkApp(name, repo, branch string) error {
 	body, _ := json.Marshal(map[string]string{"repo": repo, "branch": branch})
-	resp, err := c.http.Post(c.base+"/v1/apps/"+name+"/link", "application/json", bytes.NewReader(body))
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/link", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -94,7 +111,7 @@ func (c *Client) LinkApp(name, repo, branch string) error {
 
 func (c *Client) Manifest(redirectURL string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"redirect_url": redirectURL})
-	resp, err := c.http.Post(c.base+"/v1/github/manifest", "application/json", bytes.NewReader(body))
+	resp, err := c.do(http.MethodPost, "/v1/github/manifest", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +130,7 @@ func (c *Client) Manifest(redirectURL string) (string, error) {
 
 func (c *Client) ExchangeGitHub(code string) error {
 	body, _ := json.Marshal(map[string]string{"code": code})
-	resp, err := c.http.Post(c.base+"/v1/github/exchange", "application/json", bytes.NewReader(body))
+	resp, err := c.do(http.MethodPost, "/v1/github/exchange", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
