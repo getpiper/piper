@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"strings"
@@ -87,4 +89,62 @@ func (s *Store) UpsertAccount(googleSub, email string) (Account, error) {
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint failure.
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+// ErrBadCredential is returned for an unknown account credential or one whose
+// account has been disabled by the operator kill-switch.
+var ErrBadCredential = errors.New("bad credential")
+
+// MintAccountCredential issues a fresh random credential for accountID and stores
+// only its hash. The plaintext is returned once, to the caller.
+func (s *Store) MintAccountCredential(accountID string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	cred := hex.EncodeToString(raw)
+	_, err := s.db.Exec(
+		`INSERT INTO account_creds(token_hash, account_id, created_at) VALUES(?,?,?)`,
+		hashToken(cred), accountID, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return "", err
+	}
+	return cred, nil
+}
+
+// AuthenticateAccount resolves a plaintext credential to its Account. A disabled
+// account is treated as unauthenticated (ErrBadCredential).
+func (s *Store) AuthenticateAccount(cred string) (Account, error) {
+	var acc Account
+	var disabled int
+	err := s.db.QueryRow(
+		`SELECT a.id, a.username, a.disabled
+		   FROM account_creds c JOIN accounts a ON a.id = c.account_id
+		  WHERE c.token_hash = ?`, hashToken(cred)).
+		Scan(&acc.ID, &acc.Username, &disabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Account{}, ErrBadCredential
+	}
+	if err != nil {
+		return Account{}, err
+	}
+	if disabled != 0 {
+		return Account{}, ErrBadCredential
+	}
+	acc.Disabled = false
+	return acc, nil
+}
+
+// DisableAccount flips the kill-switch for an account by username. Its
+// credentials stop authenticating and its agents stop connecting.
+func (s *Store) DisableAccount(username string) error {
+	res, err := s.db.Exec(`UPDATE accounts SET disabled=1 WHERE username=?`, username)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return errors.New("no such account")
+	}
+	return nil
 }

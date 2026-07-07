@@ -52,3 +52,41 @@ func TestUpsertAccountDisambiguatesUsername(t *testing.T) {
 		t.Fatalf("second username = %q, want bob-2", a2.Username)
 	}
 }
+
+func TestMintAndAuthenticateCredential(t *testing.T) {
+	st := openTestStore(t)
+	acc, _ := st.UpsertAccount("sub-1", "carol@x.com")
+
+	cred, err := st.MintAccountCredential(acc.ID)
+	if err != nil {
+		t.Fatalf("MintAccountCredential: %v", err)
+	}
+	if cred == "" {
+		t.Fatal("empty credential")
+	}
+
+	got, err := st.AuthenticateAccount(cred)
+	if err != nil {
+		t.Fatalf("AuthenticateAccount: %v", err)
+	}
+	if got.ID != acc.ID || got.Username != acc.Username {
+		t.Fatalf("account = %+v, want %+v", got, acc)
+	}
+
+	if _, err := st.AuthenticateAccount("nope"); err != ErrBadCredential {
+		t.Fatalf("bad cred err = %v, want ErrBadCredential", err)
+	}
+}
+
+func TestDisabledAccountCredentialRejected(t *testing.T) {
+	st := openTestStore(t)
+	acc, _ := st.UpsertAccount("sub-1", "dave@x.com")
+	cred, _ := st.MintAccountCredential(acc.ID)
+
+	if err := st.DisableAccount(acc.Username); err != nil {
+		t.Fatalf("DisableAccount: %v", err)
+	}
+	if _, err := st.AuthenticateAccount(cred); err != ErrBadCredential {
+		t.Fatalf("disabled cred err = %v, want ErrBadCredential", err)
+	}
+}
