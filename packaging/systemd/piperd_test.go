@@ -57,13 +57,13 @@ func TestPiperdEnvExample(t *testing.T) {
 }
 
 func TestPiperdDocumentation(t *testing.T) {
-	readme := repositoryFile(t, "README.md")
+	manual := repositoryFile(t, "docs", "manual-setup.md")
 	for _, text := range []string{
 		"packaging/systemd/piperd.service",
 		"systemctl enable --now piperd",
 	} {
-		if !strings.Contains(readme, text) {
-			t.Errorf("README missing %q", text)
+		if !strings.Contains(manual, text) {
+			t.Errorf("docs/manual-setup.md missing %q", text)
 		}
 	}
 

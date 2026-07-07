@@ -2,7 +2,7 @@
 
 Coarse **map** of what's built vs. what's left — by design. Detail for any 🟡/⬜ item lives in its linked issue (`[#N]`), not here; entries stay to one line so they can't drift from the issue. Design lives in [`docs/superpowers/specs/`](docs/superpowers/specs/); plans in [`docs/superpowers/plans/`](docs/superpowers/plans/); how-to-work in [`CLAUDE.md`](CLAUDE.md).
 
-_Last updated: 2026-07-06 — piperd ships a native systemd unit (epic #43 underway). Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-07 — piperd ships a container image + Compose file (epic #43); registry publish remains a follow-up. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
 
 Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label conventions: [CLAUDE.md § Issue tracking](CLAUDE.md#issue-tracking--progress).
 
@@ -55,7 +55,7 @@ Goal: piperd installable and self-sustaining on the box (Pi/VPS/laptop) — serv
 
 - ✅ Graceful `SIGTERM` shutdown (clean service stop/restart) — [#48](https://github.com/getpiper/piper/issues/48)
 - ✅ Native systemd unit (`DynamicUser`+`docker` group, `CAP_NET_BIND_SERVICE`, `StateDirectory`) — [#44](https://github.com/getpiper/piper/issues/44)
-- ⬜ Container image + compose (host `docker.sock`; publish blocked on release pipeline) — [#45](https://github.com/getpiper/piper/issues/45)
+- ✅ Container image + compose (host `docker.sock`; registry publish tracked separately) — [#45](https://github.com/getpiper/piper/issues/45)
 - ✅ One-line `curl … | sh` installer (OS/arch detect, checksum-verified, `--cli-only`/`--rc`) — [#46](https://github.com/getpiper/piper/issues/46)
 - ✅ Standalone `piper` CLI on PATH (`--cli-only`; drives a `piperd` on another host on the same network via `PIPER_ADDR`) — [#47](https://github.com/getpiper/piper/issues/47)
 - ⬜ launchd plist (best-effort macOS) — [#56](https://github.com/getpiper/piper/issues/56)

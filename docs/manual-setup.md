@@ -27,6 +27,41 @@ via `CAP_NET_BIND_SERVICE` — no root. Edit `/etc/piper/piperd.env` to override
 or switch on relay mode. See the
 [end-to-end runbook](runbooks/git-deploy-e2e.md) for verification, logs, and teardown.
 
+## Run piperd in Docker (Compose)
+
+Prefer to run `piperd` itself as a container instead of a systemd service? Build and
+start it with Compose from the repo root:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up -d --build
+```
+
+This builds the image from the repo's `Dockerfile`, mounts the host's
+`/var/run/docker.sock` (piperd drives the **host** Docker daemon as a sibling
+container — not Docker-in-Docker), and persists state in the named `piper_data`
+volume at `/var/lib/piper`. To override defaults, copy the env file and point
+`env_file` at your copy instead of the tracked example:
+
+```bash
+cp packaging/systemd/piperd.env.example deploy/compose/piperd.env
+```
+
+Then edit `deploy/compose/piperd.env` and change the `env_file:` entry in
+`docker-compose.yml` to `deploy/compose/piperd.env` (already gitignored).
+
+**Networking:** the compose file sets `network_mode: host`, which is required, not
+optional. `piperd` publishes every app container's port to `127.0.0.1` on the
+Docker host and dials that same address for health checks, so `piperd` must share
+the host's network namespace to see them — otherwise `127.0.0.1` inside piperd's
+own container would be its own empty loopback, not the host's. Host networking
+also lets the embedded Caddy manager bind `:80`/`:443` directly. This is Linux-only,
+matching the rest of the service-install path.
+
+**Trust:** mounting `docker.sock` grants the container root-equivalent control over
+the host's Docker daemon — the same trust boundary the systemd unit already accepts
+via its `docker` group membership (see the previous section). Only run this on a
+box you already trust with root.
+
 ## Run the relay as a service
 
 On a Linux relay host, build or download the static `piper-relay` binary, then install

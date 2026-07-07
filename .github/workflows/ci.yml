@@ -27,6 +27,11 @@ jobs:
               - 'Makefile'
               - '.github/workflows/ci.yml'
               - '.goreleaser.yaml'
+            docker:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'deploy/compose/**'
+              - '.github/workflows/ci.yml'
 
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.code == 'true'
@@ -62,3 +67,20 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: check
+
+      - name: Set up QEMU
+        if: steps.changes.outputs.docker == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.changes.outputs.docker == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build piperd image (multi-arch, no push)
+        if: steps.changes.outputs.docker == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
