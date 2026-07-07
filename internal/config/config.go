@@ -1,7 +1,12 @@
 // Package config loads piperd runtime configuration from the environment.
 package config
 
-import "os"
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+)
 
 type Config struct {
 	APIAddr     string // control API listen address
@@ -31,7 +36,7 @@ func Load() Config {
 	return Config{
 		APIAddr:     env("PIPER_API_ADDR", "127.0.0.1:8088"),
 		WebhookAddr: env("PIPER_WEBHOOK_ADDR", "127.0.0.1:8089"),
-		DataDir:     env("PIPER_DATA_DIR", "./data"),
+		DataDir:     env("PIPER_DATA_DIR", defaultDataDir()),
 		BaseDomain:  env("PIPER_BASE_DOMAIN", "piper.localhost"),
 		CaddyAdmin:  env("PIPER_CADDY_ADMIN", "http://127.0.0.1:2019"),
 
@@ -48,4 +53,72 @@ func Load() Config {
 // ClientAddr returns the piperd base URL used by the piper CLI.
 func ClientAddr() string {
 	return env("PIPER_ADDR", "http://127.0.0.1:8088")
+}
+
+// defaultDataDir is piperd's SQLite home when PIPER_DATA_DIR is unset:
+// ~/.piper/piperd. Falls back to ./data if the home dir can't be resolved.
+func defaultDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "./data"
+	}
+	return filepath.Join(home, ".piper", "piperd")
+}
+
+// ClientConfig is the piper CLI's saved credentials/target.
+type ClientConfig struct {
+	Addr  string `json:"addr"`
+	Token string `json:"token"`
+}
+
+func clientConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".piper", "piper", "config.json"), nil
+}
+
+// LoadClient reads ~/.piper/piper/config.json, then applies PIPER_ADDR /
+// PIPER_TOKEN env overrides and the localhost default for Addr. A missing file
+// is not an error.
+func LoadClient() (ClientConfig, error) {
+	var cc ClientConfig
+	path, err := clientConfigPath()
+	if err != nil {
+		return cc, err
+	}
+	data, err := os.ReadFile(path)
+	if err == nil {
+		_ = json.Unmarshal(data, &cc)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return cc, err
+	}
+	if v := os.Getenv("PIPER_ADDR"); v != "" {
+		cc.Addr = v
+	}
+	if cc.Addr == "" {
+		cc.Addr = "http://127.0.0.1:8088"
+	}
+	if v := os.Getenv("PIPER_TOKEN"); v != "" {
+		cc.Token = v
+	}
+	return cc, nil
+}
+
+// SaveClient writes cc to ~/.piper/piper/config.json with 0600 perms, creating
+// the directory if needed.
+func SaveClient(cc ClientConfig) error {
+	path, err := clientConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
