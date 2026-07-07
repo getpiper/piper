@@ -60,9 +60,23 @@ address) to `~/.piper/piper/config.json`, mode `0600`; `PIPER_TOKEN` /
 `PIPER_ADDR` override the saved values per command. Manage tokens on the box
 with `piperd token list` and `piperd token revoke <name>`.
 
-True remote/internet access — driving a box through the relay tunnel instead
-of a directly reachable address — isn't built yet; see
-[#49](https://github.com/getpiper/piper/issues/49).
+### Join the public relay (self-service)
+
+On a box running `piperd`:
+
+```bash
+piper login          # opens a Google device-flow login; stores your account credential
+piper connect        # claims this box on the relay and writes ~/.piper/piperd/relay.json
+sudo systemctl restart piperd   # piperd reads relay.json at startup and dials the tunnel
+```
+
+`piper login --relay <url>` targets a self-hosted relay instead of the default
+`https://api.public.getpiper.co`. Environment variables (`PIPER_RELAY_ADDR`,
+`PIPER_RELAY_TOKEN`, `PIPER_BASE_DOMAIN`) still override `relay.json`.
+
+> A live HTTPS URL on the shared `*.public.getpiper.co` domain arrives with the
+> relay-terminated app path (next plan); `connect` today gets your box onto the
+> tunnel with its assigned base domain.
 
 Only pre-release builds exist for now, so add `--rc` to install the latest
 release candidate:
