@@ -126,3 +126,59 @@ func TestClientConfigRoundTripsRelayFields(t *testing.T) {
 		t.Fatalf("cc = %+v", cc)
 	}
 }
+
+func TestRelayFileRoundTripAndMissing(t *testing.T) {
+	dir := t.TempDir()
+	if _, found, err := LoadRelayFile(dir); err != nil || found {
+		t.Fatalf("missing relay file: found=%v err=%v", found, err)
+	}
+	rf := RelayFile{RelayAddr: "relay:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co"}
+	if err := SaveRelayFile(dir, rf); err != nil {
+		t.Fatalf("SaveRelayFile: %v", err)
+	}
+	got, found, err := LoadRelayFile(dir)
+	if err != nil || !found {
+		t.Fatalf("LoadRelayFile: found=%v err=%v", found, err)
+	}
+	if got != rf {
+		t.Fatalf("relay file = %+v, want %+v", got, rf)
+	}
+}
+
+func TestLoadReadsRelayFileWhenEnvUnset(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{
+		RelayAddr: "relay:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_DATA_DIR", dir)
+	t.Setenv("PIPER_RELAY_ADDR", "")
+	t.Setenv("PIPER_RELAY_TOKEN", "")
+	t.Setenv("PIPER_BASE_DOMAIN", "")
+	cfg := Load()
+	if cfg.RelayAddr != "relay:7000" || cfg.RelayToken != "enr-1" ||
+		cfg.BaseDomain != "ab12-alice.public.getpiper.co" {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+}
+
+func TestLoadEnvOverridesRelayFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{
+		RelayAddr: "relay:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_DATA_DIR", dir)
+	t.Setenv("PIPER_RELAY_ADDR", "override:9000")
+	t.Setenv("PIPER_RELAY_TOKEN", "")
+	t.Setenv("PIPER_BASE_DOMAIN", "")
+	cfg := Load()
+	if cfg.RelayAddr != "override:9000" {
+		t.Fatalf("RelayAddr = %q, want env override", cfg.RelayAddr)
+	}
+	if cfg.RelayToken != "enr-1" { // env unset ⇒ file value
+		t.Fatalf("RelayToken = %q, want file value", cfg.RelayToken)
+	}
+}
