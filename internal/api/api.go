@@ -211,3 +211,30 @@ func isWithin(base, target string) bool {
 	rel, err := filepath.Rel(base, target)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
+
+// RequireToken wraps next so every request must carry a valid
+// `Authorization: Bearer <token>`. Unknown, malformed, or revoked tokens get 401.
+func RequireToken(s *store.Store, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok, ok := bearerToken(r)
+		if !ok {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		if _, err := s.AuthenticateToken(tok); err != nil {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearerToken(r *http.Request) (string, bool) {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, prefix) {
+		return "", false
+	}
+	tok := strings.TrimSpace(strings.TrimPrefix(h, prefix))
+	return tok, tok != ""
+}

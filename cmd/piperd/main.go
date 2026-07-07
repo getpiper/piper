@@ -103,11 +103,11 @@ func main() {
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
 	// After `piper github setup` stores App creds at runtime, start serving
 	// webhooks immediately (relay mode only) instead of waiting for a restart.
-	handler := api.New(st, dep, cfg.BaseDomain, "", func() {
+	handler := api.RequireToken(st, api.New(st, dep, cfg.BaseDomain, "", func() {
 		if wh != nil {
 			wh.start()
 		}
-	})
+	}))
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
 	go func() {
