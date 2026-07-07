@@ -26,16 +26,48 @@ type Agent struct {
 	BaseDomain string
 }
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db        *sql.DB
+	apex      string
+	maxAgents int
+}
+
+// Configure sets the free-tier apex domain and the per-account agent cap used by
+// EnrollForAccount. Safe to call once after Open.
+func (s *Store) Configure(apex string, maxAgents int) {
+	s.apex = apex
+	s.maxAgents = maxAgents
+}
+
+func (s *Store) apexOrDefault() string {
+	if s.apex == "" {
+		return "public.getpiper.co"
+	}
+	return s.apex
+}
+
+func (s *Store) maxAgentsOrDefault() int {
+	if s.maxAgents <= 0 {
+		return 3
+	}
+	return s.maxAgents
+}
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout makes a second writer (e.g. an overlapping control API
+	// request) wait for the lock instead of failing immediately with
+	// SQLITE_BUSY.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := ensureAgentAccountColumn(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate agents: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -64,16 +96,52 @@ func (s *Store) Enroll(name, baseDomain string) (string, error) {
 	return tok, nil
 }
 
-// Authenticate resolves a plaintext token to its Agent, or ErrBadToken.
+// Authenticate resolves a plaintext token to its Agent, or ErrBadToken. An agent
+// whose owning account has been disabled is rejected as ErrBadToken.
 func (s *Store) Authenticate(token string) (Agent, error) {
 	var ag Agent
-	err := s.db.QueryRow(`SELECT name, base_domain FROM agents WHERE token_hash=?`, hashToken(token)).
-		Scan(&ag.Name, &ag.BaseDomain)
+	var disabled sql.NullInt64
+	err := s.db.QueryRow(
+		`SELECT ag.name, ag.base_domain, acc.disabled
+		   FROM agents ag LEFT JOIN accounts acc ON acc.id = ag.account_id
+		  WHERE ag.token_hash = ?`, hashToken(token)).
+		Scan(&ag.Name, &ag.BaseDomain, &disabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Agent{}, ErrBadToken
 	}
 	if err != nil {
 		return Agent{}, err
 	}
+	if disabled.Valid && disabled.Int64 != 0 {
+		return Agent{}, ErrBadToken
+	}
 	return ag, nil
+}
+
+// ensureAgentAccountColumn adds agents.account_id if an older DB predates it.
+// CREATE TABLE IF NOT EXISTS can't alter an existing table, so we add the column
+// idempotently and tolerate the "duplicate column" error on already-migrated DBs.
+func ensureAgentAccountColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(agents)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "account_id" {
+			return nil // already migrated
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE agents ADD COLUMN account_id TEXT`)
+	return err
 }

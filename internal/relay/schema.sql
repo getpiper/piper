@@ -7,3 +7,17 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE UNIQUE INDEX IF NOT EXISTS agents_base_domain_unique
     ON agents(base_domain);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id          TEXT PRIMARY KEY,
+    google_sub  TEXT NOT NULL UNIQUE,
+    username    TEXT NOT NULL UNIQUE,
+    disabled    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS account_creds (
+    token_hash  TEXT PRIMARY KEY,
+    account_id  TEXT NOT NULL REFERENCES accounts(id),
+    created_at  TEXT NOT NULL
+);
