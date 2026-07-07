@@ -73,3 +73,73 @@ func TestLoginPollUnknownHandle(t *testing.T) {
 		t.Fatalf("unknown-handle poll status = %d, want 400", rr.Code)
 	}
 }
+
+func TestEnrollWithAccountCredential(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000")
+
+	acc, _ := st.UpsertAccount("sub-1", "judy@x.com")
+	cred, _ := st.MintAccountCredential(acc.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
+	req.Header.Set("Authorization", "Bearer "+cred)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enroll status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		EnrollmentToken string `json:"enrollment_token"`
+		BaseDomain      string `json:"base_domain"`
+		TunnelEndpoint  string `json:"tunnel_endpoint"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.EnrollmentToken == "" {
+		t.Fatal("empty enrollment token")
+	}
+	if !strings.HasSuffix(out.BaseDomain, "-judy.public.getpiper.co") {
+		t.Fatalf("base domain = %q", out.BaseDomain)
+	}
+	if out.TunnelEndpoint != "relay.getpiper.co:7000" {
+		t.Fatalf("tunnel endpoint = %q", out.TunnelEndpoint)
+	}
+}
+
+func TestEnrollRejectsBadCredential(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
+	req.Header.Set("Authorization", "Bearer nope")
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bad-cred enroll status = %d, want 401", rr.Code)
+	}
+}
+
+func TestEnrollOverCapReturns429(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 1)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000")
+	acc, _ := st.UpsertAccount("sub-1", "ken@x.com")
+	cred, _ := st.MintAccountCredential(acc.ID)
+
+	do := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
+		req.Header.Set("Authorization", "Bearer "+cred)
+		rr := httptest.NewRecorder()
+		api.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if c := do(); c != http.StatusOK {
+		t.Fatalf("first enroll = %d, want 200", c)
+	}
+	if c := do(); c != http.StatusTooManyRequests {
+		t.Fatalf("over-cap enroll = %d, want 429", c)
+	}
+}

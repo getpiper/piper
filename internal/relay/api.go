@@ -6,21 +6,25 @@ import (
 	"net/http"
 )
 
-// NewAPI returns the relay's self-service control API: device-flow login and
-// account-bound enrollment. TLS termination for this handler is a deployment
-// concern (front it with the api.<apex> cert); the handler itself is plain HTTP.
-func NewAPI(st *Store, v Verifier) http.Handler {
-	a := &api{st: st, v: v}
+// NewAPI returns the control API without advertising a tunnel endpoint (tests /
+// LAN). Use NewAPIWithTunnel in production to advertise the relay's tunnel addr.
+func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "") }
+
+// NewAPIWithTunnel is NewAPI plus the public tunnel endpoint returned to agents
+// on enroll so a freshly claimed box knows where to dial.
+func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string) http.Handler {
+	a := &api{st: st, v: v, tunnelEndpoint: tunnelEndpoint}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/login/device", a.loginDevice)
 	mux.HandleFunc("POST /v1/login/poll", a.loginPoll)
-	mux.HandleFunc("POST /v1/enroll", a.enroll) // implemented in Task 7
+	mux.HandleFunc("POST /v1/enroll", a.enroll)
 	return mux
 }
 
 type api struct {
-	st *Store
-	v  Verifier
+	st             *Store
+	v              Verifier
+	tunnelEndpoint string
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
@@ -78,5 +82,42 @@ func (a *api) loginPoll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	cred, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "missing bearer credential", http.StatusUnauthorized)
+		return
+	}
+	acc, err := a.st.AuthenticateAccount(cred)
+	if errors.Is(err, ErrBadCredential) {
+		http.Error(w, "bad credential", http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		http.Error(w, "auth error", http.StatusInternalServerError)
+		return
+	}
+	en, err := a.st.EnrollForAccount(acc.ID)
+	if errors.Is(err, ErrQuotaExceeded) {
+		http.Error(w, "agent quota exceeded", http.StatusTooManyRequests)
+		return
+	}
+	if err != nil {
+		http.Error(w, "enroll error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"enrollment_token": en.Token,
+		"base_domain":      en.BaseDomain,
+		"tunnel_endpoint":  a.tunnelEndpoint,
+	})
+}
+
+// bearerToken extracts a "Bearer <tok>" Authorization header.
+func bearerToken(r *http.Request) (string, bool) {
+	const p = "Bearer "
+	h := r.Header.Get("Authorization")
+	if len(h) <= len(p) || h[:len(p)] != p {
+		return "", false
+	}
+	return h[len(p):], true
 }
