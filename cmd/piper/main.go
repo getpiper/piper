@@ -21,11 +21,24 @@ import (
 
 var openBrowserFn = openBrowser
 
-func dialClient(stderr io.Writer) (*client.Client, bool) {
+// dialClient returns a client for piperd's control API: loopback by default,
+// or — when remote is a relay-connected box's base domain — through the
+// relay's control plane at <RelayAPI>/agents/<base-domain>, authenticated by
+// the account credential from `piper login`. The relay strips the prefix and
+// swaps the credential for the box's own token, so the same Client works for
+// both.
+func dialClient(remote string, stderr io.Writer) (*client.Client, bool) {
 	cc, err := config.LoadClient()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return nil, false
+	}
+	if remote != "" {
+		if cc.RelayAPI == "" || cc.AccountCredential == "" {
+			fmt.Fprintln(stderr, "error: remote target requires a relay login; run `piper login`")
+			return nil, false
+		}
+		return client.New(strings.TrimRight(cc.RelayAPI, "/")+"/agents/"+remote, cc.AccountCredential), true
 	}
 	return client.New(cc.Addr, cc.Token), true
 }
@@ -66,7 +79,7 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	gfs := flag.NewFlagSet("piper", flag.ContinueOnError)
 	gfs.SetOutput(stderr)
-	gfs.String("remote", os.Getenv("PIPER_REMOTE"), "base domain of a relay-connected box to drive through the relay")
+	remote := gfs.String("remote", os.Getenv("PIPER_REMOTE"), "base domain of a relay-connected box to drive through the relay")
 	if err := gfs.Parse(args); err != nil {
 		return 2
 	}
@@ -128,7 +141,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
 			return 2
 		}
-		c, ok := dialClient(stderr)
+		c, ok := dialClient(*remote, stderr)
 		if !ok {
 			return 1
 		}
@@ -154,7 +167,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR]")
 			return 2
 		}
-		c, ok := dialClient(stderr)
+		c, ok := dialClient(*remote, stderr)
 		if !ok {
 			return 1
 		}
@@ -170,7 +183,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper list")
 			return 2
 		}
-		c, ok := dialClient(stderr)
+		c, ok := dialClient(*remote, stderr)
 		if !ok {
 			return 1
 		}
@@ -184,9 +197,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	case "app":
-		return cmdApp(args[1:], stdout, stderr)
+		return cmdApp(*remote, args[1:], stdout, stderr)
 	case "github":
-		return cmdGithub(args[1:], stdout, stderr)
+		return cmdGithub(*remote, args[1:], stdout, stderr)
 	default:
 		return usage(stderr)
 	}
@@ -194,7 +207,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const appLinkUsage = "usage: piper app link <name> --repo owner/name [--branch main]"
 
-func cmdApp(args []string, stdout, stderr io.Writer) int {
+func cmdApp(remote string, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "link" {
 		fmt.Fprintln(stderr, appLinkUsage)
 		return 2
@@ -215,7 +228,7 @@ func cmdApp(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, appLinkUsage)
 		return 2
 	}
-	c, ok := dialClient(stderr)
+	c, ok := dialClient(remote, stderr)
 	if !ok {
 		return 1
 	}
@@ -227,7 +240,7 @@ func cmdApp(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func cmdGithub(args []string, stdout, stderr io.Writer) int {
+func cmdGithub(remote string, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "setup" {
 		fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
 		return 2
@@ -242,14 +255,14 @@ func cmdGithub(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
 		return 2
 	}
-	return githubSetup(*org, stdout, stderr)
+	return githubSetup(remote, *org, stdout, stderr)
 }
 
 // githubSetup drives the GitHub App manifest flow: it asks piperd for a manifest,
 // serves a tiny auto-submitting form that POSTs it to GitHub, catches the
 // redirect ?code=, and exchanges it for App credentials stored on the box.
-func githubSetup(org string, stdout, stderr io.Writer) int {
-	c, ok := dialClient(stderr)
+func githubSetup(remote, org string, stdout, stderr io.Writer) int {
+	c, ok := dialClient(remote, stderr)
 	if !ok {
 		return 1
 	}

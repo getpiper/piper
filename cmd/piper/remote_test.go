@@ -2,8 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/store"
 )
 
 func TestRunRemoteFlagRejectedForLocalOnlyCommands(t *testing.T) {
@@ -26,5 +32,90 @@ func TestRunVersionIgnoresPiperRemoteEnv(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+}
+
+func TestRunRemoteListRoutesThroughRelay(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agents/ab12-alice.public.getpiper.co/v1/apps" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer cred-xyz" {
+			t.Errorf("Authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode([]store.App{{Name: "api", Port: 3000}})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{RelayAPI: srv.URL, AccountCredential: "cred-xyz"}); err != nil {
+		t.Fatalf("SaveClient: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--remote", "ab12-alice.public.getpiper.co", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if got := stdout.String(); got != "api\tport=3000\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+func TestRunRemoteEnvSelectsTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	t.Setenv("PIPER_REMOTE", "env-box.public.getpiper.co")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agents/env-box.public.getpiper.co/v1/apps" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]store.App{})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{RelayAPI: srv.URL, AccountCredential: "cred-xyz"}); err != nil {
+		t.Fatalf("SaveClient: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+}
+
+func TestRunRemoteFlagOverridesEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	t.Setenv("PIPER_REMOTE", "wrong-box.public.getpiper.co")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agents/right-box.public.getpiper.co/v1/apps" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]store.App{})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{RelayAPI: srv.URL, AccountCredential: "cred-xyz"}); err != nil {
+		t.Fatalf("SaveClient: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--remote", "right-box.public.getpiper.co", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+}
+
+func TestRunRemoteRequiresRelayLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // empty config: no RelayAPI/AccountCredential
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--remote", "box.example.com", "list"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "piper login") {
+		t.Errorf("stderr = %q, want a pointer to `piper login`", got)
 	}
 }
