@@ -83,6 +83,73 @@ func Dial(conn net.Conn, token, baseDomain string) (*Session, error) {
 	return &Session{BaseDomain: baseDomain, mux: mux}, nil
 }
 
+// Stream kinds: every stream opens with a single kind byte so each end can
+// dispatch by purpose. The agent opens only Control streams; the relay opens
+// only Passthrough/HTTP streams.
+const (
+	KindPassthrough byte = 'T' // relay→agent: replayed ClientHello follows; agent pipes to :443
+	KindHTTP        byte = 'H' // relay→agent: relay-terminated plaintext HTTP; agent pipes to :80
+	KindControl     byte = 'C' // agent→relay: a length-prefixed ControlRequest/ControlResponse
+)
+
+// OpenKind opens a new stream and writes its kind byte.
+func (s *Session) OpenKind(kind byte) (net.Conn, error) {
+	c, err := s.mux.Open()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.Write([]byte{kind}); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
+// AcceptKind accepts a stream and reads its leading kind byte.
+func (s *Session) AcceptKind() (byte, net.Conn, error) {
+	c, err := s.mux.Accept()
+	if err != nil {
+		return 0, nil, err
+	}
+	var b [1]byte
+	if _, err := io.ReadFull(c, b[:]); err != nil {
+		c.Close()
+		return 0, nil, err
+	}
+	return b[0], c, nil
+}
+
+// ControlRequest is an agent→relay control message on a KindControl stream.
+type ControlRequest struct {
+	Op       string `json:"op"` // "register" | "deregister"
+	App      string `json:"app,omitempty"`
+	Hostname string `json:"hostname,omitempty"`
+}
+
+// ControlResponse is the relay's reply. Error is non-empty on failure.
+type ControlResponse struct {
+	Hostname string `json:"hostname,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// WriteMsg writes v as a single length-prefixed JSON frame.
+func WriteMsg(w io.Writer, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return writeFrame(w, b)
+}
+
+// ReadMsg reads one length-prefixed JSON frame into v.
+func ReadMsg(r io.Reader, v any) error {
+	b, err := readFrame(r)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, v)
+}
+
 // Serve reads the client handshake over conn, authorizes it, then starts a
 // yamux server. On auth failure it returns the auth error (caller closes conn).
 func Serve(conn net.Conn, auth Auth) (*Session, error) {

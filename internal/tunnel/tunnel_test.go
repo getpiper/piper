@@ -153,3 +153,53 @@ func TestServeClearsPreAuthDeadlineBeforeAuth(t *testing.T) {
 	clientSession := <-clientResult
 	t.Cleanup(func() { clientSession.Close() })
 }
+
+func TestOpenAcceptKind(t *testing.T) {
+	c1, c2 := net.Pipe()
+	srvSess := make(chan *Session, 1)
+	go func() {
+		s, err := Serve(c2, func(_, _ string) error { return nil })
+		if err != nil {
+			t.Errorf("Serve: %v", err)
+			return
+		}
+		srvSess <- s
+	}()
+	cli, err := Dial(c1, "tok", "base.example.com")
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	srv := <-srvSess
+
+	// Client opens a control stream; server accepts and sees the kind.
+	go func() {
+		stream, err := cli.OpenKind(KindControl)
+		if err != nil {
+			t.Errorf("OpenKind: %v", err)
+			return
+		}
+		_ = WriteMsg(stream, ControlRequest{Op: "register", App: "blog"})
+		var resp ControlResponse
+		_ = ReadMsg(stream, &resp)
+		if resp.Hostname != "blog-alice.public.getpiper.co" {
+			t.Errorf("resp = %+v", resp)
+		}
+		stream.Close()
+	}()
+
+	kind, stream, err := srv.AcceptKind()
+	if err != nil {
+		t.Fatalf("AcceptKind: %v", err)
+	}
+	if kind != KindControl {
+		t.Fatalf("kind = %q, want C", kind)
+	}
+	var req ControlRequest
+	if err := ReadMsg(stream, &req); err != nil {
+		t.Fatalf("ReadMsg: %v", err)
+	}
+	if req.Op != "register" || req.App != "blog" {
+		t.Fatalf("req = %+v", req)
+	}
+	_ = WriteMsg(stream, ControlResponse{Hostname: "blog-alice.public.getpiper.co"})
+}
