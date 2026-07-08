@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -35,7 +36,12 @@ func env(key, def string) string {
 // defaults. Env vars override relay.json, which overrides built-in defaults.
 func Load() Config {
 	dataDir := env("PIPER_DATA_DIR", DefaultDataDir())
-	rf, _, _ := LoadRelayFile(dataDir) // best-effort: a corrupt file yields zero values
+	rf, _, err := LoadRelayFile(dataDir) // best-effort: a corrupt file yields zero values
+	if err != nil {
+		// A present-but-unreadable relay.json otherwise silently drops the box
+		// to LAN-only; log it so the failure is diagnosable.
+		log.Printf("piper: ignoring unreadable %s: %v", relayFilePath(dataDir), err)
+	}
 
 	return Config{
 		APIAddr:     env("PIPER_API_ADDR", "127.0.0.1:8088"),
@@ -73,6 +79,25 @@ func defaultDataDir() string {
 // PIPER_DATA_DIR is unset. `piper connect` reuses it to write relay.json to the
 // same place piperd reads it.
 func DefaultDataDir() string { return defaultDataDir() }
+
+// SystemDataDir is piperd's data dir under the shipped systemd unit, whose
+// StateDirectory=piper sets PIPER_DATA_DIR=/var/lib/piper. `piper connect`
+// prefers this when it exists so relay.json lands where the service reads it.
+// A var (not a const) so tests can point it at a scratch directory.
+var SystemDataDir = "/var/lib/piper"
+
+// ConnectDataDir resolves where `piper connect` writes relay.json so piperd
+// reads it back: PIPER_DATA_DIR if set, else the systemd StateDirectory when it
+// exists (the standard service install), else the per-user default.
+func ConnectDataDir() string {
+	if v := os.Getenv("PIPER_DATA_DIR"); v != "" {
+		return v
+	}
+	if fi, err := os.Stat(SystemDataDir); err == nil && fi.IsDir() {
+		return SystemDataDir
+	}
+	return defaultDataDir()
+}
 
 // ClientConfig is the piper CLI's saved credentials/target. Addr/Token are the
 // LAN path (bearer to piperd); RelayAPI/AccountCredential are the relay path

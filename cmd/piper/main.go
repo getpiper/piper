@@ -87,15 +87,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "connect":
 		fs := flag.NewFlagSet("connect", flag.ContinueOnError)
 		fs.SetOutput(stderr)
-		def := os.Getenv("PIPER_DATA_DIR")
-		if def == "" {
-			def = config.DefaultDataDir()
-		}
-		dataDir := fs.String("data-dir", def, "piperd data directory (where relay.json is written)")
+		dataDir := fs.String("data-dir", config.ConnectDataDir(), "piperd data directory (where relay.json is written)")
+		installOnly := fs.Bool("install-only", false, "write relay.json from the --relay-* flags without logging in or enrolling (the privileged systemd-run install step)")
+		relayAddr := fs.String("relay-addr", "", "relay tunnel endpoint (with --install-only)")
+		relayToken := fs.String("relay-token", "", "enrollment token (with --install-only)")
+		baseDomain := fs.String("base-domain", "", "assigned base domain (with --install-only)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
-		return connect(*dataDir, stdout, stderr)
+		return connect(connectOpts{
+			dataDir:     *dataDir,
+			installOnly: *installOnly,
+			relayAddr:   *relayAddr,
+			relayToken:  *relayToken,
+			baseDomain:  *baseDomain,
+		}, stdout, stderr)
 	case "create":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")

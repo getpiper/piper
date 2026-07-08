@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -180,5 +181,48 @@ func TestLoadEnvOverridesRelayFile(t *testing.T) {
 	}
 	if cfg.RelayToken != "enr-1" { // env unset ⇒ file value
 		t.Fatalf("RelayToken = %q, want file value", cfg.RelayToken)
+	}
+}
+
+func TestConnectDataDirResolution(t *testing.T) {
+	// PIPER_DATA_DIR wins outright.
+	explicit := t.TempDir()
+	t.Setenv("PIPER_DATA_DIR", explicit)
+	if got := ConnectDataDir(); got != explicit {
+		t.Fatalf("ConnectDataDir with env = %q, want %q", got, explicit)
+	}
+
+	// Env unset + SystemDataDir exists ⇒ the systemd StateDirectory.
+	t.Setenv("PIPER_DATA_DIR", "")
+	sys := t.TempDir()
+	old := SystemDataDir
+	SystemDataDir = sys
+	defer func() { SystemDataDir = old }()
+	if got := ConnectDataDir(); got != sys {
+		t.Fatalf("ConnectDataDir with system dir present = %q, want %q", got, sys)
+	}
+
+	// Env unset + SystemDataDir missing ⇒ the per-user default.
+	SystemDataDir = filepath.Join(sys, "does-not-exist")
+	if got := ConnectDataDir(); got != DefaultDataDir() {
+		t.Fatalf("ConnectDataDir fallback = %q, want %q", got, DefaultDataDir())
+	}
+}
+
+func TestLoadIgnoresCorruptRelayFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "relay.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_DATA_DIR", dir)
+	t.Setenv("PIPER_RELAY_ADDR", "")
+	t.Setenv("PIPER_RELAY_TOKEN", "")
+	t.Setenv("PIPER_BASE_DOMAIN", "")
+	cfg := Load() // must not panic; degrades to zero relay values + default domain
+	if cfg.RelayAddr != "" || cfg.RelayToken != "" {
+		t.Fatalf("corrupt relay.json leaked values: %+v", cfg)
+	}
+	if cfg.BaseDomain != "piper.localhost" {
+		t.Fatalf("BaseDomain = %q, want default", cfg.BaseDomain)
 	}
 }

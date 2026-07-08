@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/getpiper/piper/internal/config"
@@ -69,10 +70,45 @@ func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
 	}
 }
 
-// connect claims this box: it enrolls with the relay using the stored account
-// credential and writes a relay.json into piperd's data dir. piperd reads that
-// file at startup and dials the tunnel; connect does not restart piperd.
-func connect(dataDir string, stdout, stderr io.Writer) int {
+// connectOpts are the inputs to `piper connect`. In the normal path only
+// dataDir is set; installOnly + the relay* fields drive the login-less write
+// used by the privileged systemd-run install step (see connect).
+type connectOpts struct {
+	dataDir     string
+	installOnly bool
+	relayAddr   string
+	relayToken  string
+	baseDomain  string
+}
+
+// connect claims this box on the relay and installs the enrollment into
+// piperd's data dir as relay.json; piperd reads it at startup and dials the
+// tunnel (connect never restarts piperd).
+//
+// Two contexts, split along a permission boundary: `piper login` stores the
+// account credential in the invoking user's home, but under the shipped systemd
+// unit piperd runs as a DynamicUser whose data dir (/var/lib/piper) the login
+// user cannot write. So the normal path enrolls as the user, then — when the
+// target is that protected system dir — prints a ready `sudo systemd-run …
+// piper connect --install-only …` command that performs the write as the
+// DynamicUser (mirroring how `piper-relay enroll` writes the relay's state
+// dir). installOnly is that second step: no login, no network, just the write.
+func connect(o connectOpts, stdout, stderr io.Writer) int {
+	if o.installOnly {
+		if o.relayAddr == "" || o.relayToken == "" || o.baseDomain == "" {
+			fmt.Fprintln(stderr, "error: --install-only requires --relay-addr, --relay-token and --base-domain")
+			return 1
+		}
+		if err := config.SaveRelayFile(o.dataDir, config.RelayFile{
+			RelayAddr: o.relayAddr, RelayToken: o.relayToken, BaseDomain: o.baseDomain,
+		}); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "relay.json written to %s\n", o.dataDir)
+		return 0
+	}
+
 	cc, err := config.LoadClient()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -94,7 +130,28 @@ func connect(dataDir string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	if err := config.SaveRelayFile(dataDir, config.RelayFile{
+
+	// Protected systemd install: the login user can't write piperd's DynamicUser
+	// data dir, so guide the privileged install rather than fail on it. The
+	// enrolled values are passed through so no second login/enrollment is needed.
+	if o.dataDir == config.SystemDataDir {
+		self, err := os.Executable()
+		if err != nil || self == "" {
+			self = "piper"
+		}
+		fmt.Fprintf(stdout, "box claimed: %s\n\n", en.BaseDomain)
+		fmt.Fprintln(stdout, "piperd runs as a systemd DynamicUser; install the enrollment as it:")
+		fmt.Fprintf(stdout, "\n    sudo systemd-run --pipe --wait --collect \\\n"+
+			"      --property=DynamicUser=yes --property=StateDirectory=piper \\\n"+
+			"      --setenv=PIPER_DATA_DIR=%s \\\n"+
+			"      %s connect --install-only \\\n"+
+			"      --relay-addr %s --relay-token %s --base-domain %s\n\n",
+			o.dataDir, self, en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
+		fmt.Fprintln(stdout, "then: sudo systemctl restart piperd")
+		return 0
+	}
+
+	if err := config.SaveRelayFile(o.dataDir, config.RelayFile{
 		RelayAddr:  en.TunnelEndpoint,
 		RelayToken: en.EnrollmentToken,
 		BaseDomain: en.BaseDomain,
