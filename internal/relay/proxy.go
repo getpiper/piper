@@ -30,16 +30,33 @@ func NewControlProxy(st *Store, router *Router) http.Handler {
 			return
 		}
 
-		// Path shape: /agents/<base-domain>/v1/...
+		// Path shape: /agents/<base-domain>[/v1/...]
 		rest := strings.TrimPrefix(r.URL.Path, "/agents/")
-		base, tail, found := strings.Cut(rest, "/")
-		if !found || base == "" || !strings.HasPrefix(tail, "v1/") {
+		base, tail, _ := strings.Cut(rest, "/")
+		if base == "" {
 			http.NotFound(w, r)
 			return
 		}
 
 		ownerID, _, err := st.AgentAccount(base)
 		if err != nil || ownerID != acc.ID {
+			http.NotFound(w, r)
+			return
+		}
+
+		if tail == "" {
+			// Liveness: answered by the relay itself from its in-memory
+			// session map — never opens a tunnel stream. Offline is an
+			// answer, not an error: 200 with connected:false.
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			_, connected := router.Lookup(base)
+			writeJSON(w, http.StatusOK, map[string]any{"agent": base, "connected": connected})
+			return
+		}
+		if !strings.HasPrefix(tail, "v1/") {
 			http.NotFound(w, r)
 			return
 		}

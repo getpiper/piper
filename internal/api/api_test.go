@@ -275,3 +275,58 @@ func TestUntarRejectsPathTraversal(t *testing.T) {
 		t.Errorf("escape file exists or stat failed: %v", err)
 	}
 }
+
+func TestListAppsIncludesDeployStatus(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil)
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "running"); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/apps", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var apps []App
+	if err := json.NewDecoder(rr.Body).Decode(&apps); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// ListApps orders by name: api, blog.
+	if len(apps) != 2 || apps[0].Name != "api" || apps[0].Status != "" {
+		t.Errorf("apps[0] = %+v, want api with empty status", apps)
+	}
+	if apps[1].Name != "blog" || apps[1].Status != "running" {
+		t.Errorf("apps[1] = %+v, want blog running", apps)
+	}
+}
+
+func TestGetAppIncludesDeployStatus(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed"); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/apps/blog", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var app App
+	if err := json.NewDecoder(rr.Body).Decode(&app); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if app.Name != "blog" || app.Status != "failed" {
+		t.Errorf("app = %+v, want blog failed", app)
+	}
+}

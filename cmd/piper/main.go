@@ -202,6 +202,40 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s\tport=%d\n", app.Name, app.Port)
 		}
 		return 0
+	case "status":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: piper status")
+			return 2
+		}
+		c, ok := dialClient(*remote, stderr)
+		if !ok {
+			return 1
+		}
+		if *remote != "" {
+			live, err := c.Liveness()
+			if err != nil {
+				fmt.Fprintln(stderr, "error:", err)
+				return 1
+			}
+			if !live.Connected {
+				fmt.Fprintf(stdout, "box %s: offline\n", *remote)
+				return 0
+			}
+			fmt.Fprintf(stdout, "box %s: connected\n", *remote)
+		}
+		apps, err := c.ListApps()
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		for _, app := range apps {
+			status := app.Status
+			if status == "" {
+				status = "-"
+			}
+			fmt.Fprintf(stdout, "%s\tstatus=%s\tport=%d\n", app.Name, status, app.Port)
+		}
+		return 0
 	case "app":
 		return cmdApp(*remote, args[1:], stdout, stderr)
 	case "github":
@@ -359,6 +393,6 @@ func openBrowser(url string) error {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] <version|login|connect|create|deploy|list|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] <version|login|connect|create|deploy|list|status|app|github> [args]")
 	return 2
 }

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -166,5 +167,62 @@ func TestControlProxyNoTokenBForwardsBare(t *testing.T) {
 	// Never provisioned: forwarded with NO Authorization (a real box would 401).
 	if !strings.Contains(rr.Body.String(), "auth= ") && !strings.HasSuffix(strings.TrimSpace(rr.Body.String()), "auth=") {
 		t.Fatalf("expected empty forwarded auth, got %q", rr.Body.String())
+	}
+}
+
+func TestControlProxyLiveness(t *testing.T) {
+	api, _, router, aliceCred, malloryCred, base := proxyFixture(t)
+
+	// Same gates as the proxy: no/bad credential → 401.
+	if rr := proxyGet(t, api, "/agents/"+base, ""); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("no cred: %d, want 401", rr.Code)
+	}
+	// Cross-tenant and unknown agents → 404, indistinguishable.
+	if rr := proxyGet(t, api, "/agents/"+base, malloryCred); rr.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant: %d, want 404", rr.Code)
+	}
+	if rr := proxyGet(t, api, "/agents/nope.public.getpiper.co", aliceCred); rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown agent: %d, want 404", rr.Code)
+	}
+
+	// Owned but no live session: offline is an answer, not an error.
+	rr := proxyGet(t, api, "/agents/"+base, aliceCred)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("offline liveness: %d, want 200 (body %s)", rr.Code, rr.Body.String())
+	}
+	var live struct {
+		Agent     string `json:"agent"`
+		Connected bool   `json:"connected"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&live); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if live.Agent != base || live.Connected {
+		t.Errorf("offline liveness = %+v, want agent=%s connected=false", live, base)
+	}
+
+	// Connected session ⇒ box up. No fakeBox is serving streams: if the
+	// handler opened a tunnel stream, this request would hang — liveness
+	// must be answered from the router's in-memory map alone.
+	relaySess, _ := pipeSession(t, base)
+	router.Register(relaySess)
+	rr = proxyGet(t, api, "/agents/"+base, aliceCred)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("connected liveness: %d, want 200", rr.Code)
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&live); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !live.Connected {
+		t.Errorf("connected liveness = %+v, want connected=true", live)
+	}
+
+	// Bare agent path is a GET-only resource.
+	req := httptest.NewRequest(http.MethodPost, "/agents/"+base, nil)
+	req.Header.Set("Authorization", "Bearer "+aliceCred)
+	pr := httptest.NewRecorder()
+	api.ServeHTTP(pr, req)
+	if pr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST liveness: %d, want 405", pr.Code)
 	}
 }

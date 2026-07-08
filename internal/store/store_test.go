@@ -262,3 +262,35 @@ func TestDeleteTokenHardDeletes(t *testing.T) {
 		t.Fatalf("second delete: %v", err)
 	}
 }
+
+func TestLatestDeployment(t *testing.T) {
+	s := openTemp(t)
+	s.CreateApp("blog", 8080)
+	if _, err := s.LatestDeployment("blog"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty LatestDeployment err = %v, want ErrNotFound", err)
+	}
+	s.CreateDeployment("blog", "img1", "c1", 40001, "running")
+	d2, _ := s.CreateDeployment("blog", "img2", "c2", 40002, "failed")
+	got, err := s.LatestDeployment("blog")
+	if err != nil {
+		t.Fatalf("LatestDeployment: %v", err)
+	}
+	if got.ID != d2.ID || got.Status != "failed" {
+		t.Errorf("LatestDeployment = %+v, want id %s status failed", got, d2.ID)
+	}
+}
+
+func TestLatestDeploymentIgnoresPreviews(t *testing.T) {
+	s := openTemp(t)
+	s.CreateApp("blog", 8080)
+	s.CreateDeployment("blog", "img", "main-c", 40000, "running")
+	// Created later, so it would win on created_at if pr>0 rows weren't excluded.
+	s.CreatePreviewDeployment("blog", 3, "img", "preview-c", 41000, "failed")
+	got, err := s.LatestDeployment("blog")
+	if err != nil {
+		t.Fatalf("LatestDeployment: %v", err)
+	}
+	if got.ContainerID != "main-c" || got.Status != "running" {
+		t.Errorf("LatestDeployment = %+v, want main-c/running", got)
+	}
+}

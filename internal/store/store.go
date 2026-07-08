@@ -208,6 +208,27 @@ func (s *Store) LatestRunning(app string) (Deployment, error) {
 	return d, nil
 }
 
+// LatestDeployment returns the newest non-preview deployment for app,
+// whatever its status — the app's production deploy state. PR previews
+// (pr > 0) never color it. ErrNotFound when the app was never deployed.
+func (s *Store) LatestDeployment(app string) (Deployment, error) {
+	var d Deployment
+	var ts string
+	err := s.db.QueryRow(
+		`SELECT id, app, image_id, container_id, host_port, status, created_at
+		 FROM deployments WHERE app=? AND pr=0
+		 ORDER BY created_at DESC LIMIT 1`, app).
+		Scan(&d.ID, &d.App, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Deployment{}, ErrNotFound
+	}
+	if err != nil {
+		return Deployment{}, err
+	}
+	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, ts)
+	return d, nil
+}
+
 func (s *Store) CreatePreviewDeployment(app string, pr int, imageID, containerID string, hostPort int, status string) (Deployment, error) {
 	d := Deployment{
 		ID: uuid.NewString(), App: app, PR: pr, ImageID: imageID,
