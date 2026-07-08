@@ -32,7 +32,9 @@ func TestLoginDevice(t *testing.T) {
 func TestLoginPollPendingThenSuccess(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ DeviceCode string `json:"device_code"` }
+		var body struct {
+			DeviceCode string `json:"device_code"`
+		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.DeviceCode != "dev-1" {
 			t.Errorf("device_code = %q", body.DeviceCode)
