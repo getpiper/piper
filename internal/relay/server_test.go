@@ -16,8 +16,8 @@ import (
 
 // startTestRelay opens a store with one enrolled account-bound agent, starts
 // Serve on ephemeral ports with the given tlsCfg, and dials an agent tunnel back.
-// It returns the agent session, the relay's TLS address, and the agent base domain.
-func startTestRelay(t *testing.T, tlsCfg *tls.Config) (*tunnel.Session, string, string) {
+// It returns the agent session, the relay's TLS address, the agent base domain, and the store.
+func startTestRelay(t *testing.T, tlsCfg *tls.Config) (*tunnel.Session, string, string, *Store) {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
 	if err != nil {
@@ -74,7 +74,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config) (*tunnel.Session, string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sess, tlsLn.Addr().String(), en.BaseDomain
+	return sess, tlsLn.Addr().String(), en.BaseDomain, st
 }
 
 func TestControlRegisterThenTerminate(t *testing.T) {
@@ -83,7 +83,7 @@ func TestControlRegisterThenTerminate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess, tlsAddr, _ := startTestRelay(t, tlsCfg)
+	sess, tlsAddr, _, _ := startTestRelay(t, tlsCfg)
 
 	// Agent side: register a hostname over a control stream.
 	cs, err := sess.OpenKind(tunnel.KindControl)
@@ -155,4 +155,27 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+func TestControlProvisionStoresToken(t *testing.T) {
+	sess, _, base, st := startTestRelay(t, nil)
+
+	cs, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "provision", Token: "box-tok"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("provision error: %s", resp.Error)
+	}
+	if got, err := st.ControlToken(base); err != nil || got != "box-tok" {
+		t.Fatalf("ControlToken = %q, %v (want box-tok)", got, err)
+	}
 }

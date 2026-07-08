@@ -104,6 +104,15 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 		_ = st.DeregisterHostname(sess.BaseDomain, req.Hostname)
 		router.UnregisterHost(req.Hostname)
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Hostname: req.Hostname})
+	case "provision":
+		// The box hands the relay its control-API bearer (agent-push Token B).
+		// The op rides the authenticated session, so it can only ever set the
+		// token for the session's own agent.
+		if err := st.SetControlToken(sess.BaseDomain, req.Token); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	default:
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "unknown op"})
 	}
