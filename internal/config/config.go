@@ -80,29 +80,22 @@ func defaultDataDir() string {
 // same place piperd reads it.
 func DefaultDataDir() string { return defaultDataDir() }
 
-// SystemDataDir is piperd's data dir under the shipped systemd unit, whose
-// StateDirectory=piper sets PIPER_DATA_DIR=/var/lib/piper. `piper connect`
-// prefers this when it exists so relay.json lands where the service reads it.
-// A var (not a const) so tests can point it at a scratch directory.
-var SystemDataDir = "/var/lib/piper"
+// SystemEnvDir is where the shipped systemd install keeps piperd's
+// EnvironmentFile. `piper connect` targets it on a systemd-managed box instead
+// of writing relay.json into piperd's DynamicUser StateDirectory, which the
+// login user can't touch. A var so tests can point it at a scratch directory.
+var SystemEnvDir = "/etc/piper"
 
-// ConnectDataDir resolves where `piper connect` writes relay.json so piperd
-// reads it back: PIPER_DATA_DIR if set, else the systemd StateDirectory when it
-// exists (the standard service install), else the per-user default.
-//
-// Detection uses Lstat, not Stat: under the shipped DynamicUser unit the
-// StateDirectory is a symlink (/var/lib/piper → /var/lib/private/piper, 0700
-// root), so a non-root login user can't Stat through it but can Lstat the link
-// itself. We only need to know the path exists; the privileged install step
-// does the actual write.
-func ConnectDataDir() string {
-	if v := os.Getenv("PIPER_DATA_DIR"); v != "" {
-		return v
-	}
-	if _, err := os.Lstat(SystemDataDir); err == nil {
-		return SystemDataDir
-	}
-	return defaultDataDir()
+// SystemEnvFile is piperd's EnvironmentFile within SystemEnvDir.
+func SystemEnvFile() string { return filepath.Join(SystemEnvDir, "piperd.env") }
+
+// SystemManaged reports whether piperd is installed under the shipped systemd
+// unit, detected by the presence of /etc/piper (the installer creates it). It's
+// a plain 0700 root dir, so a non-root login user can still Stat it — statting
+// the inode needs only search permission on /etc, not access to the dir itself.
+func SystemManaged() bool {
+	fi, err := os.Stat(SystemEnvDir)
+	return err == nil && fi.IsDir()
 }
 
 // ClientConfig is the piper CLI's saved credentials/target. Addr/Token are the
