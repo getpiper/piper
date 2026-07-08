@@ -56,10 +56,17 @@ func TestLoginRejectsBadToken(t *testing.T) {
 	}
 }
 
-func TestLoginRequiresToken(t *testing.T) {
+func TestLoginTokenPathStillValidates(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
 	var out, errb bytes.Buffer
-	if code := run([]string{"login"}, &out, &errb); code != 2 {
-		t.Fatalf("code = %d, want 2", code)
+	// --token present ⇒ LAN path, which rejects a bad token with exit 1.
+	if code := run([]string{"login", "--addr", srv.URL, "--token", "bad"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
 	}
 }

@@ -38,6 +38,9 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
 - ✅ `piper-relay` managed systemd service + operator docs — [#38](https://github.com/getpiper/piper/issues/38)
 - ✅ `piperd` — outbound tunnel client + cert wiring (additive; LAN-only unchanged) — [#10](https://github.com/getpiper/piper/issues/10)
 - ✅ e2e — loopback relay path (tunnel + SNI + on-box TLS) — [#10](https://github.com/getpiper/piper/issues/10)
+- ✅ `piper login` / `piper connect` self-service onboarding CLI — device-flow login + box claim, writes piperd `relay.json` — [#49](https://github.com/getpiper/piper/issues/49), [#83](https://github.com/getpiper/piper/pull/83)
+  - ⬜ LAN `login` load-mutate-save so it doesn't clobber stored relay creds — [#84](https://github.com/getpiper/piper/issues/84)
+  - ⬜ thread `context.Context` through `relayclient` requests — [#85](https://github.com/getpiper/piper/issues/85)
 
 ## Plan 3 — Git-driven deploys — epic [#11](https://github.com/getpiper/piper/issues/11) ([plan](docs/superpowers/plans/2026-07-05-plan3-git-deploys.md))
 

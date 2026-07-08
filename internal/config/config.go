@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -31,17 +32,26 @@ func env(key, def string) string {
 	return def
 }
 
-// Load builds a Config from env vars, applying defaults.
+// Load builds a Config from env vars and the persisted relay.json, applying
+// defaults. Env vars override relay.json, which overrides built-in defaults.
 func Load() Config {
+	dataDir := env("PIPER_DATA_DIR", DefaultDataDir())
+	rf, _, err := LoadRelayFile(dataDir) // best-effort: a corrupt file yields zero values
+	if err != nil {
+		// A present-but-unreadable relay.json otherwise silently drops the box
+		// to LAN-only; log it so the failure is diagnosable.
+		log.Printf("piper: ignoring unreadable %s: %v", relayFilePath(dataDir), err)
+	}
+
 	return Config{
 		APIAddr:     env("PIPER_API_ADDR", "127.0.0.1:8088"),
 		WebhookAddr: env("PIPER_WEBHOOK_ADDR", "127.0.0.1:8089"),
-		DataDir:     env("PIPER_DATA_DIR", defaultDataDir()),
-		BaseDomain:  env("PIPER_BASE_DOMAIN", "piper.localhost"),
+		DataDir:     dataDir,
+		BaseDomain:  firstNonEmpty(os.Getenv("PIPER_BASE_DOMAIN"), rf.BaseDomain, "piper.localhost"),
 		CaddyAdmin:  env("PIPER_CADDY_ADMIN", "http://127.0.0.1:2019"),
 
-		RelayAddr:   env("PIPER_RELAY_ADDR", ""),
-		RelayToken:  env("PIPER_RELAY_TOKEN", ""),
+		RelayAddr:   firstNonEmpty(os.Getenv("PIPER_RELAY_ADDR"), rf.RelayAddr),
+		RelayToken:  firstNonEmpty(os.Getenv("PIPER_RELAY_TOKEN"), rf.RelayToken),
 		ACMEEmail:   env("PIPER_ACME_EMAIL", ""),
 		ACMECA:      env("PIPER_ACME_CA", ""),
 		DNSProvider: env("PIPER_DNS_PROVIDER", ""),
@@ -65,10 +75,44 @@ func defaultDataDir() string {
 	return filepath.Join(home, ".piper", "piperd")
 }
 
-// ClientConfig is the piper CLI's saved credentials/target.
+// DefaultDataDir is piperd's data-dir default (~/.piper/piperd) when
+// PIPER_DATA_DIR is unset. `piper connect` reuses it to write relay.json to the
+// same place piperd reads it.
+func DefaultDataDir() string { return defaultDataDir() }
+
+// SystemDataDir is piperd's data dir under the shipped systemd unit, whose
+// StateDirectory=piper sets PIPER_DATA_DIR=/var/lib/piper. `piper connect`
+// prefers this when it exists so relay.json lands where the service reads it.
+// A var (not a const) so tests can point it at a scratch directory.
+var SystemDataDir = "/var/lib/piper"
+
+// ConnectDataDir resolves where `piper connect` writes relay.json so piperd
+// reads it back: PIPER_DATA_DIR if set, else the systemd StateDirectory when it
+// exists (the standard service install), else the per-user default.
+//
+// Detection uses Lstat, not Stat: under the shipped DynamicUser unit the
+// StateDirectory is a symlink (/var/lib/piper → /var/lib/private/piper, 0700
+// root), so a non-root login user can't Stat through it but can Lstat the link
+// itself. We only need to know the path exists; the privileged install step
+// does the actual write.
+func ConnectDataDir() string {
+	if v := os.Getenv("PIPER_DATA_DIR"); v != "" {
+		return v
+	}
+	if _, err := os.Lstat(SystemDataDir); err == nil {
+		return SystemDataDir
+	}
+	return defaultDataDir()
+}
+
+// ClientConfig is the piper CLI's saved credentials/target. Addr/Token are the
+// LAN path (bearer to piperd); RelayAPI/AccountCredential are the relay path
+// (device-flow login), written by `piper login` and read by `piper connect`.
 type ClientConfig struct {
-	Addr  string `json:"addr"`
-	Token string `json:"token"`
+	Addr              string `json:"addr"`
+	Token             string `json:"token"`
+	RelayAPI          string `json:"relay_api,omitempty"`
+	AccountCredential string `json:"account_credential,omitempty"`
 }
 
 func clientConfigPath() (string, error) {
@@ -121,4 +165,54 @@ func SaveClient(cc ClientConfig) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+// RelayFile is the persisted relay enrollment written by `piper connect` and
+// read by piperd at startup. Environment variables override these values.
+type RelayFile struct {
+	RelayAddr  string `json:"relay_addr"`
+	RelayToken string `json:"relay_token"`
+	BaseDomain string `json:"base_domain"`
+}
+
+func relayFilePath(dataDir string) string { return filepath.Join(dataDir, "relay.json") }
+
+// SaveRelayFile writes rf to <dataDir>/relay.json with 0600 perms, creating the
+// directory if needed.
+func SaveRelayFile(dataDir string, rf RelayFile) error {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(rf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(relayFilePath(dataDir), data, 0o600)
+}
+
+// LoadRelayFile reads <dataDir>/relay.json. A missing file is not an error:
+// found is false and rf is the zero value.
+func LoadRelayFile(dataDir string) (RelayFile, bool, error) {
+	var rf RelayFile
+	data, err := os.ReadFile(relayFilePath(dataDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return rf, false, nil
+	}
+	if err != nil {
+		return rf, false, err
+	}
+	if err := json.Unmarshal(data, &rf); err != nil {
+		return rf, false, err
+	}
+	return rf, true, nil
+}
+
+// firstNonEmpty returns the first non-empty string, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
