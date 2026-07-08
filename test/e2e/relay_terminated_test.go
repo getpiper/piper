@@ -164,8 +164,8 @@ func TestRelayTerminatedSelfService(t *testing.T) {
 
 	// Owner's credential → the box's real, Token-B-gated /v1/apps.
 	apps := controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base+"/v1/apps", cred, http.StatusOK, 30*time.Second)
-	if !strings.Contains(apps, "blog") {
-		t.Fatalf("control response missing deployed app: %q", apps)
+	if !strings.Contains(apps, "blog") || !strings.Contains(apps, `"Status":"running"`) {
+		t.Fatalf("control response missing deployed app with running status: %q", apps)
 	}
 
 	// Unknown credential → 401 at the relay.
@@ -174,6 +174,15 @@ func TestRelayTerminatedSelfService(t *testing.T) {
 	// Another tenant → 404 at the relay: never reaches the box, existence not leaked.
 	mcred := insertSecondAccount(t, relayData)
 	controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base+"/v1/apps", mcred, http.StatusNotFound, 10*time.Second)
+
+	// ---- Health/metrics surface (#75) ----
+	// Liveness: relay-answered from the live tunnel session, no box round-trip.
+	live := controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base, cred, http.StatusOK, 10*time.Second)
+	if !strings.Contains(live, `"connected":true`) {
+		t.Fatalf("liveness = %q, want connected:true", live)
+	}
+	// Same gates as the proxy: another tenant gets 404, not an existence leak.
+	controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base, mcred, http.StatusNotFound, 10*time.Second)
 }
 
 // terminatedHostname reads the single registered hostname from the relay's
