@@ -18,16 +18,31 @@ type RouteSetter interface {
 	RemoveRoute(host string) error
 }
 
+// HostnameRegistrar assigns a relay-terminated public hostname for an app over
+// the tunnel. In terminated (free-tier) mode the Deployer routes that hostname
+// instead of "<app>.<baseDom>". Implemented by *agent.TunnelClient; injected by
+// piperd. Nil in LAN / BYO-domain mode.
+type HostnameRegistrar interface {
+	Register(app string) (string, error)
+	Deregister(hostname string) error
+}
+
 type Deployer struct {
-	store   *store.Store
-	runtime runtime.Runtime
-	routes  RouteSetter
-	baseDom string
+	store     *store.Store
+	runtime   runtime.Runtime
+	routes    RouteSetter
+	baseDom   string
+	registrar HostnameRegistrar
 }
 
 func New(s *store.Store, rt runtime.Runtime, routes RouteSetter, baseDomain string) *Deployer {
 	return &Deployer{store: s, runtime: rt, routes: routes, baseDom: baseDomain}
 }
+
+// SetHostnameRegistrar puts the Deployer into relay-terminated mode: Deploy asks
+// the registrar for each app's public hostname and routes that. Nil restores
+// LAN/BYO behavior.
+func (d *Deployer) SetHostnameRegistrar(r HostnameRegistrar) { d.registrar = r }
 
 func (d *Deployer) hostFor(app string) string {
 	return app + "." + d.baseDom
@@ -91,7 +106,14 @@ func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.De
 	if err != nil {
 		return store.Deployment{}, err
 	}
-	if err := d.routes.UpsertRoute(d.hostFor(appName), run.HostPort); err != nil {
+	host := d.hostFor(appName)
+	if d.registrar != nil {
+		host, err = d.registrar.Register(appName)
+		if err != nil {
+			return store.Deployment{}, fmt.Errorf("register hostname: %w", err)
+		}
+	}
+	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
 		return store.Deployment{}, fmt.Errorf("route: %w", err)
 	}
 	if previous.ContainerID != "" && previous.ContainerID != run.ContainerID {

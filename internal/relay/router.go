@@ -12,9 +12,15 @@ import (
 type Router struct {
 	mu     sync.RWMutex
 	byBase map[string]*tunnel.Session
+	byHost map[string]*tunnel.Session
 }
 
-func NewRouter() *Router { return &Router{byBase: map[string]*tunnel.Session{}} }
+func NewRouter() *Router {
+	return &Router{
+		byBase: map[string]*tunnel.Session{},
+		byHost: map[string]*tunnel.Session{},
+	}
+}
 
 func (r *Router) Register(sess *tunnel.Session) {
 	r.mu.Lock()
@@ -22,11 +28,38 @@ func (r *Router) Register(sess *tunnel.Session) {
 	r.byBase[sess.BaseDomain] = sess
 }
 
+// RegisterHost maps an exact relay-terminated hostname to a session.
+func (r *Router) RegisterHost(hostname string, sess *tunnel.Session) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byHost[hostname] = sess
+}
+
+// UnregisterHost removes a single terminated hostname.
+func (r *Router) UnregisterHost(hostname string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.byHost, hostname)
+}
+
+// LookupHost returns the session for an exact terminated hostname.
+func (r *Router) LookupHost(hostname string) (*tunnel.Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.byHost[hostname]
+	return s, ok
+}
+
 func (r *Router) Unregister(sess *tunnel.Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.byBase[sess.BaseDomain] == sess {
 		delete(r.byBase, sess.BaseDomain)
+	}
+	for host, s := range r.byHost {
+		if s == sess {
+			delete(r.byHost, host)
+		}
 	}
 }
 

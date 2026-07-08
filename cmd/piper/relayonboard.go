@@ -116,8 +116,8 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "box claimed: %s\n\n", en.BaseDomain)
 		fmt.Fprintln(stdout, "piperd runs as a systemd DynamicUser; store the enrollment in its EnvironmentFile:")
 		fmt.Fprintf(stdout, "\n    sudo sh -c 'f=%s; \\\n"+
-			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN)=/d\" \"$f\"; \\\n"+
-			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; } >> \"$f\"'\n\n",
+			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN|PIPER_RELAY_TERMINATED)=/d\" \"$f\"; \\\n"+
+			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; } >> \"$f\"'\n\n",
 			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
 		fmt.Fprintln(stdout, "then: sudo systemctl restart piperd")
 		return 0
@@ -127,6 +127,7 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 		RelayAddr:  en.TunnelEndpoint,
 		RelayToken: en.EnrollmentToken,
 		BaseDomain: en.BaseDomain,
+		Terminated: true,
 	}); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1

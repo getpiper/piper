@@ -18,6 +18,7 @@ type Config struct {
 
 	RelayAddr   string // relay tunnel endpoint; empty ⇒ LAN-only (Plan 1)
 	RelayToken  string // enrollment token presented to the relay
+	Terminated  bool   // relay-terminated shared domain: box serves :80, holds no cert
 	ACMEEmail   string // ACME account email
 	ACMECA      string // ACME directory URL; empty ⇒ Let's Encrypt production
 	DNSProvider string // lego DNS provider name (e.g. "cloudflare")
@@ -52,6 +53,7 @@ func Load() Config {
 
 		RelayAddr:   firstNonEmpty(os.Getenv("PIPER_RELAY_ADDR"), rf.RelayAddr),
 		RelayToken:  firstNonEmpty(os.Getenv("PIPER_RELAY_TOKEN"), rf.RelayToken),
+		Terminated:  os.Getenv("PIPER_RELAY_TERMINATED") == "1" || rf.Terminated,
 		ACMEEmail:   env("PIPER_ACME_EMAIL", ""),
 		ACMECA:      env("PIPER_ACME_CA", ""),
 		DNSProvider: env("PIPER_DNS_PROVIDER", ""),
@@ -166,6 +168,7 @@ type RelayFile struct {
 	RelayAddr  string `json:"relay_addr"`
 	RelayToken string `json:"relay_token"`
 	BaseDomain string `json:"base_domain"`
+	Terminated bool   `json:"terminated,omitempty"`
 }
 
 func relayFilePath(dataDir string) string { return filepath.Join(dataDir, "relay.json") }

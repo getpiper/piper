@@ -113,7 +113,11 @@ func main() {
 		return
 	}
 
-	st.Configure(env("PIPER_RELAY_APEX", "public.getpiper.co"), atoiOr(env("PIPER_RELAY_MAX_AGENTS", "3"), 3))
+	st.Configure(
+		env("PIPER_RELAY_APEX", "public.getpiper.co"),
+		atoiOr(env("PIPER_RELAY_MAX_AGENTS", "3"), 3),
+		atoiOr(env("PIPER_RELAY_MAX_APPS", "10"), 10),
+	)
 
 	tlsAddr := env("PIPER_RELAY_TLS_ADDR", ":443")
 	tunnelAddr := env("PIPER_RELAY_TUNNEL_ADDR", ":7000")
@@ -129,6 +133,9 @@ func main() {
 			log.Fatalf("google verifier: %v", err)
 		}
 		v = gv
+	} else if env("PIPER_RELAY_FAKE_APPROVE", "") == "1" {
+		log.Print("piper-relay: PIPER_RELAY_FAKE_APPROVE=1 — device login auto-approves (TEST ONLY)")
+		v = relay.NewAutoApproveVerifier("e2e-sub", "e2e@localhost")
 	} else {
 		log.Print("piper-relay: no PIPER_RELAY_GOOGLE_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
@@ -145,6 +152,14 @@ func main() {
 		}
 	}()
 
+	tlsCfg, err := relay.LoadWildcardConfig(env("PIPER_RELAY_TLS_CERT", ""), env("PIPER_RELAY_TLS_KEY", ""))
+	if err != nil {
+		log.Fatalf("wildcard cert: %v", err)
+	}
+	if tlsCfg == nil {
+		log.Print("piper-relay: no wildcard cert (PIPER_RELAY_TLS_CERT/KEY); passthrough-only, shared-domain termination disabled")
+	}
+
 	log.Printf("piper-relay: TLS %s, tunnel %s", tlsAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, tunnelAddr, st))
+	log.Fatal(relay.Serve(tlsAddr, tunnelAddr, st, tlsCfg))
 }

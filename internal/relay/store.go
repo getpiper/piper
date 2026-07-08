@@ -30,13 +30,22 @@ type Store struct {
 	db        *sql.DB
 	apex      string
 	maxAgents int
+	maxApps   int
 }
 
-// Configure sets the free-tier apex domain and the per-account agent cap used by
-// EnrollForAccount. Safe to call once after Open.
-func (s *Store) Configure(apex string, maxAgents int) {
+// Configure sets the free-tier apex, the per-account agent cap (EnrollForAccount)
+// and the per-account app cap (RegisterHostname). Safe to call once after Open.
+func (s *Store) Configure(apex string, maxAgents, maxApps int) {
 	s.apex = apex
 	s.maxAgents = maxAgents
+	s.maxApps = maxApps
+}
+
+func (s *Store) maxAppsOrDefault() int {
+	if s.maxApps <= 0 {
+		return 10
+	}
+	return s.maxApps
 }
 
 func (s *Store) apexOrDefault() string {
