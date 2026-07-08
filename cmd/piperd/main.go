@@ -28,6 +28,7 @@ import (
 	"github.com/getpiper/piper/internal/runtime"
 	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/getpiper/piper/internal/tunnel"
 	"github.com/getpiper/piper/internal/webhook"
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
@@ -143,7 +144,7 @@ func main() {
 	var mgr *caddy.Manager
 	if os.Getenv("PIPER_SKIP_CADDY") == "" {
 		opts := []caddy.Option{}
-		if cfg.RelayAddr != "" {
+		if cfg.RelayAddr != "" && !cfg.Terminated {
 			opts = append(opts, caddy.WithHTTPS(":443"))
 		}
 		mgr, err = caddy.StartManager(cfg.CaddyAdmin, ":80", opts...)
@@ -152,14 +153,33 @@ func main() {
 		}
 	}
 
-	// Relay mode: obtain/serve TLS on :443, dial the relay, register the base domain.
+	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
+
+	// Relay mode: dial the relay and forward its streams. Terminated (free-tier)
+	// mode holds no box cert and serves apps on :80; the relay terminates TLS and
+	// opens KindHTTP streams. Non-terminated (BYO-domain) mode obtains a wildcard
+	// cert, serves :443, and answers KindPassthrough streams.
 	var wh *webhookStarter
 	if cfg.RelayAddr != "" {
-		if err := setupRelayTLS(ctx, cfg); err != nil {
-			log.Fatalf("relay tls: %v", err)
+		var dialLocal func(kind byte) (net.Conn, error)
+		if cfg.Terminated {
+			dialLocal = func(kind byte) (net.Conn, error) {
+				if kind == tunnel.KindHTTP {
+					return net.Dial("tcp", "127.0.0.1:80")
+				}
+				return net.Dial("tcp", "127.0.0.1:443")
+			}
+		} else {
+			if err := setupRelayTLS(ctx, cfg); err != nil {
+				log.Fatalf("relay tls: %v", err)
+			}
+			dialLocal = func(byte) (net.Conn, error) { return net.Dial("tcp", "127.0.0.1:443") }
 		}
-		go agent.RunTunnelClient(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain,
-			func() (net.Conn, error) { return net.Dial("tcp", "127.0.0.1:443") })
+		tc := &agent.TunnelClient{}
+		go tc.Run(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain, dialLocal)
+		if cfg.Terminated {
+			dep.SetHostnameRegistrar(tc)
+		}
 
 		wh = newWebhookStarter(cfg, st, rt)
 		if _, err := st.GetGitHubApp(); err == nil {
@@ -169,7 +189,6 @@ func main() {
 		}
 	}
 
-	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
 	// After `piper github setup` stores App creds at runtime, start serving
 	// webhooks immediately (relay mode only) instead of waiting for a restart.
 	handler := api.RequireToken(st, api.New(st, dep, cfg.BaseDomain, "", func() {
