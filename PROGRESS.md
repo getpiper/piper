@@ -38,11 +38,13 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
 - ✅ `piper-relay` managed systemd service + operator docs — [#38](https://github.com/getpiper/piper/issues/38)
 - ✅ `piperd` — outbound tunnel client + cert wiring (additive; LAN-only unchanged) — [#10](https://github.com/getpiper/piper/issues/10)
 - ✅ e2e — loopback relay path (tunnel + SNI + on-box TLS) — [#10](https://github.com/getpiper/piper/issues/10)
-- ✅ `piper login` / `piper connect` self-service onboarding CLI — device-flow login + box claim, writes piperd `relay.json` — [#49](https://github.com/getpiper/piper/issues/49), [#83](https://github.com/getpiper/piper/pull/83)
-- ✅ Relay-terminated shared domain — typed tunnel streams (`T`/`H`/`C`); relay assigns `<app-hash>-<username>.<apex>`, terminates wildcard TLS, forwards HTTP over the tunnel; free-tier box served on `:80` with no on-box cert; `login → connect → deploy → curl` e2e green — [#49](https://github.com/getpiper/piper/issues/49)
+- ✅ **Public-relay onboarding slice (Plans 1–3)** — relay accounts + device-flow, `piper login`/`connect`, and relay-terminated shared domain; `login → connect → deploy → curl` e2e green — [#90](https://github.com/getpiper/piper/issues/90) (child of epic [#49](https://github.com/getpiper/piper/issues/49))
+  - ✅ `piper login` / `piper connect` self-service onboarding CLI — device-flow login + box claim, writes piperd `relay.json` — [#83](https://github.com/getpiper/piper/pull/83)
+  - ✅ Relay-terminated shared domain — typed tunnel streams (`T`/`H`/`C`); relay assigns `<app-hash>-<username>.<apex>`, terminates wildcard TLS, forwards HTTP over the tunnel; free-tier box served on `:80` with no on-box cert — [#89](https://github.com/getpiper/piper/pull/89)
   - ⬜ surface the relay-assigned public host in `piper list` / deploy output (e2e reads it from the relay DB today)
   - ⬜ LAN `login` load-mutate-save so it doesn't clobber stored relay creds — [#84](https://github.com/getpiper/piper/issues/84)
   - ⬜ thread `context.Context` through `relayclient` requests — [#85](https://github.com/getpiper/piper/issues/85)
+- ⬜ **Epic [#49](https://github.com/getpiper/piper/issues/49) remains open** — the remote control-plane track is not built: control-stream routing + caller→agent authz [#73](https://github.com/getpiper/piper/issues/73), remote CLI target [#74](https://github.com/getpiper/piper/issues/74), health/metrics [#75](https://github.com/getpiper/piper/issues/75), hosted dashboard [#76](https://github.com/getpiper/piper/issues/76). Only the gate [#72](https://github.com/getpiper/piper/issues/72) and the onboarding slice [#90](https://github.com/getpiper/piper/issues/90) are done.
 
 ## Plan 3 — Git-driven deploys — epic [#11](https://github.com/getpiper/piper/issues/11) ([plan](docs/superpowers/plans/2026-07-05-plan3-git-deploys.md))
 
