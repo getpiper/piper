@@ -176,7 +176,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "deployed %s: http://%s.piper.localhost (%s)\n", name, name, dep.Status)
+		if *remote != "" {
+			// The app's public hostname is relay-assigned at deploy time and
+			// not in the response; print no URL rather than a wrong one.
+			fmt.Fprintf(stdout, "deployed %s (%s)\n", name, dep.Status)
+		} else {
+			fmt.Fprintf(stdout, "deployed %s: http://%s.piper.localhost (%s)\n", name, name, dep.Status)
+		}
 		return 0
 	case "list":
 		if len(args) != 1 {

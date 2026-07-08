@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,5 +119,33 @@ func TestRunRemoteRequiresRelayLogin(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "piper login") {
 		t.Errorf("stderr = %q, want a pointer to `piper login`", got)
+	}
+}
+
+func TestRunRemoteDeployPrintsNoLocalURL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agents/ab12-alice.public.getpiper.co/v1/apps/blog/deploy" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "running"})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{RelayAPI: srv.URL, AccountCredential: "cred-xyz"}); err != nil {
+		t.Fatalf("SaveClient: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--remote", "ab12-alice.public.getpiper.co", "deploy", "blog", "--path", srcDir}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if got := stdout.String(); got != "deployed blog (running)\n" {
+		t.Errorf("stdout = %q, want %q", got, "deployed blog (running)\n")
 	}
 }
