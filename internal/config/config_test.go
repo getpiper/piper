@@ -220,3 +220,33 @@ func TestLoadIgnoresCorruptRelayFile(t *testing.T) {
 		t.Fatalf("BaseDomain = %q, want default", cfg.BaseDomain)
 	}
 }
+
+func TestRelayFileTerminatedRoundTripAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{
+		RelayAddr: "relay:7000", RelayToken: "enr-1",
+		BaseDomain: "aaaa-alice.public.getpiper.co", Terminated: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := LoadRelayFile(dir)
+	if err != nil || !got.Terminated {
+		t.Fatalf("relay file terminated = %v (err %v)", got.Terminated, err)
+	}
+
+	t.Setenv("PIPER_DATA_DIR", dir)
+	t.Setenv("PIPER_RELAY_ADDR", "")
+	t.Setenv("PIPER_RELAY_TOKEN", "")
+	t.Setenv("PIPER_BASE_DOMAIN", "")
+	t.Setenv("PIPER_RELAY_TERMINATED", "")
+	if cfg := Load(); !cfg.Terminated {
+		t.Fatal("Load did not read terminated from relay.json")
+	}
+	t.Setenv("PIPER_RELAY_TERMINATED", "0")
+	// An explicit env value of 0 should win over the file's true only if we treat
+	// env as authoritative; keep the rule simple: env "1" forces on, otherwise the
+	// file decides. Document via this assertion:
+	if cfg := Load(); !cfg.Terminated {
+		t.Fatal("non-1 env must not override a terminated relay.json")
+	}
+}

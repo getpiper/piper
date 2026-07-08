@@ -109,9 +109,43 @@ func TestConnectEnrollsAndWritesRelayFile(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("relay file: found=%v err=%v", found, err)
 	}
-	want := config.RelayFile{RelayAddr: "relay.getpiper.co:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co"}
+	want := config.RelayFile{RelayAddr: "relay.getpiper.co:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co", Terminated: true}
 	if rf != want {
 		t.Fatalf("relay file = %+v, want %+v", rf, want)
+	}
+}
+
+func TestConnectWritesTerminated(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/enroll" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"enrollment_token": "enr-1", "base_domain": "aaaa-alice.public.getpiper.co",
+			"tunnel_endpoint": "relay.getpiper.co:7000",
+		})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{
+		Addr: "http://127.0.0.1:8088", RelayAPI: srv.URL, AccountCredential: "cred-xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	old := config.SystemEnvDir
+	config.SystemEnvDir = filepath.Join(t.TempDir(), "absent") // force the non-systemd path
+	defer func() { config.SystemEnvDir = old }()
+	var out, errb bytes.Buffer
+	if code := run([]string{"connect", "--data-dir", dataDir}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, err = %s", code, errb.String())
+	}
+	rf, _, err := config.LoadRelayFile(dataDir)
+	if err != nil || !rf.Terminated {
+		t.Fatalf("relay file terminated = %v (err %v)", rf.Terminated, err)
 	}
 }
 
@@ -179,6 +213,7 @@ func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 		"PIPER_RELAY_ADDR=relay.getpiper.co:7000",
 		"PIPER_RELAY_TOKEN=enr-1",
 		"PIPER_BASE_DOMAIN=ab12-alice.public.getpiper.co",
+		"PIPER_RELAY_TERMINATED=1",
 	} {
 		if !bytes.Contains(out.Bytes(), []byte(want)) {
 			t.Fatalf("stdout missing %q; got:\n%s", want, out.String())
