@@ -280,3 +280,57 @@ func TestTeardownPreviewNoRunningIsNoOp(t *testing.T) {
 		t.Fatalf("TeardownPreview no-op err = %v, want nil", err)
 	}
 }
+
+type fakeRegistrar struct {
+	host    string
+	deregs  []string
+	failing bool
+}
+
+func (f *fakeRegistrar) Register(app string) (string, error) {
+	if f.failing {
+		return "", errors.New("quota")
+	}
+	f.host = "hash-" + app + "-alice.public.getpiper.co"
+	return f.host, nil
+}
+func (f *fakeRegistrar) Deregister(hostname string) error {
+	f.deregs = append(f.deregs, hostname)
+	return nil
+}
+
+func TestDeployTerminatedRoutesAssignedHostname(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "public.getpiper.co")
+	reg := &fakeRegistrar{}
+	d.SetHostnameRegistrar(reg)
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	// Route must be the relay-assigned single-label host, NOT blog.public.getpiper.co.
+	if _, ok := routes.upserts["hash-blog-alice.public.getpiper.co"]; !ok {
+		t.Fatalf("routes = %v, want the assigned hostname", routes.upserts)
+	}
+	if _, ok := routes.upserts["blog.public.getpiper.co"]; ok {
+		t.Fatal("terminated deploy must not route <app>.<baseDom>")
+	}
+}
+
+func TestDeployTerminatedRegistrarFails(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	d := New(s, rt, newFakeCaddy(), "public.getpiper.co")
+	d.SetHostnameRegistrar(&fakeRegistrar{failing: true})
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("expected deploy to fail when registration fails")
+	}
+}
