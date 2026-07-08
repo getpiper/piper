@@ -89,11 +89,17 @@ var SystemDataDir = "/var/lib/piper"
 // ConnectDataDir resolves where `piper connect` writes relay.json so piperd
 // reads it back: PIPER_DATA_DIR if set, else the systemd StateDirectory when it
 // exists (the standard service install), else the per-user default.
+//
+// Detection uses Lstat, not Stat: under the shipped DynamicUser unit the
+// StateDirectory is a symlink (/var/lib/piper → /var/lib/private/piper, 0700
+// root), so a non-root login user can't Stat through it but can Lstat the link
+// itself. We only need to know the path exists; the privileged install step
+// does the actual write.
 func ConnectDataDir() string {
 	if v := os.Getenv("PIPER_DATA_DIR"); v != "" {
 		return v
 	}
-	if fi, err := os.Stat(SystemDataDir); err == nil && fi.IsDir() {
+	if _, err := os.Lstat(SystemDataDir); err == nil {
 		return SystemDataDir
 	}
 	return defaultDataDir()

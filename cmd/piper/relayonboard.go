@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/getpiper/piper/internal/config"
@@ -134,7 +135,7 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 	// Protected systemd install: the login user can't write piperd's DynamicUser
 	// data dir, so guide the privileged install rather than fail on it. The
 	// enrolled values are passed through so no second login/enrollment is needed.
-	if o.dataDir == config.SystemDataDir {
+	if filepath.Clean(o.dataDir) == filepath.Clean(config.SystemDataDir) {
 		self, err := os.Executable()
 		if err != nil || self == "" {
 			self = "piper"

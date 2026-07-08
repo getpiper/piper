@@ -192,18 +192,25 @@ func TestConnectDataDirResolution(t *testing.T) {
 		t.Fatalf("ConnectDataDir with env = %q, want %q", got, explicit)
 	}
 
-	// Env unset + SystemDataDir exists ⇒ the systemd StateDirectory.
+	// Env unset + SystemDataDir present ⇒ the systemd StateDirectory. Model it as
+	// a symlink with an unresolvable target: under DynamicUser, /var/lib/piper is
+	// a symlink into /var/lib/private (0700 root), so the login user can't Stat
+	// through it — detection must use Lstat.
 	t.Setenv("PIPER_DATA_DIR", "")
-	sys := t.TempDir()
+	base := t.TempDir()
+	link := filepath.Join(base, "piper")
+	if err := os.Symlink(filepath.Join(base, "unreadable-target"), link); err != nil {
+		t.Fatal(err)
+	}
 	old := SystemDataDir
-	SystemDataDir = sys
+	SystemDataDir = link
 	defer func() { SystemDataDir = old }()
-	if got := ConnectDataDir(); got != sys {
-		t.Fatalf("ConnectDataDir with system dir present = %q, want %q", got, sys)
+	if got := ConnectDataDir(); got != link {
+		t.Fatalf("ConnectDataDir with StateDirectory symlink = %q, want %q", got, link)
 	}
 
-	// Env unset + SystemDataDir missing ⇒ the per-user default.
-	SystemDataDir = filepath.Join(sys, "does-not-exist")
+	// Env unset + SystemDataDir absent ⇒ the per-user default.
+	SystemDataDir = filepath.Join(base, "does-not-exist")
 	if got := ConnectDataDir(); got != DefaultDataDir() {
 		t.Fatalf("ConnectDataDir fallback = %q, want %q", got, DefaultDataDir())
 	}
