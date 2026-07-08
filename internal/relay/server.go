@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/getpiper/piper/internal/tunnel"
 )
@@ -59,7 +60,8 @@ func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Ro
 	var ctrlQ *connQueue
 	if ctrl != nil && tlsCfg != nil {
 		ctrlQ = newConnQueue()
-		go func() { _ = http.Serve(ctrlQ, ctrl) }()
+		srv := &http.Server{Handler: ctrl, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+		go func() { _ = srv.Serve(ctrlQ) }()
 	}
 	ctrlHost := "api." + st.apexOrDefault()
 
@@ -155,6 +157,10 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 		// The box hands the relay its control-API bearer (agent-push Token B).
 		// The op rides the authenticated session, so it can only ever set the
 		// token for the session's own agent.
+		if req.Token == "" {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "provision: empty token"})
+			return
+		}
 		if err := st.SetControlToken(sess.BaseDomain, req.Token); err != nil {
 			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
 			return

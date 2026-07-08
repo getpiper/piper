@@ -35,7 +35,8 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 	var ctrlQ *connQueue
 	if ctrl != nil && tlsCfg != nil {
 		ctrlQ = newConnQueue()
-		go func() { _ = http.Serve(ctrlQ, ctrl) }()
+		srv := &http.Server{Handler: ctrl, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+		go func() { _ = srv.Serve(ctrlQ) }()
 		t.Cleanup(func() { ctrlQ.Close() })
 	}
 	ctrlHost := "api." + st.apexOrDefault()
@@ -186,6 +187,47 @@ func TestControlProvisionStoresToken(t *testing.T) {
 	}
 	if got, err := st.ControlToken(base); err != nil || got != "box-tok" {
 		t.Fatalf("ControlToken = %q, %v (want box-tok)", got, err)
+	}
+}
+
+func TestControlProvisionRejectsEmptyToken(t *testing.T) {
+	sess, _, base, st := startTestRelay(t, nil, nil)
+
+	// Seed a working token first, so we can confirm an empty provision
+	// doesn't clear it.
+	cs, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "provision", Token: "box-tok"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs, &resp); err != nil {
+		t.Fatal(err)
+	}
+	cs.Close()
+	if resp.Error != "" {
+		t.Fatalf("seed provision error: %s", resp.Error)
+	}
+
+	cs2, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs2.Close()
+	if err := tunnel.WriteMsg(cs2, tunnel.ControlRequest{Op: "provision"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp2 tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs2, &resp2); err != nil {
+		t.Fatal(err)
+	}
+	if resp2.Error == "" {
+		t.Fatalf("provision with empty token: want error, got %+v", resp2)
+	}
+	if got, err := st.ControlToken(base); err != nil || got != "box-tok" {
+		t.Fatalf("ControlToken = %q, %v (want unchanged box-tok)", got, err)
 	}
 }
 

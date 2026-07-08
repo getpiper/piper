@@ -85,7 +85,7 @@ func Dial(conn net.Conn, token, baseDomain string) (*Session, error) {
 
 // Stream kinds: every stream opens with a single kind byte so each end can
 // dispatch by purpose. The agent opens only Control streams; the relay opens
-// only Passthrough/HTTP streams.
+// Passthrough, HTTP, and ControlAPI streams.
 const (
 	KindPassthrough byte = 'T' // relay→agent: replayed ClientHello follows; agent pipes to :443
 	KindHTTP        byte = 'H' // relay→agent: relay-terminated plaintext HTTP; agent pipes to :80
