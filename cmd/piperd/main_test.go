@@ -8,12 +8,15 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/getpiper/piper/internal/store"
 )
 
 type fakeCertificateManager struct {
@@ -216,5 +219,64 @@ func TestRunRenewLoopReplacesCertificate(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("renew loop did not stop")
+	}
+}
+
+type fakeProvisionStore struct {
+	tokens  []store.Token
+	created []string
+	deleted []string
+}
+
+func (f *fakeProvisionStore) ListTokens() ([]store.Token, error) { return f.tokens, nil }
+func (f *fakeProvisionStore) CreateToken(label, scope string) (string, error) {
+	f.created = append(f.created, label+"/"+scope)
+	return "tok-" + label, nil
+}
+func (f *fakeProvisionStore) DeleteToken(label string) error {
+	f.deleted = append(f.deleted, label)
+	return nil
+}
+
+func TestProvisionRelayControlFirstConnect(t *testing.T) {
+	f := &fakeProvisionStore{}
+	var pushed string
+	provisionRelayControl(f, func(tok string) error { pushed = tok; return nil }, "base.example.com")
+	if len(f.created) != 1 || f.created[0] != "relay:base.example.com/admin" {
+		t.Fatalf("created = %v", f.created)
+	}
+	if pushed != "tok-relay:base.example.com" {
+		t.Fatalf("pushed = %q", pushed)
+	}
+	if len(f.deleted) != 0 {
+		t.Fatalf("unexpected delete: %v", f.deleted)
+	}
+}
+
+func TestProvisionRelayControlAlreadyProvisioned(t *testing.T) {
+	f := &fakeProvisionStore{tokens: []store.Token{{Label: "relay:base.example.com"}}}
+	provisionRelayControl(f, func(string) error { t.Fatal("must not push"); return nil }, "base.example.com")
+	if len(f.created) != 0 {
+		t.Fatalf("re-minted: %v", f.created)
+	}
+}
+
+func TestProvisionRelayControlRevokedMeansNo(t *testing.T) {
+	// A revoked row is the owner's unilateral cutoff: never re-mint for this
+	// enrollment (spec: re-provisioning requires a new claim → new base domain).
+	rt := time.Now()
+	f := &fakeProvisionStore{tokens: []store.Token{{Label: "relay:base.example.com", RevokedAt: &rt}}}
+	provisionRelayControl(f, func(string) error { t.Fatal("must not push"); return nil }, "base.example.com")
+	if len(f.created) != 0 {
+		t.Fatalf("re-minted after owner revoke: %v", f.created)
+	}
+}
+
+func TestProvisionRelayControlPushFailureUnwinds(t *testing.T) {
+	f := &fakeProvisionStore{}
+	provisionRelayControl(f, func(string) error { return errors.New("session died") }, "base.example.com")
+	// The mint must be unwound so the marker doesn't block the next attempt.
+	if len(f.deleted) != 1 || f.deleted[0] != "relay:base.example.com" {
+		t.Fatalf("deleted = %v, want the just-minted label", f.deleted)
 	}
 }

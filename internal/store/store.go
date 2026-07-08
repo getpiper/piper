@@ -341,3 +341,12 @@ func (s *Store) RevokeToken(label string) error {
 	}
 	return nil
 }
+
+// DeleteToken hard-deletes the token with the given label. It exists only to
+// unwind a relay-provisioning push that failed after mint (cmd/piperd), so the
+// next connect can retry. Owner-facing revocation is RevokeToken — soft, so the
+// revoked row remains as the "never re-provision" marker.
+func (s *Store) DeleteToken(label string) error {
+	_, err := s.db.Exec(`DELETE FROM tokens WHERE label=?`, label)
+	return err
+}

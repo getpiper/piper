@@ -60,6 +60,45 @@ type tokenStore interface {
 	RevokeToken(label string) error
 }
 
+// relayTokenStore is the store slice relay-control provisioning needs.
+type relayTokenStore interface {
+	ListTokens() ([]store.Token, error)
+	CreateToken(label, scope string) (string, error)
+	DeleteToken(label string) error
+}
+
+// provisionRelayControl mints a control-API token for the relay and pushes it
+// over the tunnel, once per enrollment (agent-push Token B — see the
+// control-stream routing design). The token row itself is the marker: any row
+// labeled relay:<base>, live OR revoked, means "already provisioned" or "the
+// owner cut the relay off" — never re-mint. A new `piper connect` creates a new
+// enrollment (new base domain) and so a fresh mint. If the push fails, the
+// just-minted row is deleted so the next connect retries.
+func provisionRelayControl(st relayTokenStore, push func(string) error, baseDomain string) {
+	label := "relay:" + baseDomain
+	toks, err := st.ListTokens()
+	if err != nil {
+		log.Printf("relay control provision: list tokens: %v", err)
+		return
+	}
+	for _, tk := range toks {
+		if tk.Label == label {
+			return
+		}
+	}
+	tok, err := st.CreateToken(label, "admin")
+	if err != nil {
+		log.Printf("relay control provision: mint: %v", err)
+		return
+	}
+	if err := push(tok); err != nil {
+		log.Printf("relay control provision: push: %v (will retry next connect)", err)
+		_ = st.DeleteToken(label)
+		return
+	}
+	log.Printf("relay control provision: pushed control bearer for %s", baseDomain)
+}
+
 // runTokenCmd implements `piperd token <create|list|revoke>`, writing directly
 // to the on-box store. It needs no auth: running it is proof of box ownership.
 func runTokenCmd(st tokenStore, args []string, out io.Writer) error {
@@ -164,18 +203,28 @@ func main() {
 		var dialLocal func(kind byte) (net.Conn, error)
 		if cfg.Terminated {
 			dialLocal = func(kind byte) (net.Conn, error) {
-				if kind == tunnel.KindHTTP {
+				switch kind {
+				case tunnel.KindControlAPI:
+					return net.Dial("tcp", cfg.APIAddr)
+				case tunnel.KindHTTP:
 					return net.Dial("tcp", "127.0.0.1:80")
+				default:
+					return net.Dial("tcp", "127.0.0.1:443")
 				}
-				return net.Dial("tcp", "127.0.0.1:443")
 			}
 		} else {
 			if err := setupRelayTLS(ctx, cfg); err != nil {
 				log.Fatalf("relay tls: %v", err)
 			}
-			dialLocal = func(byte) (net.Conn, error) { return net.Dial("tcp", "127.0.0.1:443") }
+			dialLocal = func(kind byte) (net.Conn, error) {
+				if kind == tunnel.KindControlAPI {
+					return net.Dial("tcp", cfg.APIAddr)
+				}
+				return net.Dial("tcp", "127.0.0.1:443")
+			}
 		}
 		tc := &agent.TunnelClient{}
+		tc.OnConnect = func() { provisionRelayControl(st, tc.Provision, cfg.BaseDomain) }
 		go tc.Run(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain, dialLocal)
 		if cfg.Terminated {
 			dep.SetHostnameRegistrar(tc)
