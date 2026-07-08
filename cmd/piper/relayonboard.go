@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/getpiper/piper/internal/config"
@@ -71,45 +69,23 @@ func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
 	}
 }
 
-// connectOpts are the inputs to `piper connect`. In the normal path only
-// dataDir is set; installOnly + the relay* fields drive the login-less write
-// used by the privileged systemd-run install step (see connect).
+// connectOpts are the inputs to `piper connect`. dataDir is where relay.json is
+// written on a non-systemd (dev / per-user) install.
 type connectOpts struct {
-	dataDir     string
-	installOnly bool
-	relayAddr   string
-	relayToken  string
-	baseDomain  string
+	dataDir string
 }
 
-// connect claims this box on the relay and installs the enrollment into
-// piperd's data dir as relay.json; piperd reads it at startup and dials the
-// tunnel (connect never restarts piperd).
+// connect claims this box on the relay and installs the enrollment so piperd
+// picks it up at startup (connect never restarts piperd).
 //
-// Two contexts, split along a permission boundary: `piper login` stores the
-// account credential in the invoking user's home, but under the shipped systemd
-// unit piperd runs as a DynamicUser whose data dir (/var/lib/piper) the login
-// user cannot write. So the normal path enrolls as the user, then — when the
-// target is that protected system dir — prints a ready `sudo systemd-run …
-// piper connect --install-only …` command that performs the write as the
-// DynamicUser (mirroring how `piper-relay enroll` writes the relay's state
-// dir). installOnly is that second step: no login, no network, just the write.
+// On a dev / per-user install the login user owns the data dir, so relay.json is
+// written directly. On the shipped systemd install piperd runs as a DynamicUser
+// whose StateDirectory the login user can't write; there the enrollment belongs
+// in the root-owned EnvironmentFile /etc/piper/piperd.env, which systemd injects
+// into the service at start — so connect prints a plain-sudo upsert of the three
+// relay keys instead (the file may already hold ACME/DNS settings, so it must
+// not be clobbered).
 func connect(o connectOpts, stdout, stderr io.Writer) int {
-	if o.installOnly {
-		if o.relayAddr == "" || o.relayToken == "" || o.baseDomain == "" {
-			fmt.Fprintln(stderr, "error: --install-only requires --relay-addr, --relay-token and --base-domain")
-			return 1
-		}
-		if err := config.SaveRelayFile(o.dataDir, config.RelayFile{
-			RelayAddr: o.relayAddr, RelayToken: o.relayToken, BaseDomain: o.baseDomain,
-		}); err != nil {
-			fmt.Fprintln(stderr, "error:", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "relay.json written to %s\n", o.dataDir)
-		return 0
-	}
-
 	cc, err := config.LoadClient()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -132,22 +108,17 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Protected systemd install: the login user can't write piperd's DynamicUser
-	// data dir, so guide the privileged install rather than fail on it. The
-	// enrolled values are passed through so no second login/enrollment is needed.
-	if filepath.Clean(o.dataDir) == filepath.Clean(config.SystemDataDir) {
-		self, err := os.Executable()
-		if err != nil || self == "" {
-			self = "piper"
-		}
+	// Systemd install: the login user can't write piperd's DynamicUser data dir,
+	// but /etc/piper/piperd.env is a root-owned EnvironmentFile systemd injects at
+	// start. Guide a plain-sudo upsert of the three relay keys (delete any prior
+	// or commented copies, then append) rather than clobbering admin edits.
+	if config.SystemManaged() {
 		fmt.Fprintf(stdout, "box claimed: %s\n\n", en.BaseDomain)
-		fmt.Fprintln(stdout, "piperd runs as a systemd DynamicUser; install the enrollment as it:")
-		fmt.Fprintf(stdout, "\n    sudo systemd-run --pipe --wait --collect \\\n"+
-			"      --property=DynamicUser=yes --property=StateDirectory=piper \\\n"+
-			"      --setenv=PIPER_DATA_DIR=%s \\\n"+
-			"      %s connect --install-only \\\n"+
-			"      --relay-addr %s --relay-token %s --base-domain %s\n\n",
-			o.dataDir, self, en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
+		fmt.Fprintln(stdout, "piperd runs as a systemd DynamicUser; store the enrollment in its EnvironmentFile:")
+		fmt.Fprintf(stdout, "\n    sudo sh -c 'f=%s; \\\n"+
+			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN)=/d\" \"$f\"; \\\n"+
+			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; } >> \"$f\"'\n\n",
+			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
 		fmt.Fprintln(stdout, "then: sudo systemctl restart piperd")
 		return 0
 	}

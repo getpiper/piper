@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -97,6 +98,9 @@ func TestConnectEnrollsAndWritesRelayFile(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
+	old := config.SystemEnvDir
+	config.SystemEnvDir = filepath.Join(t.TempDir(), "absent") // force the non-systemd path
+	defer func() { config.SystemEnvDir = old }()
 	var out, errb bytes.Buffer
 	if code := run([]string{"connect", "--data-dir", dataDir}, &out, &errb); code != 0 {
 		t.Fatalf("code = %d, err = %s", code, errb.String())
@@ -133,43 +137,7 @@ func TestConnectQuotaExceeded(t *testing.T) {
 	}
 }
 
-func TestConnectInstallOnlyWritesRelayFile(t *testing.T) {
-	// --install-only needs no login and no relay: it just writes the file from
-	// the flags. This is the step the privileged systemd-run install runs.
-	t.Setenv("HOME", t.TempDir())
-	dataDir := t.TempDir()
-	var out, errb bytes.Buffer
-	code := run([]string{
-		"connect", "--install-only", "--data-dir", dataDir,
-		"--relay-addr", "relay.getpiper.co:7000", "--relay-token", "enr-1",
-		"--base-domain", "ab12-alice.public.getpiper.co",
-	}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("code = %d, err = %s", code, errb.String())
-	}
-	rf, found, err := config.LoadRelayFile(dataDir)
-	if err != nil || !found {
-		t.Fatalf("relay file: found=%v err=%v", found, err)
-	}
-	want := config.RelayFile{RelayAddr: "relay.getpiper.co:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co"}
-	if rf != want {
-		t.Fatalf("relay file = %+v, want %+v", rf, want)
-	}
-}
-
-func TestConnectInstallOnlyRequiresValues(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	var out, errb bytes.Buffer
-	// Missing --relay-token/--base-domain.
-	if code := run([]string{"connect", "--install-only", "--data-dir", t.TempDir(), "--relay-addr", "relay:7000"}, &out, &errb); code != 1 {
-		t.Fatalf("code = %d, want 1", code)
-	}
-	if !bytes.Contains(errb.Bytes(), []byte("--install-only requires")) {
-		t.Fatalf("stderr = %q", errb.String())
-	}
-}
-
-func TestConnectSystemDirGuidesInstall(t *testing.T) {
+func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
 	t.Setenv("PIPER_TOKEN", "")
@@ -192,21 +160,26 @@ func TestConnectSystemDirGuidesInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Treat this scratch dir as the protected systemd StateDirectory.
-	sysDir := t.TempDir()
-	old := config.SystemDataDir
-	config.SystemDataDir = sysDir
-	defer func() { config.SystemDataDir = old }()
+	// A present /etc/piper marks a systemd-managed box.
+	dataDir := t.TempDir()
+	old := config.SystemEnvDir
+	config.SystemEnvDir = t.TempDir()
+	defer func() { config.SystemEnvDir = old }()
 
 	var out, errb bytes.Buffer
-	if code := run([]string{"connect", "--data-dir", sysDir}, &out, &errb); code != 0 {
+	if code := run([]string{"connect", "--data-dir", dataDir}, &out, &errb); code != 0 {
 		t.Fatalf("code = %d, err = %s", code, errb.String())
 	}
-	// It must guide the privileged install, not write the file directly.
-	if _, found, _ := config.LoadRelayFile(sysDir); found {
-		t.Fatalf("relay.json written directly to the protected system dir; expected a guided install instead")
+	// It must guide the env-file install, not write relay.json.
+	if _, found, _ := config.LoadRelayFile(dataDir); found {
+		t.Fatalf("relay.json written on a systemd-managed box; expected a guided env-file install")
 	}
-	for _, want := range []string{"systemd-run", "--install-only", "enr-1", "relay.getpiper.co:7000", "ab12-alice.public.getpiper.co"} {
+	for _, want := range []string{
+		"piperd.env",
+		"PIPER_RELAY_ADDR=relay.getpiper.co:7000",
+		"PIPER_RELAY_TOKEN=enr-1",
+		"PIPER_BASE_DOMAIN=ab12-alice.public.getpiper.co",
+	} {
 		if !bytes.Contains(out.Bytes(), []byte(want)) {
 			t.Fatalf("stdout missing %q; got:\n%s", want, out.String())
 		}

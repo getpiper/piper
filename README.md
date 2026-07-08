@@ -69,19 +69,19 @@ piper login          # opens a Google device-flow login; stores your account cre
 piper connect        # enrolls this box on the relay
 ```
 
-`piper connect` enrolls and writes piperd's `relay.json`. Where it writes
-depends on the install:
+`piper connect` enrolls this box. Where it installs the enrollment depends on
+the install:
 
 - **Manual / dev** (piperd reads `~/.piper/piperd`): `connect` writes
   `relay.json` there directly, then just `sudo systemctl restart piperd`.
 - **Shipped systemd unit** (piperd runs as a `DynamicUser`, state under
   `/var/lib/piper`): that directory isn't writable by your login user, so
-  `connect` instead prints a ready `sudo systemd-run … piper connect
-  --install-only …` command. Run it — it writes `relay.json` as the service's
-  own user (the same pattern `piper-relay enroll` uses) — then
-  `sudo systemctl restart piperd`.
+  `connect` instead prints a ready `sudo sh -c … /etc/piper/piperd.env` command
+  that stores the enrollment in piperd's root-owned EnvironmentFile (systemd
+  injects it into the service at start, so its `DynamicUser` never needs to read
+  it). Run it, then `sudo systemctl restart piperd`.
 
-Either way piperd reads `relay.json` at startup and dials the tunnel.
+Either way piperd picks up the enrollment at startup and dials the tunnel.
 
 `piper login --relay <url>` targets a self-hosted relay instead of the default
 `https://api.public.getpiper.co`. Environment variables (`PIPER_RELAY_ADDR`,

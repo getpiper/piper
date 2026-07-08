@@ -184,35 +184,22 @@ func TestLoadEnvOverridesRelayFile(t *testing.T) {
 	}
 }
 
-func TestConnectDataDirResolution(t *testing.T) {
-	// PIPER_DATA_DIR wins outright.
-	explicit := t.TempDir()
-	t.Setenv("PIPER_DATA_DIR", explicit)
-	if got := ConnectDataDir(); got != explicit {
-		t.Fatalf("ConnectDataDir with env = %q, want %q", got, explicit)
+func TestSystemManaged(t *testing.T) {
+	old := SystemEnvDir
+	defer func() { SystemEnvDir = old }()
+
+	dir := t.TempDir()
+	SystemEnvDir = dir
+	if !SystemManaged() {
+		t.Fatal("SystemManaged = false with an existing /etc/piper, want true")
+	}
+	if got, want := SystemEnvFile(), filepath.Join(dir, "piperd.env"); got != want {
+		t.Fatalf("SystemEnvFile = %q, want %q", got, want)
 	}
 
-	// Env unset + SystemDataDir present ⇒ the systemd StateDirectory. Model it as
-	// a symlink with an unresolvable target: under DynamicUser, /var/lib/piper is
-	// a symlink into /var/lib/private (0700 root), so the login user can't Stat
-	// through it — detection must use Lstat.
-	t.Setenv("PIPER_DATA_DIR", "")
-	base := t.TempDir()
-	link := filepath.Join(base, "piper")
-	if err := os.Symlink(filepath.Join(base, "unreadable-target"), link); err != nil {
-		t.Fatal(err)
-	}
-	old := SystemDataDir
-	SystemDataDir = link
-	defer func() { SystemDataDir = old }()
-	if got := ConnectDataDir(); got != link {
-		t.Fatalf("ConnectDataDir with StateDirectory symlink = %q, want %q", got, link)
-	}
-
-	// Env unset + SystemDataDir absent ⇒ the per-user default.
-	SystemDataDir = filepath.Join(base, "does-not-exist")
-	if got := ConnectDataDir(); got != DefaultDataDir() {
-		t.Fatalf("ConnectDataDir fallback = %q, want %q", got, DefaultDataDir())
+	SystemEnvDir = filepath.Join(dir, "absent")
+	if SystemManaged() {
+		t.Fatal("SystemManaged = true with an absent dir, want false")
 	}
 }
 
