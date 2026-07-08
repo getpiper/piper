@@ -11,7 +11,7 @@ import (
 func newTestAPI(t *testing.T) (http.Handler, *Store, *FakeVerifier) {
 	t.Helper()
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3)
+	st.Configure("public.getpiper.co", 3, 10)
 	fv := NewFakeVerifier()
 	return NewAPI(st, fv), st, fv
 }
@@ -76,7 +76,7 @@ func TestLoginPollUnknownHandle(t *testing.T) {
 
 func TestEnrollWithAccountCredential(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3)
+	st.Configure("public.getpiper.co", 3, 10)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000")
 
 	acc, _ := st.UpsertAccount("sub-1", "judy@x.com")
@@ -110,7 +110,7 @@ func TestEnrollWithAccountCredential(t *testing.T) {
 
 func TestEnrollRejectsBadCredential(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3)
+	st.Configure("public.getpiper.co", 3, 10)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
@@ -124,7 +124,7 @@ func TestEnrollRejectsBadCredential(t *testing.T) {
 
 func TestEnrollOverCapReturns429(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 1)
+	st.Configure("public.getpiper.co", 1, 10)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000")
 	acc, _ := st.UpsertAccount("sub-1", "ken@x.com")
 	cred, _ := st.MintAccountCredential(acc.ID)

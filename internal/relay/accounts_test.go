@@ -94,7 +94,7 @@ func TestDisabledAccountCredentialRejected(t *testing.T) {
 
 func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3)
+	st.Configure("public.getpiper.co", 3, 10)
 	acc, _ := st.UpsertAccount("sub-1", "erin@x.com")
 
 	en, err := st.EnrollForAccount(acc.ID)
@@ -119,7 +119,7 @@ func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 
 func TestEnrollForAccountEnforcesCap(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 2)
+	st.Configure("public.getpiper.co", 2, 10)
 	acc, _ := st.UpsertAccount("sub-1", "frank@x.com")
 
 	for i := 0; i < 2; i++ {
@@ -134,7 +134,7 @@ func TestEnrollForAccountEnforcesCap(t *testing.T) {
 
 func TestAuthenticateRejectsDisabledAccountAgent(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3)
+	st.Configure("public.getpiper.co", 3, 10)
 	acc, _ := st.UpsertAccount("sub-1", "grace@x.com")
 	en, _ := st.EnrollForAccount(acc.ID)
 

@@ -21,3 +21,11 @@ CREATE TABLE IF NOT EXISTS account_creds (
     account_id  TEXT NOT NULL REFERENCES accounts(id),
     created_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hostnames (
+    hostname    TEXT PRIMARY KEY,
+    account_id  TEXT NOT NULL REFERENCES accounts(id),
+    app         TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE(account_id, app)
+);

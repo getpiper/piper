@@ -113,7 +113,11 @@ func main() {
 		return
 	}
 
-	st.Configure(env("PIPER_RELAY_APEX", "public.getpiper.co"), atoiOr(env("PIPER_RELAY_MAX_AGENTS", "3"), 3))
+	st.Configure(
+		env("PIPER_RELAY_APEX", "public.getpiper.co"),
+		atoiOr(env("PIPER_RELAY_MAX_AGENTS", "3"), 3),
+		atoiOr(env("PIPER_RELAY_MAX_APPS", "10"), 10),
+	)
 
 	tlsAddr := env("PIPER_RELAY_TLS_ADDR", ":443")
 	tunnelAddr := env("PIPER_RELAY_TUNNEL_ADDR", ":7000")
