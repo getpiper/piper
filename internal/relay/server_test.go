@@ -17,7 +17,7 @@ import (
 // startTestRelay opens a store with one enrolled account-bound agent, starts
 // Serve on ephemeral ports with the given tlsCfg, and dials an agent tunnel back.
 // It returns the agent session, the relay's TLS address, the agent base domain, and the store.
-func startTestRelay(t *testing.T, tlsCfg *tls.Config) (*tunnel.Session, string, string, *Store) {
+func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunnel.Session, string, string, *Store) {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
 	if err != nil {
@@ -31,6 +31,15 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config) (*tunnel.Session, string, 
 	tlsLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	tunLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	router := NewRouter()
+
+	var ctrlQ *connQueue
+	if ctrl != nil && tlsCfg != nil {
+		ctrlQ = newConnQueue()
+		go func() { _ = http.Serve(ctrlQ, ctrl) }()
+		t.Cleanup(func() { ctrlQ.Close() })
+	}
+	ctrlHost := "api." + st.apexOrDefault()
+
 	go func() {
 		for {
 			c, err := tunLn.Accept()
@@ -61,7 +70,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config) (*tunnel.Session, string, 
 			if err != nil {
 				return
 			}
-			go handlePublic(c, router, tlsCfg)
+			go handlePublic(c, router, tlsCfg, ctrlHost, ctrlQ)
 		}
 	}()
 	t.Cleanup(func() { tlsLn.Close(); tunLn.Close() })
@@ -83,7 +92,7 @@ func TestControlRegisterThenTerminate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess, tlsAddr, _, _ := startTestRelay(t, tlsCfg)
+	sess, tlsAddr, _, _ := startTestRelay(t, tlsCfg, nil)
 
 	// Agent side: register a hostname over a control stream.
 	cs, err := sess.OpenKind(tunnel.KindControl)
@@ -158,7 +167,7 @@ func indexOf(s, sub string) int {
 }
 
 func TestControlProvisionStoresToken(t *testing.T) {
-	sess, _, base, st := startTestRelay(t, nil)
+	sess, _, base, st := startTestRelay(t, nil, nil)
 
 	cs, err := sess.OpenKind(tunnel.KindControl)
 	if err != nil {
@@ -177,5 +186,29 @@ func TestControlProvisionStoresToken(t *testing.T) {
 	}
 	if got, err := st.ControlToken(base); err != nil || got != "box-tok" {
 		t.Fatalf("ControlToken = %q, %v (want box-tok)", got, err)
+	}
+}
+
+func TestControlPlaneSNIDispatch(t *testing.T) {
+	cert, key := writeWildcard(t, "public.getpiper.co")
+	tlsCfg, err := LoadWildcardConfig(cert, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "ctrl-ok "+r.URL.Path)
+	})
+	_, tlsAddr, _, _ := startTestRelay(t, tlsCfg, ctrl)
+
+	d := &tls.Dialer{Config: &tls.Config{ServerName: "api.public.getpiper.co", InsecureSkipVerify: true}}
+	c, err := d.Dial("tcp", tlsAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	fmt.Fprintf(c, "GET /ping HTTP/1.1\r\nHost: api.public.getpiper.co\r\nConnection: close\r\n\r\n")
+	b, _ := io.ReadAll(c)
+	if !contains(string(b), "ctrl-ok /ping") {
+		t.Fatalf("control dispatch response = %q", b)
 	}
 }

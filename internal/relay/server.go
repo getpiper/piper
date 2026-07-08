@@ -5,16 +5,63 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 
 	"github.com/getpiper/piper/internal/tunnel"
 )
 
+// connQueue adapts SNI-dispatched control-plane connections into a
+// net.Listener so one http.Server can serve them all. handlePublic pushes each
+// terminated TLS conn; the server owns its lifetime from there.
+type connQueue struct {
+	ch   chan net.Conn
+	done chan struct{}
+}
+
+func newConnQueue() *connQueue {
+	return &connQueue{ch: make(chan net.Conn), done: make(chan struct{})}
+}
+
+func (q *connQueue) Accept() (net.Conn, error) {
+	select {
+	case c := <-q.ch:
+		return c, nil
+	case <-q.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (q *connQueue) Close() error {
+	select {
+	case <-q.done:
+	default:
+		close(q.done)
+	}
+	return nil
+}
+
+func (q *connQueue) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4zero} }
+
+func (q *connQueue) push(c net.Conn) {
+	select {
+	case q.ch <- c:
+	case <-q.done:
+		c.Close()
+	}
+}
+
 // Serve runs the relay: it accepts agent tunnels on tunnelAddr and public TLS
 // traffic on tlsAddr, routing each connection by SNI. tlsCfg is the wildcard
-// config for relay-terminated shared-domain apps; nil ⇒ passthrough-only. Blocks
-// until a listener fails.
-func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config) error {
-	router := NewRouter()
+// config for relay-terminated shared-domain apps; nil ⇒ passthrough-only.
+// ctrl, when non-nil and a wildcard cert is armed, is the relay's own HTTP API,
+// served TLS-terminated at SNI "api.<apex>" (#73). Blocks until a listener fails.
+func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler) error {
+	var ctrlQ *connQueue
+	if ctrl != nil && tlsCfg != nil {
+		ctrlQ = newConnQueue()
+		go func() { _ = http.Serve(ctrlQ, ctrl) }()
+	}
+	ctrlHost := "api." + st.apexOrDefault()
 
 	tunLn, err := net.Listen("tcp", tunnelAddr)
 	if err != nil {
@@ -31,7 +78,7 @@ func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config) error {
 		if err != nil {
 			return err
 		}
-		go handlePublic(conn, router, tlsCfg)
+		go handlePublic(conn, router, tlsCfg, ctrlHost, ctrlQ)
 	}
 }
 
@@ -118,12 +165,19 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 	}
 }
 
-func handlePublic(conn net.Conn, router *Router, tlsCfg *tls.Config) {
-	defer conn.Close()
+func handlePublic(conn net.Conn, router *Router, tlsCfg *tls.Config, ctrlHost string, ctrlQ *connQueue) {
 	sni, buffered, err := readSNI(conn)
 	if err != nil {
+		conn.Close()
 		return
 	}
+	// Control plane: api.<apex> is the relay's own TLS-terminated HTTP API,
+	// checked before app routing so no app registration can ever shadow it.
+	if ctrlQ != nil && sni == ctrlHost {
+		ctrlQ.push(tls.Server(&prefixConn{Conn: conn, prefix: buffered}, tlsCfg))
+		return
+	}
+	defer conn.Close()
 	if sess, ok := router.LookupHost(sni); ok {
 		if tlsCfg == nil {
 			return // terminated hostname but no wildcard cert configured

@@ -145,9 +145,12 @@ func main() {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
 	}
 
+	router := relay.NewRouter()
+	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router)
+
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)
-		if err := http.ListenAndServe(apiAddr, relay.NewAPIWithTunnel(st, v, tunnelPublic, nil)); err != nil {
+		if err := http.ListenAndServe(apiAddr, apiHandler); err != nil {
 			log.Fatalf("control API: %v", err)
 		}
 	}()
@@ -161,5 +164,5 @@ func main() {
 	}
 
 	log.Printf("piper-relay: TLS %s, tunnel %s", tlsAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, tunnelAddr, st, tlsCfg))
+	log.Fatal(relay.Serve(tlsAddr, tunnelAddr, st, tlsCfg, router, apiHandler))
 }
