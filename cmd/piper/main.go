@@ -64,8 +64,28 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	gfs := flag.NewFlagSet("piper", flag.ContinueOnError)
+	gfs.SetOutput(stderr)
+	gfs.String("remote", os.Getenv("PIPER_REMOTE"), "base domain of a relay-connected box to drive through the relay")
+	if err := gfs.Parse(args); err != nil {
+		return 2
+	}
+	args = gfs.Args()
 	if len(args) == 0 {
 		return usage(stderr)
+	}
+	remoteFlagSet := false
+	gfs.Visit(func(f *flag.Flag) {
+		if f.Name == "remote" {
+			remoteFlagSet = true
+		}
+	})
+	if remoteFlagSet {
+		switch args[0] {
+		case "version", "login", "connect":
+			fmt.Fprintf(stderr, "error: --remote does not apply to %q\n", args[0])
+			return 2
+		}
 	}
 	switch args[0] {
 	case "version":
@@ -320,6 +340,6 @@ func openBrowser(url string) error {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper <version|login|connect|create|deploy|list|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] <version|login|connect|create|deploy|list|app|github> [args]")
 	return 2
 }
