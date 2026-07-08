@@ -104,6 +104,25 @@ only splices SNI) — set `PIPER_BASE_DOMAIN` + cert/DNS config instead of using
 `piper connect`. Self-hosters run the relay passthrough-only by leaving
 `PIPER_RELAY_TLS_CERT`/`KEY` unset.
 
+### Drive a box remotely
+
+Any control command (`create`, `deploy`, `list`, `app link`, `github setup`)
+can target one of your relay-connected boxes from anywhere, by the base
+domain `piper connect` printed:
+
+```bash
+piper --remote ab12-alice.public.getpiper.co list
+export PIPER_REMOTE=ab12-alice.public.getpiper.co   # or set it once
+piper deploy blog --path .
+```
+
+Requests travel relay → tunnel → box: the CLI authenticates to the relay with
+the account credential `piper login` saved in `~/.piper/piper/config.json`
+(mode `0600`), and the relay swaps it for the box's own token — your relay
+credential never reaches the box, and the box still enforces its own auth.
+The `--remote` flag overrides `PIPER_REMOTE`; `login` and `connect` are
+inherently local and reject `--remote`.
+
 Only pre-release builds exist for now, so add `--rc` to install the latest
 release candidate:
 
