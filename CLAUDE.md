@@ -73,8 +73,9 @@ Shortcuts live in the `Makefile`:
 - `make test` — `go test ./...`. Docker-dependent tests skip cleanly when Docker is absent; e2e needs real Docker + Caddy.
 - `make build` — builds `bin/piperd` and `bin/piper` with `CGO_ENABLED=0`.
 - `make cross` — `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...`; proves the Pi cross-compile still works.
+- `make verify` — mirrors CI's `verify` gate: gofmt check → `go vet` → `make test` → `make cross`. `make fmt` (`gofmt -w .`) fixes formatting in place.
 
-Always run `make test` and `make cross` before claiming work is done.
+Always run `make verify` before claiming work is done or pushing — it catches the gofmt/vet failures `make test` alone misses.
 
 ## Hard constraints
 
@@ -97,7 +98,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 
 - Branch off `main`, named `<gh-name>/<short-description>` (e.g. `ozykhan/agent-store`).
 - Reference the issue in commits and the PR body (`Part of #N`); put `Closes #N` in the PR body so merge closes fully-finished issues.
-- Run `make test` and `make cross` before pushing — CI runs the same and must pass.
+- Run `make verify` before pushing — it runs the same gofmt/vet/test/cross gate CI does, which must pass.
 - Open the PR into `main` (`gh pr create --base main`) and **squash-merge** (one clean commit per feature on `main`).
 
 There is no `dev`/`master` split: Piper's software is installed and run by users on their own hardware — not a service we deploy — so there's no environment for a second integration branch to gate. (The eventual hosted relay is the one scoped exception; see below.)
