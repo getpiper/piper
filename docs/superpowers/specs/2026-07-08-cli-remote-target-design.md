@@ -77,8 +77,8 @@ shapes, same response decoding.
   in the deploy response — printing nothing beats printing a wrong URL. The
   hardcoded `http://<name>.piper.localhost` line stays for local. Returning the
   routed hostname in the deploy response (which also fixes the URL for *local*
-  relay-terminated deploys, a pre-existing gap) is a follow-up `[deploy]`
-  issue, out of scope here.
+  relay-terminated deploys, a pre-existing gap) is the follow-up
+  [#93](https://github.com/getpiper/piper/issues/93), out of scope here.
 - Relay-originated statuses pass through `responseError` verbatim: 401 bad
   credential, 404 not-yours/unknown agent, 503 box offline. No CLI
   special-casing.
@@ -101,7 +101,8 @@ House style: table-driven, `httptest` fakes, `run()`-level where possible.
 
 - Named contexts / `piper use` — layer on later if multi-box demand is real.
 - Routed hostname in the deploy response (real app URLs for terminated mode,
-  local and remote) — follow-up `[deploy]` issue.
+  local and remote) — follow-up
+  [#93](https://github.com/getpiper/piper/issues/93).
 - Agent listing (`piper boxes`) — needs a new relay endpoint; separate issue.
 - Keychain/OS credential storage — `config.json` at 0600 stays the documented
   home, same as today.

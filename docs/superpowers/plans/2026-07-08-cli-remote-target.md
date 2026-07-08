@@ -314,7 +314,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ### Task 3: Remote `deploy` output — no fabricated URL
 
-`deploy` hardcodes `http://<name>.piper.localhost` in its success line. Against a remote box the real hostname is relay-assigned and unknown to the CLI (see spec / follow-up `[deploy]` issue), so print `deployed <name> (<status>)` with no URL. Local output is unchanged.
+`deploy` hardcodes `http://<name>.piper.localhost` in its success line. Against a remote box the real hostname is relay-assigned and unknown to the CLI (see spec / follow-up [#93](https://github.com/getpiper/piper/issues/93)), so print `deployed <name> (<status>)` with no URL. Local output is unchanged.
 
 **Files:**
 - Modify: `cmd/piper/main.go` (`deploy` case, the `fmt.Fprintf(stdout, "deployed %s: http://%s.piper.localhost (%s)\n", ...)` line at ~line 146)
