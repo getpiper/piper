@@ -147,7 +147,7 @@ func main() {
 
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)
-		if err := http.ListenAndServe(apiAddr, relay.NewAPIWithTunnel(st, v, tunnelPublic)); err != nil {
+		if err := http.ListenAndServe(apiAddr, relay.NewAPIWithTunnel(st, v, tunnelPublic, nil)); err != nil {
 			log.Fatalf("control API: %v", err)
 		}
 	}()

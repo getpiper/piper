@@ -90,6 +90,7 @@ const (
 	KindPassthrough byte = 'T' // relay→agent: replayed ClientHello follows; agent pipes to :443
 	KindHTTP        byte = 'H' // relay→agent: relay-terminated plaintext HTTP; agent pipes to :80
 	KindControl     byte = 'C' // agent→relay: a length-prefixed ControlRequest/ControlResponse
+	KindControlAPI  byte = 'A' // relay→agent: a forwarded control-plane HTTP request; agent pipes to the control API
 )
 
 // OpenKind opens a new stream and writes its kind byte.
