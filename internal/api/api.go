@@ -20,6 +20,26 @@ type Deployerer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
 }
 
+// App is the wire shape of an app in API responses: the stored app plus the
+// status of its latest non-preview deployment — exactly one of "building",
+// "running", "failed", "stopped" — or "" when never deployed.
+type App struct {
+	store.App
+	Status string
+}
+
+// latestStatus resolves the App.Status for one app; never-deployed is "".
+func latestStatus(s *store.Store, app string) (string, error) {
+	d, err := s.LatestDeployment(app)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return d.Status, nil
+}
+
 // onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
 // exchange endpoint, so the daemon can start serving webhooks without a restart.
 func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func()) http.Handler {
@@ -52,7 +72,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusCreated, app)
+		writeJSON(w, http.StatusCreated, App{App: app})
 	})
 	mux.HandleFunc("GET /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		apps, err := s.ListApps()
@@ -60,10 +80,16 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if apps == nil {
-			apps = []store.App{}
+		out := make([]App, 0, len(apps))
+		for _, a := range apps {
+			status, err := latestStatus(s, a.Name)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out = append(out, App{App: a, Status: status})
 		}
-		writeJSON(w, http.StatusOK, apps)
+		writeJSON(w, http.StatusOK, out)
 	})
 	mux.HandleFunc("GET /v1/apps/{name}", func(w http.ResponseWriter, r *http.Request) {
 		app, err := s.GetApp(r.PathValue("name"))
@@ -75,7 +101,12 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, app)
+		status, err := latestStatus(s, app.Name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, App{App: app, Status: status})
 	})
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
