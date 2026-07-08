@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -58,7 +59,9 @@ func TestListApps(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode([]store.App{{Name: "blog", Port: 8080}})
+		_ = json.NewEncoder(w).Encode([]api.App{
+			{App: store.App{Name: "blog", Port: 8080}, Status: "running"},
+		})
 	}))
 	defer srv.Close()
 
@@ -66,8 +69,32 @@ func TestListApps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListApps: %v", err)
 	}
-	if len(apps) != 1 || apps[0].Name != "blog" || apps[0].Port != 8080 {
+	if len(apps) != 1 || apps[0].Name != "blog" || apps[0].Port != 8080 || apps[0].Status != "running" {
 		t.Errorf("apps = %+v", apps)
+	}
+}
+
+func TestLiveness(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The liveness resource is the client's base path itself.
+		if r.Method != http.MethodGet || r.URL.Path != "/agents/box.public.getpiper.co" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer cred" {
+			t.Errorf("Authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent": "box.public.getpiper.co", "connected": true,
+		})
+	}))
+	defer srv.Close()
+
+	live, err := New(srv.URL+"/agents/box.public.getpiper.co", "cred").Liveness()
+	if err != nil {
+		t.Fatalf("Liveness: %v", err)
+	}
+	if live.Agent != "box.public.getpiper.co" || !live.Connected {
+		t.Errorf("live = %+v", live)
 	}
 }
 

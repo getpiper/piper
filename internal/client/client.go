@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -60,7 +61,7 @@ func (c *Client) CreateApp(name string, port int) error {
 	return nil
 }
 
-func (c *Client) ListApps() ([]store.App, error) {
+func (c *Client) ListApps() ([]api.App, error) {
 	resp, err := c.do(http.MethodGet, "/v1/apps", "", nil)
 	if err != nil {
 		return nil, err
@@ -69,11 +70,36 @@ func (c *Client) ListApps() ([]store.App, error) {
 	if resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, responseError("list apps", resp)
 	}
-	var apps []store.App
+	var apps []api.App
 	if err := json.NewDecoder(resp.Body).Decode(&apps); err != nil {
 		return nil, err
 	}
 	return apps, nil
+}
+
+// Liveness reports the relay's view of the box: whether its tunnel session is
+// currently connected. It GETs the client's base path itself, which on a
+// remote client is the relay's /agents/<base-domain> resource — it has no
+// meaning against a local piperd address.
+type Liveness struct {
+	Agent     string `json:"agent"`
+	Connected bool   `json:"connected"`
+}
+
+func (c *Client) Liveness() (Liveness, error) {
+	resp, err := c.do(http.MethodGet, "", "", nil)
+	if err != nil {
+		return Liveness{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return Liveness{}, responseError("liveness", resp)
+	}
+	var l Liveness
+	if err := json.NewDecoder(resp.Body).Decode(&l); err != nil {
+		return Liveness{}, err
+	}
+	return l, nil
 }
 
 func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
