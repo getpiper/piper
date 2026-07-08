@@ -209,6 +209,11 @@ The unit runs as a `DynamicUser` in the `docker` group and binds `:80`/`:443` vi
 `CAP_NET_BIND_SERVICE` — no root. Apply later env edits with
 `sudo systemctl restart piperd`.
 
+To join the public relay instead of setting `PIPER_RELAY_ADDR`/`PIPER_RELAY_TOKEN`/`PIPER_BASE_DOMAIN`
+by hand, run `piper login && piper connect` — on this systemd install `connect`
+prints a ready `sudo sh -c … /etc/piper/piperd.env` command that upserts those
+three keys for you (see the README's "Join the public relay").
+
 **Health checks before moving on:**
 
 - piperd logs `piperd listening …` and does **not** exit on `relay tls:` — a cert
