@@ -23,6 +23,11 @@ var ErrNotConnected = errors.New("relay tunnel not connected")
 type TunnelClient struct {
 	mu   sync.Mutex
 	sess *tunnel.Session
+
+	// OnConnect, if set before Run, is invoked in its own goroutine each time a
+	// relay session is established — piperd uses it to provision the relay's
+	// control bearer (see the control-stream routing design).
+	OnConnect func()
 }
 
 func (c *TunnelClient) setSession(s *tunnel.Session) {
@@ -60,6 +65,9 @@ func (c *TunnelClient) Run(ctx context.Context, relayAddr, token, baseDomain str
 		}
 		log.Printf("tunnel: connected to relay %s as %s", relayAddr, baseDomain)
 		c.setSession(sess)
+		if c.OnConnect != nil {
+			go c.OnConnect()
+		}
 		start := time.Now()
 		serveStreams(ctx, sess, dialLocal)
 		c.setSession(nil)
@@ -80,6 +88,13 @@ func (c *TunnelClient) Register(app string) (string, error) {
 // Deregister asks the relay to drop hostname.
 func (c *TunnelClient) Deregister(hostname string) error {
 	_, err := c.control(tunnel.ControlRequest{Op: "deregister", Hostname: hostname})
+	return err
+}
+
+// Provision hands the relay this box's control-API bearer for the enrollment.
+// It rides the authenticated session, so it can only set this agent's token.
+func (c *TunnelClient) Provision(token string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "provision", Token: token})
 	return err
 }
 

@@ -234,3 +234,62 @@ func TestTunnelClientBacksOffOnImmediateSessionDeath(t *testing.T) {
 		t.Fatalf("accepted %d connections in 500ms; reconnect loop is busy-spinning (want < 5)", n)
 	}
 }
+
+func TestTunnelClientProvision(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+		return nil, errors.New("no local dials expected")
+	})
+	relaySess := <-sessCh
+
+	got := make(chan tunnel.ControlRequest, 1)
+	go func() {
+		kind, stream, err := relaySess.AcceptKind()
+		if err != nil || kind != tunnel.KindControl {
+			return
+		}
+		var req tunnel.ControlRequest
+		_ = tunnel.ReadMsg(stream, &req)
+		got <- req
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+		stream.Close()
+	}()
+
+	// Retry until Run publishes its session.
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err = c.Provision("box-token"); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	req := <-got
+	if req.Op != "provision" || req.Token != "box-token" {
+		t.Fatalf("relay saw %+v, want op=provision token=box-token", req)
+	}
+}
+
+func TestTunnelClientOnConnectFires(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fired := make(chan struct{}, 1)
+	var c TunnelClient
+	c.OnConnect = func() { fired <- struct{}{} }
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+		return nil, errors.New("no local dials expected")
+	})
+	<-sessCh
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnConnect did not fire after session establishment")
+	}
+}
