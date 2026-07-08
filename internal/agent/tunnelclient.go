@@ -4,18 +4,43 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/getpiper/piper/internal/tunnel"
 )
 
-// RunTunnelClient maintains an outbound tunnel to relayAddr, registering
-// baseDomain, and forwards each accepted stream to a fresh dialLocal() conn. It
-// reconnects with backoff until ctx is cancelled. Blocks.
-func RunTunnelClient(ctx context.Context, relayAddr, token, baseDomain string, dialLocal func() (net.Conn, error)) {
+// ErrNotConnected is returned by Register/Deregister when no relay session is live.
+var ErrNotConnected = errors.New("relay tunnel not connected")
+
+// TunnelClient maintains an outbound tunnel to the relay and exposes hostname
+// registration over it. The current session is published under a mutex so the
+// deploy path can open control streams on whatever session is live.
+type TunnelClient struct {
+	mu   sync.Mutex
+	sess *tunnel.Session
+}
+
+func (c *TunnelClient) setSession(s *tunnel.Session) {
+	c.mu.Lock()
+	c.sess = s
+	c.mu.Unlock()
+}
+
+func (c *TunnelClient) current() *tunnel.Session {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sess
+}
+
+// Run maintains the tunnel to relayAddr, registering baseDomain, and forwards
+// each relay-opened stream to dialLocal(kind). It reconnects with backoff until
+// ctx is cancelled. Blocks.
+func (c *TunnelClient) Run(ctx context.Context, relayAddr, token, baseDomain string, dialLocal func(kind byte) (net.Conn, error)) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		conn, err := net.Dial("tcp", relayAddr)
@@ -34,8 +59,10 @@ func RunTunnelClient(ctx context.Context, relayAddr, token, baseDomain string, d
 			continue
 		}
 		log.Printf("tunnel: connected to relay %s as %s", relayAddr, baseDomain)
+		c.setSession(sess)
 		start := time.Now()
 		serveStreams(ctx, sess, dialLocal)
+		c.setSession(nil)
 		if time.Since(start) > healthyThreshold {
 			backoff = time.Second
 		}
@@ -44,28 +71,61 @@ func RunTunnelClient(ctx context.Context, relayAddr, token, baseDomain string, d
 	}
 }
 
+// Register opens a control stream on the current session and asks the relay to
+// assign/return the public hostname for app.
+func (c *TunnelClient) Register(app string) (string, error) {
+	return c.control(tunnel.ControlRequest{Op: "register", App: app})
+}
+
+// Deregister asks the relay to drop hostname.
+func (c *TunnelClient) Deregister(hostname string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "deregister", Hostname: hostname})
+	return err
+}
+
+func (c *TunnelClient) control(req tunnel.ControlRequest) (string, error) {
+	sess := c.current()
+	if sess == nil {
+		return "", ErrNotConnected
+	}
+	stream, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+	if err := tunnel.WriteMsg(stream, req); err != nil {
+		return "", err
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(stream, &resp); err != nil {
+		return "", err
+	}
+	if resp.Error != "" {
+		return "", errors.New(resp.Error)
+	}
+	return resp.Hostname, nil
+}
+
 // healthyThreshold is how long a session must stay up before a subsequent
 // disconnect is treated as "was fine" and resets backoff to the floor. A
 // session that dies before this (e.g. relay rejects auth immediately) keeps
 // the backoff growing so a misconfigured token doesn't busy-spin reconnects.
 const healthyThreshold = 10 * time.Second
 
-func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func() (net.Conn, error)) {
+func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func(kind byte) (net.Conn, error)) {
 	defer sess.Close()
-	stopCancel := context.AfterFunc(ctx, func() {
-		_ = sess.Close()
-	})
+	stopCancel := context.AfterFunc(ctx, func() { _ = sess.Close() })
 	defer stopCancel()
 	for {
-		stream, err := sess.Accept()
+		kind, stream, err := sess.AcceptKind()
 		if err != nil {
 			return // session died; caller reconnects
 		}
 		go func() {
 			defer stream.Close()
-			local, err := dialLocal()
+			local, err := dialLocal(kind)
 			if err != nil {
-				log.Printf("tunnel: dial local: %v", err)
+				log.Printf("tunnel: dial local (kind %q): %v", kind, err)
 				return
 			}
 			defer local.Close()

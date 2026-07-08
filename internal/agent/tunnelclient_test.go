@@ -12,16 +12,34 @@ import (
 	"github.com/getpiper/piper/internal/tunnel"
 )
 
-// The tunnel client forwards an accepted stream to the local dialer. We stand up
-// a real relay-side listener + tunnel.Serve, run the client against it, open a
-// stream from the server, and check bytes reach a fake "local Caddy".
-func TestTunnelClientForwardsToLocal(t *testing.T) {
+// fakeRelay accepts one agent tunnel and exposes its session for the test to
+// drive (open T/H streams, accept C streams).
+func fakeRelay(t *testing.T) (addr string, sessCh chan *tunnel.Session) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	t.Cleanup(func() { ln.Close() })
+	sessCh = make(chan *tunnel.Session, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		sess, err := tunnel.Serve(c, func(_, _ string) error { return nil })
+		if err != nil {
+			return
+		}
+		sessCh <- sess
+	}()
+	return ln.Addr().String(), sessCh
+}
 
+// The tunnel client forwards an accepted stream to the local dialer. We stand up
+// a real relay-side listener + tunnel.Serve, run the client against it, open a
+// passthrough stream from the server, and check bytes reach a fake "local Caddy".
+func TestTunnelClientForwardsToLocal(t *testing.T) {
 	// Fake local Caddy: echoes.
 	local, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -37,29 +55,18 @@ func TestTunnelClientForwardsToLocal(t *testing.T) {
 		c.Close()
 	}()
 
-	sessCh := make(chan *tunnel.Session, 1)
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		sess, err := tunnel.Serve(conn, func(_, _ string) error { return nil })
-		if err != nil {
-			return
-		}
-		sessCh <- sess
-	}()
-
+	addr, sessCh := fakeRelay(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunTunnelClient(ctx, ln.Addr().String(), "tok", "alice.example.com", func() (net.Conn, error) {
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "alice.example.com", func(byte) (net.Conn, error) {
 		return net.Dial("tcp", local.Addr().String())
 	})
 
 	sess := <-sessCh
-	stream, err := sess.Open()
+	stream, err := sess.OpenKind(tunnel.KindPassthrough)
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("OpenKind: %v", err)
 	}
 	stream.SetDeadline(time.Now().Add(2 * time.Second))
 	stream.Write([]byte("hello"))
@@ -69,6 +76,90 @@ func TestTunnelClientForwardsToLocal(t *testing.T) {
 	}
 	if string(buf) != "hello" {
 		t.Fatalf("echo = %q", buf)
+	}
+}
+
+func TestTunnelClientDialsByKind(t *testing.T) {
+	// Two local listeners stand in for the box's :443 and :80.
+	ln443, _ := net.Listen("tcp", "127.0.0.1:0")
+	ln80, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln443.Close()
+	defer ln80.Close()
+	got := make(chan byte, 1)
+	accept := func(ln net.Listener, mark byte) {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			got <- mark
+			c.Close()
+		}
+	}
+	go accept(ln443, 'T')
+	go accept(ln80, 'H')
+
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(kind byte) (net.Conn, error) {
+		if kind == tunnel.KindHTTP {
+			return net.Dial("tcp", ln80.Addr().String())
+		}
+		return net.Dial("tcp", ln443.Addr().String())
+	})
+	relaySess := <-sessCh
+
+	// Relay opens an H stream → agent must dial :80.
+	hs, _ := relaySess.OpenKind(tunnel.KindHTTP)
+	hs.Close()
+	if mark := <-got; mark != 'H' {
+		t.Fatalf("H stream dialed %q, want :80", mark)
+	}
+	// Relay opens a T stream → agent must dial :443.
+	ts, _ := relaySess.OpenKind(tunnel.KindPassthrough)
+	ts.Close()
+	if mark := <-got; mark != 'T' {
+		t.Fatalf("T stream dialed %q, want :443", mark)
+	}
+}
+
+func TestTunnelClientRegister(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+		return net.Dial("tcp", "127.0.0.1:9") // unused in this test
+	})
+	relaySess := <-sessCh
+
+	// Relay control handler: answer register with a canned hostname.
+	go func() {
+		kind, stream, err := relaySess.AcceptKind()
+		if err != nil || kind != tunnel.KindControl {
+			return
+		}
+		var req tunnel.ControlRequest
+		_ = tunnel.ReadMsg(stream, &req)
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Hostname: req.App + "-alice.public.getpiper.co"})
+		stream.Close()
+	}()
+
+	// Give Run a moment to publish its session.
+	var host string
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		host, err = c.Register("blog")
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil || host != "blog-alice.public.getpiper.co" {
+		t.Fatalf("Register = %q,%v", host, err)
 	}
 }
 
@@ -91,7 +182,7 @@ func TestServeStreamsStopsOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		serveStreams(ctx, clientSession, func() (net.Conn, error) {
+		serveStreams(ctx, clientSession, func(byte) (net.Conn, error) {
 			return nil, errors.New("unexpected local dial")
 		})
 		close(done)
@@ -131,7 +222,8 @@ func TestTunnelClientBacksOffOnImmediateSessionDeath(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunTunnelClient(ctx, ln.Addr().String(), "tok", "alice.example.com", func() (net.Conn, error) {
+	var c TunnelClient
+	go c.Run(ctx, ln.Addr().String(), "tok", "alice.example.com", func(byte) (net.Conn, error) {
 		return nil, io.EOF // never actually reached; session dies before Accept
 	})
 
