@@ -39,6 +39,8 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
 - ✅ `piperd` — outbound tunnel client + cert wiring (additive; LAN-only unchanged) — [#10](https://github.com/getpiper/piper/issues/10)
 - ✅ e2e — loopback relay path (tunnel + SNI + on-box TLS) — [#10](https://github.com/getpiper/piper/issues/10)
 - ✅ `piper login` / `piper connect` self-service onboarding CLI — device-flow login + box claim, writes piperd `relay.json` — [#49](https://github.com/getpiper/piper/issues/49), [#83](https://github.com/getpiper/piper/pull/83)
+- ✅ Relay-terminated shared domain — typed tunnel streams (`T`/`H`/`C`); relay assigns `<app-hash>-<username>.<apex>`, terminates wildcard TLS, forwards HTTP over the tunnel; free-tier box served on `:80` with no on-box cert; `login → connect → deploy → curl` e2e green — [#49](https://github.com/getpiper/piper/issues/49)
+  - ⬜ surface the relay-assigned public host in `piper list` / deploy output (e2e reads it from the relay DB today)
   - ⬜ LAN `login` load-mutate-save so it doesn't clobber stored relay creds — [#84](https://github.com/getpiper/piper/issues/84)
   - ⬜ thread `context.Context` through `relayclient` requests — [#85](https://github.com/getpiper/piper/issues/85)
 
