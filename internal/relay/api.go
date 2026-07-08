@@ -6,18 +6,21 @@ import (
 	"net/http"
 )
 
-// NewAPI returns the control API without advertising a tunnel endpoint (tests /
-// LAN). Use NewAPIWithTunnel in production to advertise the relay's tunnel addr.
-func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "") }
+// NewAPI returns the account API without a tunnel endpoint or control proxy
+// (tests / LAN). Use NewAPIWithTunnel in production.
+func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "", nil) }
 
-// NewAPIWithTunnel is NewAPI plus the public tunnel endpoint returned to agents
-// on enroll so a freshly claimed box knows where to dial.
-func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string) http.Handler {
+// NewAPIWithTunnel is the full account-facing API: device login, enroll, and —
+// when router is non-nil — the /agents/ control proxy (#73).
+func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Router) http.Handler {
 	a := &api{st: st, v: v, tunnelEndpoint: tunnelEndpoint}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/login/device", a.loginDevice)
 	mux.HandleFunc("POST /v1/login/poll", a.loginPoll)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
+	if router != nil {
+		mux.Handle("/agents/", NewControlProxy(st, router))
+	}
 	return mux
 }
 

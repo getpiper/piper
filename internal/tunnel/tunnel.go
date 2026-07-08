@@ -85,11 +85,12 @@ func Dial(conn net.Conn, token, baseDomain string) (*Session, error) {
 
 // Stream kinds: every stream opens with a single kind byte so each end can
 // dispatch by purpose. The agent opens only Control streams; the relay opens
-// only Passthrough/HTTP streams.
+// Passthrough, HTTP, and ControlAPI streams.
 const (
 	KindPassthrough byte = 'T' // relay→agent: replayed ClientHello follows; agent pipes to :443
 	KindHTTP        byte = 'H' // relay→agent: relay-terminated plaintext HTTP; agent pipes to :80
 	KindControl     byte = 'C' // agent→relay: a length-prefixed ControlRequest/ControlResponse
+	KindControlAPI  byte = 'A' // relay→agent: a forwarded control-plane HTTP request; agent pipes to the control API
 )
 
 // OpenKind opens a new stream and writes its kind byte.
@@ -121,9 +122,10 @@ func (s *Session) AcceptKind() (byte, net.Conn, error) {
 
 // ControlRequest is an agent→relay control message on a KindControl stream.
 type ControlRequest struct {
-	Op       string `json:"op"` // "register" | "deregister"
+	Op       string `json:"op"` // "register" | "deregister" | "provision"
 	App      string `json:"app,omitempty"`
 	Hostname string `json:"hostname,omitempty"`
+	Token    string `json:"token,omitempty"` // "provision": the box's control-API bearer for the relay to inject
 }
 
 // ControlResponse is the relay's reply. Error is non-empty on failure.

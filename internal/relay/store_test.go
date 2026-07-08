@@ -60,3 +60,41 @@ func TestEnrollRejectsDuplicateBaseDomain(t *testing.T) {
 		t.Fatal("second Enroll succeeded for duplicate base domain")
 	}
 }
+
+func TestControlTokenRoundTrip(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	acc, err := st.UpsertAccount("sub-ct", "ct@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Never provisioned: empty token, no error.
+	if tok, err := st.ControlToken(en.BaseDomain); err != nil || tok != "" {
+		t.Fatalf("fresh ControlToken = %q, %v (want \"\", nil)", tok, err)
+	}
+	if err := st.SetControlToken(en.BaseDomain, "tok-1"); err != nil {
+		t.Fatal(err)
+	}
+	if tok, _ := st.ControlToken(en.BaseDomain); tok != "tok-1" {
+		t.Fatalf("ControlToken = %q, want tok-1", tok)
+	}
+	// A re-push overwrites (re-claim provisions a fresh token).
+	if err := st.SetControlToken(en.BaseDomain, "tok-2"); err != nil {
+		t.Fatal(err)
+	}
+	if tok, _ := st.ControlToken(en.BaseDomain); tok != "tok-2" {
+		t.Fatalf("ControlToken = %q, want tok-2", tok)
+	}
+	// Unknown agents fail closed in both directions.
+	if err := st.SetControlToken("nope.example.com", "t"); err == nil {
+		t.Fatal("SetControlToken(unknown agent) = nil, want error")
+	}
+	if _, err := st.ControlToken("nope.example.com"); err == nil {
+		t.Fatal("ControlToken(unknown agent) = nil error, want error")
+	}
+}

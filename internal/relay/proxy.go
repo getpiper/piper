@@ -1,0 +1,86 @@
+package relay
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"strings"
+
+	"github.com/getpiper/piper/internal/tunnel"
+)
+
+// NewControlProxy serves /agents/<base-domain>/v1/*: it authenticates the
+// caller's relay account credential, authorizes that the account owns the
+// agent, and reverse-proxies the request over the agent's tunnel as a
+// KindControlAPI stream — swapping the caller's credential for the box's
+// stored control bearer. The box still validates that bearer on every request
+// (#77); the relay hop grants nothing at the box. Unknown and unowned agents
+// are both 404 so existence is never leaked across tenants.
+func NewControlProxy(st *Store, router *Router) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cred, ok := bearerToken(r)
+		if !ok {
+			http.Error(w, "missing bearer credential", http.StatusUnauthorized)
+			return
+		}
+		acc, err := st.AuthenticateAccount(cred)
+		if err != nil {
+			http.Error(w, "bad credential", http.StatusUnauthorized)
+			return
+		}
+
+		// Path shape: /agents/<base-domain>/v1/...
+		rest := strings.TrimPrefix(r.URL.Path, "/agents/")
+		base, tail, found := strings.Cut(rest, "/")
+		if !found || base == "" || !strings.HasPrefix(tail, "v1/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		ownerID, _, err := st.AgentAccount(base)
+		if err != nil || ownerID != acc.ID {
+			http.NotFound(w, r)
+			return
+		}
+
+		sess, ok := router.Lookup(base)
+		if !ok {
+			http.Error(w, "agent not connected", http.StatusServiceUnavailable)
+			return
+		}
+		boxToken, err := st.ControlToken(base)
+		if err != nil {
+			http.Error(w, "agent lookup failed", http.StatusInternalServerError)
+			return
+		}
+
+		rp := &httputil.ReverseProxy{
+			Rewrite: func(pr *httputil.ProxyRequest) {
+				pr.Out.URL.Scheme = "http"
+				pr.Out.URL.Host = base
+				pr.Out.URL.Path = "/" + tail
+				// Never forward the caller's account credential to the box.
+				// Inject the box's own bearer; if the box never provisioned one,
+				// forward bare and let its auth gate answer 401.
+				pr.Out.Header.Del("Authorization")
+				if boxToken != "" {
+					pr.Out.Header.Set("Authorization", "Bearer "+boxToken)
+				}
+			},
+			Transport: &http.Transport{
+				DialContext: func(context.Context, string, string) (net.Conn, error) {
+					return sess.OpenKind(tunnel.KindControlAPI)
+				},
+				// One tunnel stream per request: a pooled stream must never
+				// outlive its session.
+				DisableKeepAlives: true,
+			},
+			FlushInterval: -1,
+			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+				http.Error(w, "box unreachable: "+err.Error(), http.StatusBadGateway)
+			},
+		}
+		rp.ServeHTTP(w, r)
+	})
+}

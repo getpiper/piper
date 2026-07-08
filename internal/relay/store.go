@@ -74,9 +74,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := ensureAgentAccountColumn(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrate agents: %w", err)
+	for _, col := range []string{"account_id", "control_token"} {
+		if err := ensureAgentColumn(db, col); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate agents: %w", err)
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -127,10 +129,38 @@ func (s *Store) Authenticate(token string) (Agent, error) {
 	return ag, nil
 }
 
-// ensureAgentAccountColumn adds agents.account_id if an older DB predates it.
-// CREATE TABLE IF NOT EXISTS can't alter an existing table, so we add the column
-// idempotently and tolerate the "duplicate column" error on already-migrated DBs.
-func ensureAgentAccountColumn(db *sql.DB) error {
+// SetControlToken stores the plaintext control-API bearer the box pushed for
+// this enrollment. Plaintext by necessity: the relay must present it verbatim
+// on forwarded control requests (see the control-stream routing design).
+func (s *Store) SetControlToken(baseDomain, token string) error {
+	res, err := s.db.Exec(`UPDATE agents SET control_token=? WHERE base_domain=?`, token, baseDomain)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrBadToken
+	}
+	return nil
+}
+
+// ControlToken returns the stored control bearer for baseDomain, "" if the box
+// never provisioned one. Unknown agents are ErrBadToken.
+func (s *Store) ControlToken(baseDomain string) (string, error) {
+	var tok sql.NullString
+	err := s.db.QueryRow(`SELECT control_token FROM agents WHERE base_domain=?`, baseDomain).Scan(&tok)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrBadToken
+	}
+	if err != nil {
+		return "", err
+	}
+	return tok.String, nil
+}
+
+// ensureAgentColumn adds a column to agents if an older DB predates it.
+// CREATE TABLE IF NOT EXISTS can't alter an existing table, so we add the
+// column idempotently.
+func ensureAgentColumn(db *sql.DB, column string) error {
 	rows, err := db.Query(`PRAGMA table_info(agents)`)
 	if err != nil {
 		return err
@@ -144,13 +174,13 @@ func ensureAgentAccountColumn(db *sql.DB) error {
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
 			return err
 		}
-		if name == "account_id" {
+		if name == column {
 			return nil // already migrated
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	_, err = db.Exec(`ALTER TABLE agents ADD COLUMN account_id TEXT`)
+	_, err = db.Exec(`ALTER TABLE agents ADD COLUMN ` + column + ` TEXT`)
 	return err
 }

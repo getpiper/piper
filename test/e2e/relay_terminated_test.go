@@ -1,11 +1,16 @@
 package e2e
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,6 +157,23 @@ func TestRelayTerminatedSelfService(t *testing.T) {
 		t.Fatal("no response through relay termination")
 	}
 	fmt.Printf("terminated e2e response:\n%s\n", body)
+
+	// ---- Remote control plane through the relay (#73) ----
+	base := agentBaseDomain(t, relayData)
+	cred := accountCredential(t, home)
+
+	// Owner's credential → the box's real, Token-B-gated /v1/apps.
+	apps := controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base+"/v1/apps", cred, http.StatusOK, 30*time.Second)
+	if !strings.Contains(apps, "blog") {
+		t.Fatalf("control response missing deployed app: %q", apps)
+	}
+
+	// Unknown credential → 401 at the relay.
+	controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base+"/v1/apps", "bogus-cred", http.StatusUnauthorized, 10*time.Second)
+
+	// Another tenant → 404 at the relay: never reaches the box, existence not leaked.
+	mcred := insertSecondAccount(t, relayData)
+	controlRequest(t, "api."+apex, "127.0.0.1:8443", "/agents/"+base+"/v1/apps", mcred, http.StatusNotFound, 10*time.Second)
 }
 
 // terminatedHostname reads the single registered hostname from the relay's
@@ -169,4 +191,97 @@ func terminatedHostname(t *testing.T, relayData string) string {
 		t.Fatalf("read hostname from relay db: %v", err)
 	}
 	return hostname
+}
+
+// agentBaseDomain reads the enrolled agent's base domain from the relay store.
+func agentBaseDomain(t *testing.T, relayData string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(relayData, "relay.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var base string
+	if err := db.QueryRow(`SELECT base_domain FROM agents LIMIT 1`).Scan(&base); err != nil {
+		t.Fatalf("read agent base domain: %v", err)
+	}
+	return base
+}
+
+// accountCredential reads the relay account credential `piper login` saved.
+func accountCredential(t *testing.T, home string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(home, ".piper", "piper", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cc struct {
+		AccountCredential string `json:"account_credential"`
+	}
+	if err := json.Unmarshal(b, &cc); err != nil {
+		t.Fatal(err)
+	}
+	if cc.AccountCredential == "" {
+		t.Fatal("no account_credential in CLI config")
+	}
+	return cc.AccountCredential
+}
+
+// insertSecondAccount plants a second tenant directly in the relay store (the
+// auto-approve verifier always yields the same account, so cross-tenant denial
+// needs a hand-made one) and returns its plaintext credential.
+func insertSecondAccount(t *testing.T, relayData string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(relayData, "relay.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.Exec(
+		`INSERT INTO accounts(id, google_sub, username, disabled, created_at) VALUES('mallory-id','mallory-sub','mallory',0,?)`, now); err != nil {
+		t.Fatal(err)
+	}
+	cred := "mallory-cred-e2e"
+	sum := sha256.Sum256([]byte(cred))
+	if _, err := db.Exec(
+		`INSERT INTO account_creds(token_hash, account_id, created_at) VALUES(?,'mallory-id',?)`,
+		hex.EncodeToString(sum[:]), now); err != nil {
+		t.Fatal(err)
+	}
+	return cred
+}
+
+// controlRequest performs one control-plane HTTPS request against the relay
+// (SNI-dispatched api.<apex>), retrying until it sees wantStatus; returns the body.
+func controlRequest(t *testing.T, sni, addr, path, cred string, wantStatus int, within time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	var last string
+	for time.Now().Before(deadline) {
+		d := &tls.Dialer{Config: &tls.Config{ServerName: sni, InsecureSkipVerify: true}}
+		conn, err := d.Dial("tcp", addr)
+		if err != nil {
+			last = err.Error()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nConnection: close\r\n\r\n", path, sni, cred)
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			last = err.Error()
+			conn.Close()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		b, _ := io.ReadAll(resp.Body)
+		conn.Close()
+		if resp.StatusCode == wantStatus {
+			return string(b)
+		}
+		last = fmt.Sprintf("status %d body %q", resp.StatusCode, b)
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("control %s: want %d, last: %s", path, wantStatus, last)
+	return ""
 }

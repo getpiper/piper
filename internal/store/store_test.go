@@ -238,3 +238,27 @@ func TestListTokens(t *testing.T) {
 		t.Fatalf("len = %d, want 2", len(toks))
 	}
 }
+
+func TestDeleteTokenHardDeletes(t *testing.T) {
+	st := openTemp(t)
+
+	if _, err := st.CreateToken("relay:base.example.com", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteToken("relay:base.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	toks, err := st.ListTokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tk := range toks {
+		if tk.Label == "relay:base.example.com" {
+			t.Fatal("token row still present after DeleteToken")
+		}
+	}
+	// Deleting a non-existent label is not an error (idempotent unwind).
+	if err := st.DeleteToken("relay:base.example.com"); err != nil {
+		t.Fatalf("second delete: %v", err)
+	}
+}
