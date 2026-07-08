@@ -106,12 +106,13 @@ only splices SNI) — set `PIPER_BASE_DOMAIN` + cert/DNS config instead of using
 
 ### Drive a box remotely
 
-Any control command (`create`, `deploy`, `list`, `app link`, `github setup`)
+Any control command (`create`, `deploy`, `list`, `status`, `app link`, `github setup`)
 can target one of your relay-connected boxes from anywhere, by the base
 domain `piper connect` printed:
 
 ```bash
 piper --remote ab12-alice.public.getpiper.co list
+piper --remote ab12-alice.public.getpiper.co status  # box up? what's deployed?
 export PIPER_REMOTE=ab12-alice.public.getpiper.co   # or set it once
 piper deploy blog --path .
 ```
