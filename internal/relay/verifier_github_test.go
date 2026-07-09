@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -173,5 +174,55 @@ func TestGitHubVerifierPollUnknownHandle(t *testing.T) {
 	v := NewGitHubVerifier("test-client", "test-secret")
 	if _, err := v.Poll(context.Background(), "never-started"); err == nil {
 		t.Fatal("Poll(unknown) succeeded, want error")
+	}
+}
+
+func TestGitHubAuthCodeURL(t *testing.T) {
+	v := NewGitHubVerifier("test-client", "test-secret")
+	got := v.AuthCodeURL("state-123")
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("AuthCodeURL not a URL: %v", err)
+	}
+	if u.Host != "github.com" || u.Path != "/login/oauth/authorize" {
+		t.Fatalf("authorize URL = %q", got)
+	}
+	q := u.Query()
+	if q.Get("client_id") != "test-client" || q.Get("state") != "state-123" {
+		t.Fatalf("authorize query = %q", u.RawQuery)
+	}
+	if q.Get("scope") != "" {
+		t.Fatalf("authorize URL carries scope %q, want none", q.Get("scope"))
+	}
+}
+
+func TestGitHubExchange(t *testing.T) {
+	fake := &fakeGitHub{t: t, tokenResponses: []map[string]any{
+		{"access_token": "gho_tok", "token_type": "bearer"},
+	}}
+	v, _ := newTestGitHubVerifier(t, fake)
+
+	id, err := v.Exchange(context.Background(), "code-1")
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if id.Subject != "583231" || id.Login != "Octo-Cat" {
+		t.Fatalf("identity = %+v", id)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	f := fake.tokenForms[0]
+	if f["client_id"] != "test-client" || f["client_secret"] != "test-secret" || f["code"] != "code-1" {
+		t.Fatalf("exchange form = %+v", f)
+	}
+}
+
+func TestGitHubExchangeBadCode(t *testing.T) {
+	fake := &fakeGitHub{t: t, tokenResponses: []map[string]any{
+		{"error": "bad_verification_code"},
+	}}
+	v, _ := newTestGitHubVerifier(t, fake)
+	if _, err := v.Exchange(context.Background(), "nope"); err == nil {
+		t.Fatal("Exchange(bad code) succeeded, want error")
 	}
 }

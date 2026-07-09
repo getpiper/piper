@@ -209,3 +209,28 @@ func (g *GitHubVerifier) Poll(_ context.Context, handle string) (Identity, error
 	}
 	return fl.id, fl.err
 }
+
+// AuthCodeURL is the GitHub authorize URL for the browser flow. No
+// redirect_uri parameter: the OAuth app's single registered callback URL
+// (the relay's /v1/login/callback) is used.
+func (g *GitHubVerifier) AuthCodeURL(state string) string {
+	return g.oauthBase + "/login/oauth/authorize?client_id=" +
+		url.QueryEscape(g.clientID) + "&state=" + url.QueryEscape(state)
+}
+
+// Exchange resolves an authorization code to the GitHub identity behind it.
+func (g *GitHubVerifier) Exchange(ctx context.Context, code string) (Identity, error) {
+	var tr githubTokenResponse
+	err := g.postForm(ctx, g.oauthBase+"/login/oauth/access_token", url.Values{
+		"client_id":     {g.clientID},
+		"client_secret": {g.clientSecret},
+		"code":          {code},
+	}, &tr)
+	if err != nil {
+		return Identity{}, err
+	}
+	if tr.Error != "" || tr.AccessToken == "" {
+		return Identity{}, fmt.Errorf("github code exchange: %q", tr.Error)
+	}
+	return g.fetchUser(ctx, tr.AccessToken)
+}

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"net/url"
 	"sync"
 )
 
@@ -33,16 +34,29 @@ type Verifier interface {
 	Poll(ctx context.Context, handle string) (Identity, error)
 }
 
+// WebVerifier brokers the browser authorization-code flow with the identity
+// provider: AuthCodeURL is where /v1/login/web redirects the browser, and
+// Exchange resolves the code GitHub posts back to /v1/login/callback.
+type WebVerifier interface {
+	AuthCodeURL(state string) string
+	Exchange(ctx context.Context, code string) (Identity, error)
+}
+
 // FakeVerifier is an in-memory Verifier for tests. Approve completes a flow.
 type FakeVerifier struct {
 	mu       sync.Mutex
 	approved map[string]Identity
 	started  map[string]bool
-	auto     *Identity // when set, Poll auto-approves any started handle (test-only)
+	codes    map[string]Identity // web-flow codes granted via GrantCode
+	auto     *Identity           // when set, Poll auto-approves any started handle (test-only)
 }
 
 func NewFakeVerifier() *FakeVerifier {
-	return &FakeVerifier{approved: map[string]Identity{}, started: map[string]bool{}}
+	return &FakeVerifier{
+		approved: map[string]Identity{},
+		started:  map[string]bool{},
+		codes:    map[string]Identity{},
+	}
 }
 
 // NewAutoApproveVerifier is a FakeVerifier whose device-flow poll completes
@@ -90,5 +104,25 @@ func (f *FakeVerifier) Poll(_ context.Context, handle string) (Identity, error) 
 func (f *FakeVerifier) Approve(handle string, id Identity) {
 	f.mu.Lock()
 	f.approved[handle] = id
+	f.mu.Unlock()
+}
+
+func (f *FakeVerifier) AuthCodeURL(state string) string {
+	return "https://github.example.test/login/oauth/authorize?state=" + url.QueryEscape(state)
+}
+
+func (f *FakeVerifier) Exchange(_ context.Context, code string) (Identity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id, ok := f.codes[code]; ok {
+		return id, nil
+	}
+	return Identity{}, errors.New("bad code")
+}
+
+// GrantCode makes a web-flow code exchangeable for id (test helper).
+func (f *FakeVerifier) GrantCode(code string, id Identity) {
+	f.mu.Lock()
+	f.codes[code] = id
 	f.mu.Unlock()
 }
