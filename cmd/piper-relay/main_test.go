@@ -13,7 +13,7 @@ func TestRunAdminDisable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	acc, err := st.UpsertAccount("sub-1", "leo@x.com")
+	acc, err := st.UpsertAccount("sub-1", "leo")
 	if err != nil {
 		t.Fatal(err)
 	}

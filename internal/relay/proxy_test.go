@@ -62,12 +62,12 @@ func proxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router, al
 	t.Helper()
 	st = openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10)
-	alice, err := st.UpsertAccount("sub-alice", "alice@x.com")
+	alice, err := st.UpsertAccount("sub-alice", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
 	aliceCred, _ = st.MintAccountCredential(alice.ID)
-	mallory, err := st.UpsertAccount("sub-mallory", "mallory@x.com")
+	mallory, err := st.UpsertAccount("sub-mallory", "mallory")
 	if err != nil {
 		t.Fatal(err)
 	}

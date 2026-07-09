@@ -64,7 +64,7 @@ func TestEnrollRejectsDuplicateBaseDomain(t *testing.T) {
 func TestControlTokenRoundTrip(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10)
-	acc, err := st.UpsertAccount("sub-ct", "ct@example.com")
+	acc, err := st.UpsertAccount("sub-ct", "ct")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS agents_base_domain_unique
 
 CREATE TABLE IF NOT EXISTS accounts (
     id          TEXT PRIMARY KEY,
-    google_sub  TEXT NOT NULL UNIQUE,
+    github_id   TEXT NOT NULL UNIQUE,
     username    TEXT NOT NULL UNIQUE,
     disabled    INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL

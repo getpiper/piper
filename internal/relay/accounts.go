@@ -19,18 +19,16 @@ type Account struct {
 	Disabled bool
 }
 
-// deriveUsername turns an email into a DNS-safe label component: the local part,
-// lowercased, with every rune outside [a-z0-9-] replaced by '-', trimmed of
+// deriveUsername turns a GitHub login into a DNS-safe label component:
+// lowercased, every rune outside [a-z0-9-] replaced by '-', trimmed of
 // leading/trailing '-', and capped at 30 chars so the eventual
 // "<hash>-<username>.<apex>" label stays under DNS's 63-char limit.
-func deriveUsername(email string) string {
-	local := email
-	if i := strings.IndexByte(email, '@'); i >= 0 {
-		local = email[:i]
-	}
-	local = strings.ToLower(local)
+// (GitHub logins are already <= 39 chars of [A-Za-z0-9-], so this is
+// nearly a lowercase passthrough.)
+func deriveUsername(login string) string {
+	login = strings.ToLower(login)
 	var b strings.Builder
-	for _, r := range local {
+	for _, r := range login {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
 			b.WriteRune(r)
 		} else {
@@ -47,12 +45,13 @@ func deriveUsername(email string) string {
 	return u
 }
 
-// UpsertAccount returns the account for googleSub, creating it (with a unique
-// derived username) on first sight. Idempotent by googleSub.
-func (s *Store) UpsertAccount(googleSub, email string) (Account, error) {
+// UpsertAccount returns the account for githubID, creating it (with a unique
+// username derived from the GitHub login) on first sight. Idempotent by
+// githubID.
+func (s *Store) UpsertAccount(githubID, login string) (Account, error) {
 	var acc Account
 	var disabled int
-	err := s.db.QueryRow(`SELECT id, username, disabled FROM accounts WHERE google_sub=?`, googleSub).
+	err := s.db.QueryRow(`SELECT id, username, disabled FROM accounts WHERE github_id=?`, githubID).
 		Scan(&acc.ID, &acc.Username, &disabled)
 	if err == nil {
 		acc.Disabled = disabled != 0
@@ -62,7 +61,7 @@ func (s *Store) UpsertAccount(googleSub, email string) (Account, error) {
 		return Account{}, err
 	}
 
-	base := deriveUsername(email)
+	base := deriveUsername(login)
 	id := uuid.NewString()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for i := 1; ; i++ {
@@ -71,14 +70,14 @@ func (s *Store) UpsertAccount(googleSub, email string) (Account, error) {
 			username = base + "-" + strconv.Itoa(i)
 		}
 		_, err := s.db.Exec(
-			`INSERT INTO accounts(id, google_sub, username, disabled, created_at) VALUES(?,?,?,0,?)`,
-			id, googleSub, username, now)
+			`INSERT INTO accounts(id, github_id, username, disabled, created_at) VALUES(?,?,?,0,?)`,
+			id, githubID, username, now)
 		if err == nil {
 			return Account{ID: id, Username: username}, nil
 		}
 		if isUniqueViolation(err) {
 			// Another account already holds this username; try the next suffix.
-			// (A racing insert of the same google_sub is vanishingly unlikely on a
+			// (A racing insert of the same github_id is vanishingly unlikely on a
 			// single relay; the SELECT above handles the common re-login path.)
 			continue
 		}

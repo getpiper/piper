@@ -45,7 +45,7 @@ func TestLoginDeviceThenPoll(t *testing.T) {
 	}
 
 	// Approve, then poll → 200 with a credential.
-	fv.Approve(dev.DeviceCode, Identity{Subject: "sub-1", Email: "ivan@x.com"})
+	fv.Approve(dev.DeviceCode, Identity{Subject: "sub-1", Email: "ivan"})
 	rr = httptest.NewRecorder()
 	api.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/login/poll",
 		strings.NewReader(`{"device_code":"`+dev.DeviceCode+`"}`)))
@@ -79,7 +79,7 @@ func TestEnrollWithAccountCredential(t *testing.T) {
 	st.Configure("public.getpiper.co", 3, 10)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil)
 
-	acc, _ := st.UpsertAccount("sub-1", "judy@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "judy")
 	cred, _ := st.MintAccountCredential(acc.ID)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
@@ -126,7 +126,7 @@ func TestEnrollOverCapReturns429(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 1, 10)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil)
-	acc, _ := st.UpsertAccount("sub-1", "ken@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "ken")
 	cred, _ := st.MintAccountCredential(acc.ID)
 
 	do := func() int {
