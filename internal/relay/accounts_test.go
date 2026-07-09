@@ -16,10 +16,10 @@ func openTestStore(t *testing.T) *Store {
 	return st
 }
 
-func TestUpsertAccountIsIdempotentBySub(t *testing.T) {
+func TestUpsertAccountIsIdempotentByGitHubID(t *testing.T) {
 	st := openTestStore(t)
 
-	a1, err := st.UpsertAccount("google-sub-1", "Alice.Smith@gmail.com")
+	a1, err := st.UpsertAccount("583231", "Alice-Smith")
 	if err != nil {
 		t.Fatalf("UpsertAccount: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestUpsertAccountIsIdempotentBySub(t *testing.T) {
 		t.Fatal("empty account id")
 	}
 
-	a2, err := st.UpsertAccount("google-sub-1", "Alice.Smith@gmail.com")
+	a2, err := st.UpsertAccount("583231", "Alice-Smith")
 	if err != nil {
 		t.Fatalf("second UpsertAccount: %v", err)
 	}
@@ -41,22 +41,35 @@ func TestUpsertAccountIsIdempotentBySub(t *testing.T) {
 
 func TestUpsertAccountDisambiguatesUsername(t *testing.T) {
 	st := openTestStore(t)
-	a1, _ := st.UpsertAccount("sub-a", "bob@x.com")
-	a2, _ := st.UpsertAccount("sub-b", "bob@y.com")
+	// Two different GitHub accounts can collide on the derived username
+	// (e.g. after a rename freed the login for someone else).
+	a1, _ := st.UpsertAccount("gh-a", "bob")
+	a2, _ := st.UpsertAccount("gh-b", "bob")
 	if a1.Username != "bob" {
 		t.Fatalf("first username = %q, want bob", a1.Username)
-	}
-	if a2.Username == a1.Username {
-		t.Fatalf("second username not disambiguated: %q", a2.Username)
 	}
 	if a2.Username != "bob-2" {
 		t.Fatalf("second username = %q, want bob-2", a2.Username)
 	}
 }
 
+func TestUpsertAccountCapsLongLogin(t *testing.T) {
+	st := openTestStore(t)
+	// GitHub logins go up to 39 chars; usernames cap at 30 to keep the
+	// eventual "<hash>-<username>.<apex>" DNS label under 63 chars.
+	long := "a-very-long-github-login-name-indeed-x" // 39 chars
+	acc, err := st.UpsertAccount("gh-long", long)
+	if err != nil {
+		t.Fatalf("UpsertAccount: %v", err)
+	}
+	if len(acc.Username) > 30 {
+		t.Fatalf("username %q is %d chars, want <= 30", acc.Username, len(acc.Username))
+	}
+}
+
 func TestMintAndAuthenticateCredential(t *testing.T) {
 	st := openTestStore(t)
-	acc, _ := st.UpsertAccount("sub-1", "carol@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "carol")
 
 	cred, err := st.MintAccountCredential(acc.ID)
 	if err != nil {
@@ -81,7 +94,7 @@ func TestMintAndAuthenticateCredential(t *testing.T) {
 
 func TestDisabledAccountCredentialRejected(t *testing.T) {
 	st := openTestStore(t)
-	acc, _ := st.UpsertAccount("sub-1", "dave@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "dave")
 	cred, _ := st.MintAccountCredential(acc.ID)
 
 	if err := st.DisableAccount(acc.Username); err != nil {
@@ -95,7 +108,7 @@ func TestDisabledAccountCredentialRejected(t *testing.T) {
 func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10)
-	acc, _ := st.UpsertAccount("sub-1", "erin@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "erin")
 
 	en, err := st.EnrollForAccount(acc.ID)
 	if err != nil {
@@ -120,7 +133,7 @@ func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 func TestEnrollForAccountEnforcesCap(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 2, 10)
-	acc, _ := st.UpsertAccount("sub-1", "frank@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "frank")
 
 	for i := 0; i < 2; i++ {
 		if _, err := st.EnrollForAccount(acc.ID); err != nil {
@@ -135,7 +148,7 @@ func TestEnrollForAccountEnforcesCap(t *testing.T) {
 func TestAuthenticateRejectsDisabledAccountAgent(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10)
-	acc, _ := st.UpsertAccount("sub-1", "grace@x.com")
+	acc, _ := st.UpsertAccount("sub-1", "grace")
 	en, _ := st.EnrollForAccount(acc.ID)
 
 	if err := st.DisableAccount(acc.Username); err != nil {

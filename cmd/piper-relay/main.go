@@ -1,12 +1,12 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,6 +53,27 @@ func apiAddrIsLoopback(addr string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// parseWebRedirects splits and validates the comma-separated redirect_uri
+// prefix allowlist. Prefix matching is by strings.HasPrefix, so every prefix
+// must pin the full host: absolute http(s) URL with a path ("https://host/...").
+// Invalid entries are dropped with a log line rather than silently allowed.
+func parseWebRedirects(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		u, err := url.Parse(p)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || !strings.HasPrefix(u.Path, "/") {
+			log.Printf("piper-relay: ignoring invalid PIPER_RELAY_WEB_REDIRECTS entry %q (need https://host/path-prefix)", p)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // runAdmin handles "piper-relay admin <cmd> ...". Currently: disable <username>.
@@ -124,20 +145,17 @@ func main() {
 	apiAddr := env("PIPER_RELAY_API_ADDR", ":8080")
 	tunnelPublic := env("PIPER_RELAY_TUNNEL_PUBLIC", "")
 
-	// Self-service login needs a Google OAuth client; without one the relay runs
-	// operator-enroll-only (existing behaviour) and the API 503s login routes.
+	// Self-service login needs a GitHub OAuth app; without one the relay runs
+	// operator-enroll-only (existing behaviour) and login completes only via
+	// test approval.
 	var v relay.Verifier
-	if id := env("PIPER_RELAY_GOOGLE_CLIENT_ID", ""); id != "" {
-		gv, err := relay.NewGoogleVerifier(context.Background(), id, env("PIPER_RELAY_GOOGLE_CLIENT_SECRET", ""))
-		if err != nil {
-			log.Fatalf("google verifier: %v", err)
-		}
-		v = gv
+	if id := env("PIPER_RELAY_GITHUB_CLIENT_ID", ""); id != "" {
+		v = relay.NewGitHubVerifier(id, env("PIPER_RELAY_GITHUB_CLIENT_SECRET", ""))
 	} else if env("PIPER_RELAY_FAKE_APPROVE", "") == "1" {
 		log.Print("piper-relay: PIPER_RELAY_FAKE_APPROVE=1 — device login auto-approves (TEST ONLY)")
-		v = relay.NewAutoApproveVerifier("e2e-sub", "e2e@localhost")
+		v = relay.NewAutoApproveVerifier("e2e-sub", "e2e")
 	} else {
-		log.Print("piper-relay: no PIPER_RELAY_GOOGLE_CLIENT_ID; self-service login disabled")
+		log.Print("piper-relay: no PIPER_RELAY_GITHUB_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
 
@@ -145,8 +163,16 @@ func main() {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
 	}
 
+	// Browser (dashboard) login: allowed redirect_uri prefixes, comma-separated.
+	// Empty — or a missing client secret — leaves web login disabled (503).
+	webRedirects := parseWebRedirects(env("PIPER_RELAY_WEB_REDIRECTS", ""))
+	if len(webRedirects) > 0 && env("PIPER_RELAY_GITHUB_CLIENT_SECRET", "") == "" {
+		log.Print("piper-relay: PIPER_RELAY_WEB_REDIRECTS set but no PIPER_RELAY_GITHUB_CLIENT_SECRET; web login disabled")
+		webRedirects = nil
+	}
+
 	router := relay.NewRouter()
-	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router)
+	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
 
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)

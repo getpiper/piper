@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -21,12 +22,12 @@ func TestFakeVerifierStartPollApprove(t *testing.T) {
 		t.Fatalf("pre-approval Poll err = %v, want ErrAuthPending", err)
 	}
 
-	f.Approve(handle, Identity{Subject: "sub-1", Email: "heidi@x.com"})
+	f.Approve(handle, Identity{Subject: "sub-1", Login: "heidi"})
 	id, err := f.Poll(ctx, handle)
 	if err != nil {
 		t.Fatalf("post-approval Poll: %v", err)
 	}
-	if id.Subject != "sub-1" || id.Email != "heidi@x.com" {
+	if id.Subject != "sub-1" || id.Login != "heidi" {
 		t.Fatalf("identity = %+v", id)
 	}
 
@@ -35,12 +36,27 @@ func TestFakeVerifierStartPollApprove(t *testing.T) {
 	}
 }
 
-func TestGoogleVerifierPollUnknownHandle(t *testing.T) {
-	v, err := NewGoogleVerifier(context.Background(), "client-id.apps.googleusercontent.com", "secret")
+func TestFakeVerifierWebFlow(t *testing.T) {
+	f := NewFakeVerifier()
+
+	if got := f.AuthCodeURL("st-1"); !strings.Contains(got, "state=st-1") {
+		t.Fatalf("AuthCodeURL = %q, want state embedded", got)
+	}
+
+	if _, err := f.Exchange(context.Background(), "unknown-code"); err == nil {
+		t.Fatal("Exchange(unknown) succeeded, want error")
+	}
+
+	f.GrantCode("code-1", Identity{Subject: "sub-1", Login: "heidi"})
+	id, err := f.Exchange(context.Background(), "code-1")
 	if err != nil {
-		t.Fatalf("NewGoogleVerifier: %v", err)
+		t.Fatalf("Exchange: %v", err)
 	}
-	if _, err := v.Poll(context.Background(), "never-started"); err == nil {
-		t.Fatal("Poll(unknown) succeeded, want error")
+	if id.Login != "heidi" {
+		t.Fatalf("identity = %+v", id)
 	}
+
+	// Both verifiers satisfy WebVerifier.
+	var _ WebVerifier = f
+	var _ WebVerifier = NewGitHubVerifier("id", "secret")
 }

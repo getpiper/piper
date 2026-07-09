@@ -248,7 +248,7 @@ func insertSecondAccount(t *testing.T, relayData string) string {
 	defer db.Close()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := db.Exec(
-		`INSERT INTO accounts(id, google_sub, username, disabled, created_at) VALUES('mallory-id','mallory-sub','mallory',0,?)`, now); err != nil {
+		`INSERT INTO accounts(id, github_id, username, disabled, created_at) VALUES('mallory-id','mallory-sub','mallory',0,?)`, now); err != nil {
 		t.Fatal(err)
 	}
 	cred := "mallory-cred-e2e"

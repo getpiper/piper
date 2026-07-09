@@ -17,7 +17,7 @@ const defaultRelayAPI = "https://api.public.getpiper.co"
 // pollSleep is the device-flow poll delay; a seam so tests don't really sleep.
 var pollSleep = time.Sleep
 
-// relayLogin runs the Google device flow against the relay, printing the
+// relayLogin runs the GitHub device flow against the relay, printing the
 // verification URL + user code, polling to completion, and storing the returned
 // account credential (and relay API base) in the CLI config.
 func relayLogin(relayAPI string, stdout, stderr io.Writer) int {

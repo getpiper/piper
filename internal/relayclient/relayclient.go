@@ -1,5 +1,5 @@
 // Package relayclient is the piper CLI's HTTP client for the relay control API:
-// the Google device-flow login and account-bound box enrollment. It is the
+// the GitHub device-flow login and account-bound box enrollment. It is the
 // CLI-side counterpart of the relay's internal/relay control handlers.
 package relayclient
 

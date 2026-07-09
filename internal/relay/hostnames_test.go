@@ -14,7 +14,7 @@ func newAccountAgent(t *testing.T) (*Store, string) {
 	}
 	t.Cleanup(func() { st.Close() })
 	st.Configure("public.getpiper.co", 3, 10)
-	acc, err := st.UpsertAccount("google-sub-1", "alice@example.com")
+	acc, err := st.UpsertAccount("gh-1", "alice")
 	if err != nil {
 		t.Fatalf("UpsertAccount: %v", err)
 	}
