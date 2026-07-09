@@ -78,7 +78,7 @@ func proxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router, al
 	}
 	base = en.BaseDomain
 	router = NewRouter()
-	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router)
+	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router, nil)
 	return
 }
 

@@ -141,8 +141,21 @@ func main() {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
 	}
 
+	// Browser (dashboard) login: allowed redirect_uri prefixes, comma-separated.
+	// Empty — or a missing client secret — leaves web login disabled (503).
+	var webRedirects []string
+	for _, p := range strings.Split(env("PIPER_RELAY_WEB_REDIRECTS", ""), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			webRedirects = append(webRedirects, p)
+		}
+	}
+	if len(webRedirects) > 0 && env("PIPER_RELAY_GITHUB_CLIENT_SECRET", "") == "" {
+		log.Print("piper-relay: PIPER_RELAY_WEB_REDIRECTS set but no PIPER_RELAY_GITHUB_CLIENT_SECRET; web login disabled")
+		webRedirects = nil
+	}
+
 	router := relay.NewRouter()
-	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router)
+	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
 
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)
