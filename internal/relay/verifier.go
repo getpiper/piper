@@ -18,8 +18,8 @@ type DeviceAuth struct {
 
 // Identity is the verified subject of a completed login.
 type Identity struct {
-	Subject string // stable IdP user id (Google "sub")
-	Email   string
+	Subject string // stable IdP user id (GitHub numeric id, as a decimal string)
+	Login   string // GitHub login; source of the derived username
 }
 
 // ErrAuthPending means the user has not yet completed the device flow.
@@ -47,12 +47,12 @@ func NewFakeVerifier() *FakeVerifier {
 
 // NewAutoApproveVerifier is a FakeVerifier whose device-flow poll completes
 // immediately with a canned identity. It exists so the loopback e2e can drive
-// `piper login`/`connect` end-to-end without a real Google IdP. NEVER selected
+// `piper login`/`connect` end-to-end without a real GitHub IdP. NEVER selected
 // in production: main.go uses it only under PIPER_RELAY_FAKE_APPROVE=1 and only
-// when no real Google client ID is configured.
-func NewAutoApproveVerifier(sub, email string) *FakeVerifier {
+// when no real GitHub client ID is configured.
+func NewAutoApproveVerifier(sub, login string) *FakeVerifier {
 	f := NewFakeVerifier()
-	f.auto = &Identity{Subject: sub, Email: email}
+	f.auto = &Identity{Subject: sub, Login: login}
 	return f
 }
 

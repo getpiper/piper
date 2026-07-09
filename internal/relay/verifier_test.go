@@ -21,26 +21,16 @@ func TestFakeVerifierStartPollApprove(t *testing.T) {
 		t.Fatalf("pre-approval Poll err = %v, want ErrAuthPending", err)
 	}
 
-	f.Approve(handle, Identity{Subject: "sub-1", Email: "heidi@x.com"})
+	f.Approve(handle, Identity{Subject: "sub-1", Login: "heidi"})
 	id, err := f.Poll(ctx, handle)
 	if err != nil {
 		t.Fatalf("post-approval Poll: %v", err)
 	}
-	if id.Subject != "sub-1" || id.Email != "heidi@x.com" {
+	if id.Subject != "sub-1" || id.Login != "heidi" {
 		t.Fatalf("identity = %+v", id)
 	}
 
 	if _, err := f.Poll(ctx, "unknown-handle"); err == nil {
-		t.Fatal("Poll(unknown) succeeded, want error")
-	}
-}
-
-func TestGoogleVerifierPollUnknownHandle(t *testing.T) {
-	v, err := NewGoogleVerifier(context.Background(), "client-id.apps.googleusercontent.com", "secret")
-	if err != nil {
-		t.Fatalf("NewGoogleVerifier: %v", err)
-	}
-	if _, err := v.Poll(context.Background(), "never-started"); err == nil {
 		t.Fatal("Poll(unknown) succeeded, want error")
 	}
 }

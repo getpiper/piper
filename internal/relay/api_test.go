@@ -45,7 +45,7 @@ func TestLoginDeviceThenPoll(t *testing.T) {
 	}
 
 	// Approve, then poll → 200 with a credential.
-	fv.Approve(dev.DeviceCode, Identity{Subject: "sub-1", Email: "ivan"})
+	fv.Approve(dev.DeviceCode, Identity{Subject: "sub-1", Login: "ivan"})
 	rr = httptest.NewRecorder()
 	api.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/login/poll",
 		strings.NewReader(`{"device_code":"`+dev.DeviceCode+`"}`)))

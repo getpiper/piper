@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -124,20 +123,17 @@ func main() {
 	apiAddr := env("PIPER_RELAY_API_ADDR", ":8080")
 	tunnelPublic := env("PIPER_RELAY_TUNNEL_PUBLIC", "")
 
-	// Self-service login needs a Google OAuth client; without one the relay runs
-	// operator-enroll-only (existing behaviour) and the API 503s login routes.
+	// Self-service login needs a GitHub OAuth app; without one the relay runs
+	// operator-enroll-only (existing behaviour) and login completes only via
+	// test approval.
 	var v relay.Verifier
-	if id := env("PIPER_RELAY_GOOGLE_CLIENT_ID", ""); id != "" {
-		gv, err := relay.NewGoogleVerifier(context.Background(), id, env("PIPER_RELAY_GOOGLE_CLIENT_SECRET", ""))
-		if err != nil {
-			log.Fatalf("google verifier: %v", err)
-		}
-		v = gv
+	if id := env("PIPER_RELAY_GITHUB_CLIENT_ID", ""); id != "" {
+		v = relay.NewGitHubVerifier(id, env("PIPER_RELAY_GITHUB_CLIENT_SECRET", ""))
 	} else if env("PIPER_RELAY_FAKE_APPROVE", "") == "1" {
 		log.Print("piper-relay: PIPER_RELAY_FAKE_APPROVE=1 — device login auto-approves (TEST ONLY)")
-		v = relay.NewAutoApproveVerifier("e2e-sub", "e2e@localhost")
+		v = relay.NewAutoApproveVerifier("e2e-sub", "e2e")
 	} else {
-		log.Print("piper-relay: no PIPER_RELAY_GOOGLE_CLIENT_ID; self-service login disabled")
+		log.Print("piper-relay: no PIPER_RELAY_GITHUB_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
 

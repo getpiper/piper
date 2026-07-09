@@ -68,7 +68,7 @@ func (a *api) loginPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown or failed device code", http.StatusBadRequest)
 		return
 	}
-	acc, err := a.st.UpsertAccount(id.Subject, id.Email)
+	acc, err := a.st.UpsertAccount(id.Subject, id.Login)
 	if err != nil {
 		http.Error(w, "account error", http.StatusInternalServerError)
 		return
