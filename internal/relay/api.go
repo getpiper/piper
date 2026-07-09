@@ -64,7 +64,7 @@ const stateCookie = "piper_login_state"
 func (a *api) webLoginEnabled() bool { return a.webv != nil && len(a.webRedirects) > 0 }
 
 func (a *api) redirectAllowed(uri string) bool {
-	if uri == "" {
+	if uri == "" || strings.Contains(uri, "#") {
 		return false
 	}
 	for _, p := range a.webRedirects {
@@ -146,6 +146,10 @@ func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "credential error", http.StatusInternalServerError)
 		return
 	}
+	http.SetCookie(w, &http.Cookie{
+		Name: stateCookie, Value: "", MaxAge: -1, Path: "/v1/login",
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+	})
 	http.Redirect(w, r,
 		ws.redirectURI+"#credential="+url.QueryEscape(cred)+"&username="+url.QueryEscape(acc.Username),
 		http.StatusFound)

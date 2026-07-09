@@ -215,6 +215,18 @@ func TestWebLoginCallbackHappyPath(t *testing.T) {
 	if frag.Get("credential") == "" || frag.Get("username") != "ivan" {
 		t.Fatalf("fragment = %q", loc.Fragment)
 	}
+	var stateCookieOut *http.Cookie
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == stateCookie {
+			stateCookieOut = c
+		}
+	}
+	if stateCookieOut == nil {
+		t.Fatal("callback response did not clear the state cookie")
+	}
+	if stateCookieOut.MaxAge >= 0 {
+		t.Fatalf("state cookie MaxAge = %d, want < 0 (expired)", stateCookieOut.MaxAge)
+	}
 }
 
 func TestWebLoginRejectsDisallowedRedirect(t *testing.T) {
@@ -224,6 +236,16 @@ func TestWebLoginRejectsDisallowedRedirect(t *testing.T) {
 		"/v1/login/web?redirect_uri="+url.QueryEscape("https://evil.example/auth"), nil))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("disallowed redirect status = %d, want 400", rr.Code)
+	}
+}
+
+func TestWebLoginRejectsFragmentRedirect(t *testing.T) {
+	api, _ := newWebTestAPI(t)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+		"/v1/login/web?redirect_uri="+url.QueryEscape("https://dash.getpiper.co/#x"), nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("fragment redirect status = %d, want 400", rr.Code)
 	}
 }
 

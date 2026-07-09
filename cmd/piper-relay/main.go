@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,6 +53,27 @@ func apiAddrIsLoopback(addr string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// parseWebRedirects splits and validates the comma-separated redirect_uri
+// prefix allowlist. Prefix matching is by strings.HasPrefix, so every prefix
+// must pin the full host: absolute http(s) URL with a path ("https://host/...").
+// Invalid entries are dropped with a log line rather than silently allowed.
+func parseWebRedirects(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		u, err := url.Parse(p)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || !strings.HasPrefix(u.Path, "/") {
+			log.Printf("piper-relay: ignoring invalid PIPER_RELAY_WEB_REDIRECTS entry %q (need https://host/path-prefix)", p)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // runAdmin handles "piper-relay admin <cmd> ...". Currently: disable <username>.
@@ -143,12 +165,7 @@ func main() {
 
 	// Browser (dashboard) login: allowed redirect_uri prefixes, comma-separated.
 	// Empty — or a missing client secret — leaves web login disabled (503).
-	var webRedirects []string
-	for _, p := range strings.Split(env("PIPER_RELAY_WEB_REDIRECTS", ""), ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			webRedirects = append(webRedirects, p)
-		}
-	}
+	webRedirects := parseWebRedirects(env("PIPER_RELAY_WEB_REDIRECTS", ""))
 	if len(webRedirects) > 0 && env("PIPER_RELAY_GITHUB_CLIENT_SECRET", "") == "" {
 		log.Print("piper-relay: PIPER_RELAY_WEB_REDIRECTS set but no PIPER_RELAY_GITHUB_CLIENT_SECRET; web login disabled")
 		webRedirects = nil

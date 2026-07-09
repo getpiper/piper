@@ -170,6 +170,26 @@ func TestGitHubDeviceFlowDenied(t *testing.T) {
 	}
 }
 
+func TestGitHubDeviceFlowPollPrunesCompletedFlow(t *testing.T) {
+	fake := &fakeGitHub{t: t, tokenResponses: []map[string]any{
+		{"access_token": "gho_tok", "token_type": "bearer"},
+	}}
+	v, _ := newTestGitHubVerifier(t, fake)
+
+	handle, _, err := v.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := waitDone(t, v, handle); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	// The flow completed and was already returned once; a second poll of the
+	// same handle must not still redeem the cached identity.
+	if _, err := v.Poll(context.Background(), handle); err == nil {
+		t.Fatal("Poll(completed handle) succeeded a second time, want unknown-handle error")
+	}
+}
+
 func TestGitHubVerifierPollUnknownHandle(t *testing.T) {
 	v := NewGitHubVerifier("test-client", "test-secret")
 	if _, err := v.Poll(context.Background(), "never-started"); err == nil {
@@ -193,6 +213,9 @@ func TestGitHubAuthCodeURL(t *testing.T) {
 	}
 	if q.Get("scope") != "" {
 		t.Fatalf("authorize URL carries scope %q, want none", q.Get("scope"))
+	}
+	if q.Get("redirect_uri") != "" {
+		t.Fatalf("authorize URL carries redirect_uri %q, want none (single registered callback)", q.Get("redirect_uri"))
 	}
 }
 

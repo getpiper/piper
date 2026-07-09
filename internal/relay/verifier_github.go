@@ -51,9 +51,10 @@ func NewGitHubVerifier(clientID, clientSecret string) *GitHubVerifier {
 	}
 }
 
-// deviceCodeResponse / tokenResponse mirror GitHub's JSON. GitHub reports poll
-// errors ("authorization_pending", "slow_down", ...) as fields in 200-OK
-// bodies, not RFC-style 4xx responses.
+// githubTokenResponse mirrors GitHub's token-endpoint JSON (device poll and
+// authorization-code exchange share this shape). GitHub reports poll errors
+// ("authorization_pending", "slow_down", ...) as fields in 200-OK bodies, not
+// RFC-style 4xx responses.
 type githubTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	Error       string `json:"error"`
@@ -207,6 +208,7 @@ func (g *GitHubVerifier) Poll(_ context.Context, handle string) (Identity, error
 	if !fl.done {
 		return Identity{}, ErrAuthPending
 	}
+	delete(g.flows, handle)
 	return fl.id, fl.err
 }
 

@@ -36,6 +36,36 @@ func TestRunAdminUsage(t *testing.T) {
 	}
 }
 
+func TestParseWebRedirects(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"root path kept", "https://dash.getpiper.co/", []string{"https://dash.getpiper.co/"}},
+		{"subpath kept", "https://dash.getpiper.co/auth", []string{"https://dash.getpiper.co/auth"}},
+		{"no path dropped", "https://dash.getpiper.co", nil},
+		{"no scheme dropped", "dash.getpiper.co/", nil},
+		{"empty dropped", "", nil},
+		{"whitespace-only dropped", "   ", nil},
+		{"mixed list", "https://dash.getpiper.co/, https://dash.getpiper.co, https://ok.example/x",
+			[]string{"https://dash.getpiper.co/", "https://ok.example/x"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseWebRedirects(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("parseWebRedirects(%q) = %v, want %v", c.in, got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("parseWebRedirects(%q) = %v, want %v", c.in, got, c.want)
+				}
+			}
+		})
+	}
+}
+
 func TestApiAddrIsLoopback(t *testing.T) {
 	cases := []struct {
 		addr string
