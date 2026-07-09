@@ -65,7 +65,7 @@ with `piperd token list` and `piperd token revoke <name>`.
 On a box running `piperd`, log in and claim the box as your normal user:
 
 ```bash
-piper login          # opens a Google device-flow login; stores your account credential
+piper login          # opens a GitHub device-flow login; stores your account credential
 piper connect        # enrolls this box on the relay
 ```
 
@@ -93,7 +93,7 @@ serves apps on `:80`; the relay assigns each app a single-label hostname
 wildcard cert, and forwards plaintext HTTP over the tunnel.
 
 ```bash
-piper login                  # Google device-flow; stores your account credential
+piper login                  # GitHub device-flow; stores your account credential
 piper connect                # claims this box (terminated) and writes relay.json
 sudo systemctl restart piperd
 piper deploy blog --path .   # → https://<hash>-<you>.public.getpiper.co
