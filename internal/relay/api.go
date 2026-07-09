@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -90,8 +91,14 @@ func (a *api) loginWeb(w http.ResponseWriter, r *http.Request) {
 	raw := make([]byte, 16)
 	_, _ = rand.Read(raw)
 	state := hex.EncodeToString(raw)
+	now := time.Now()
 	a.mu.Lock()
-	a.webStates[state] = webState{redirectURI: ru, expires: time.Now().Add(10 * time.Minute)}
+	for s, ws := range a.webStates {
+		if now.After(ws.expires) {
+			delete(a.webStates, s)
+		}
+	}
+	a.webStates[state] = webState{redirectURI: ru, expires: now.Add(10 * time.Minute)}
 	a.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: stateCookie, Value: state, MaxAge: 600, Path: "/v1/login",
@@ -125,6 +132,7 @@ func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := a.webv.Exchange(r.Context(), code)
 	if err != nil {
+		log.Printf("relay: web login code exchange failed: %v", err)
 		http.Error(w, "code exchange failed", http.StatusBadGateway)
 		return
 	}

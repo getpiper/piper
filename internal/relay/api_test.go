@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestAPI(t *testing.T) (http.Handler, *Store, *FakeVerifier) {
@@ -283,6 +284,29 @@ func TestWebLoginCallbackExchangeFailure(t *testing.T) {
 	api.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("failed-exchange callback = %d, want 502", rr.Code)
+	}
+}
+
+func TestWebLoginSweepsExpiredStates(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	a := &api{st: st, v: NewFakeVerifier(), webv: NewFakeVerifier(),
+		webRedirects: []string{"https://dash.getpiper.co/"}, webStates: map[string]webState{}}
+	a.webStates["stale"] = webState{redirectURI: "https://dash.getpiper.co/x", expires: time.Now().Add(-time.Minute)}
+
+	rr := httptest.NewRecorder()
+	a.loginWeb(rr, httptest.NewRequest(http.MethodGet,
+		"/v1/login/web?redirect_uri="+url.QueryEscape("https://dash.getpiper.co/auth"), nil))
+	if rr.Code != http.StatusFound {
+		t.Fatalf("web login status = %d", rr.Code)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.webStates["stale"]; ok {
+		t.Fatal("expired state not swept on new login")
+	}
+	if len(a.webStates) != 1 {
+		t.Fatalf("webStates size = %d, want 1 (only the fresh state)", len(a.webStates))
 	}
 }
 
