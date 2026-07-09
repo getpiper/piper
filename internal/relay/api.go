@@ -34,7 +34,12 @@ func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Rout
 	mux.HandleFunc("GET /v1/login/callback", a.loginCallback)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
 	if router != nil {
-		mux.Handle("/agents/", NewControlProxy(st, router))
+		proxy := NewControlProxy(st, router)
+		// Bare /agents (account's agent list, #98) plus the per-agent subtree;
+		// registering the exact path avoids ServeMux's implicit /agents → /agents/
+		// redirect.
+		mux.Handle("/agents", proxy)
+		mux.Handle("/agents/", proxy)
 	}
 	return mux
 }

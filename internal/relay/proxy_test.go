@@ -226,3 +226,78 @@ func TestControlProxyLiveness(t *testing.T) {
 		t.Errorf("POST liveness: %d, want 405", pr.Code)
 	}
 }
+
+func TestControlProxyListAgents(t *testing.T) {
+	api, st, router, aliceCred, malloryCred, base := proxyFixture(t)
+
+	// Same gates as the per-agent endpoints: no/bad credential → 401.
+	if rr := proxyGet(t, api, "/agents", ""); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("no cred: %d, want 401", rr.Code)
+	}
+	if rr := proxyGet(t, api, "/agents", "bogus"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bad cred: %d, want 401", rr.Code)
+	}
+
+	// Alice has two agents: `base` connected, `base2` offline.
+	acc, err := st.AuthenticateAccount(aliceCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	en2, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relaySess, _ := pipeSession(t, base)
+	router.Register(relaySess)
+
+	rr := proxyGet(t, api, "/agents", aliceCred)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list: %d, want 200 (body %s)", rr.Code, rr.Body.String())
+	}
+	var list struct {
+		Agents []struct {
+			Agent     string `json:"agent"`
+			Connected bool   `json:"connected"`
+		} `json:"agents"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(list.Agents) != 2 {
+		t.Fatalf("listed %d agents, want 2: %+v", len(list.Agents), list.Agents)
+	}
+	if list.Agents[0].Agent != base || !list.Agents[0].Connected {
+		t.Errorf("agent[0] = %+v, want %s connected", list.Agents[0], base)
+	}
+	if list.Agents[1].Agent != en2.BaseDomain || list.Agents[1].Connected {
+		t.Errorf("agent[1] = %+v, want %s offline", list.Agents[1], en2.BaseDomain)
+	}
+
+	// Another tenant sees only its own (here: empty) list — never alice's.
+	rr = proxyGet(t, api, "/agents", malloryCred)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("mallory list: %d, want 200", rr.Code)
+	}
+	if body := rr.Body.String(); strings.Contains(body, base) {
+		t.Fatalf("mallory sees alice's agents: %s", body)
+	}
+	list.Agents = nil
+	if err := json.NewDecoder(strings.NewReader(rr.Body.String())).Decode(&list); err != nil {
+		t.Fatalf("decode mallory: %v", err)
+	}
+	if list.Agents == nil || len(list.Agents) != 0 {
+		t.Fatalf("mallory list = %+v, want empty (non-null) agents array", list.Agents)
+	}
+
+	// Trailing-slash form answers the same; the list is a GET-only resource.
+	if rr := proxyGet(t, api, "/agents/", aliceCred); rr.Code != http.StatusOK {
+		t.Fatalf("trailing slash: %d, want 200", rr.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/agents/", nil)
+	req.Header.Set("Authorization", "Bearer "+aliceCred)
+	pr := httptest.NewRecorder()
+	api.ServeHTTP(pr, req)
+	if pr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST list: %d, want 405", pr.Code)
+	}
+}

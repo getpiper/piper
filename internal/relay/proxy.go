@@ -10,13 +10,14 @@ import (
 	"github.com/getpiper/piper/internal/tunnel"
 )
 
-// NewControlProxy serves /agents/<base-domain>/v1/*: it authenticates the
-// caller's relay account credential, authorizes that the account owns the
-// agent, and reverse-proxies the request over the agent's tunnel as a
-// KindControlAPI stream — swapping the caller's credential for the box's
-// stored control bearer. The box still validates that bearer on every request
-// (#77); the relay hop grants nothing at the box. Unknown and unowned agents
-// are both 404 so existence is never leaked across tenants.
+// NewControlProxy serves /agents and /agents/<base-domain>/v1/*: it
+// authenticates the caller's relay account credential, authorizes that the
+// account owns the agent, and reverse-proxies the request over the agent's
+// tunnel as a KindControlAPI stream — swapping the caller's credential for the
+// box's stored control bearer. The box still validates that bearer on every
+// request (#77); the relay hop grants nothing at the box. Unknown and unowned
+// agents are both 404 so existence is never leaked across tenants. Bare
+// /agents lists the caller's own enrolled agents with liveness (#98).
 func NewControlProxy(st *Store, router *Router) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cred, ok := bearerToken(r)
@@ -30,11 +31,29 @@ func NewControlProxy(st *Store, router *Router) http.Handler {
 			return
 		}
 
-		// Path shape: /agents/<base-domain>[/v1/...]
-		rest := strings.TrimPrefix(r.URL.Path, "/agents/")
+		// Path shape: /agents[/<base-domain>[/v1/...]]
+		rest := strings.TrimPrefix(r.URL.Path, "/agents")
+		rest = strings.TrimPrefix(rest, "/")
 		base, tail, _ := strings.Cut(rest, "/")
 		if base == "" {
-			http.NotFound(w, r)
+			// List the account's own agents, each with liveness from the
+			// in-memory session map — same answers as the per-agent endpoint,
+			// and only ever the caller's rows, so nothing can leak.
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			bases, err := st.AgentsForAccount(acc.ID)
+			if err != nil {
+				http.Error(w, "list failed", http.StatusInternalServerError)
+				return
+			}
+			agents := make([]map[string]any, 0, len(bases))
+			for _, b := range bases {
+				_, connected := router.Lookup(b)
+				agents = append(agents, map[string]any{"agent": b, "connected": connected})
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 			return
 		}
 
