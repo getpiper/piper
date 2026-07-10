@@ -264,3 +264,89 @@ func TestRunGithubSetupDefault(t *testing.T) {
 		t.Errorf("stdout = %q", got)
 	}
 }
+
+func TestRunStop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/stop" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"stop", "blog"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "stopped blog") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunDeleteWithYesSkipsPrompt(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/apps/blog" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"delete", "blog", "--yes"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !called {
+		t.Fatal("DELETE was not sent")
+	}
+	if !strings.Contains(stdout.String(), "deleted blog") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunDeletePromptConfirms(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	old := stdinReader
+	stdinReader = strings.NewReader("y\n")
+	t.Cleanup(func() { stdinReader = old })
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"delete", "blog"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `delete app "blog"`) {
+		t.Errorf("stdout = %q, want the confirmation prompt", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "deleted blog") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunDeletePromptAborts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("declined delete must not reach the API")
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	old := stdinReader
+	stdinReader = strings.NewReader("n\n")
+	t.Cleanup(func() { stdinReader = old })
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"delete", "blog"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "aborted") {
+		t.Errorf("stdout = %q, want aborted", stdout.String())
+	}
+}

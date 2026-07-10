@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"html"
@@ -20,6 +21,10 @@ import (
 )
 
 var openBrowserFn = openBrowser
+
+// stdinReader feeds the delete confirmation prompt; a var so tests can
+// substitute input.
+var stdinReader io.Reader = os.Stdin
 
 // dialClient returns a client for piperd's control API: loopback by default,
 // or — when remote is a relay-connected box's base domain — through the
@@ -236,6 +241,51 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s\tstatus=%s\tport=%d\n", app.Name, status, app.Port)
 		}
 		return 0
+	case "stop":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: piper stop <name>")
+			return 2
+		}
+		c, ok := dialClient(*remote, stderr)
+		if !ok {
+			return 1
+		}
+		if err := c.StopApp(args[1]); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "stopped %s\n", args[1])
+		return 0
+	case "delete":
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "usage: piper delete <name> [--yes]")
+			return 2
+		}
+		name := args[1]
+		fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		yes := fs.Bool("yes", false, "skip the confirmation prompt")
+		if err := fs.Parse(args[2:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "usage: piper delete <name> [--yes]")
+			return 2
+		}
+		if !*yes && !confirmDelete(stdout, name) {
+			fmt.Fprintln(stdout, "aborted")
+			return 0
+		}
+		c, ok := dialClient(*remote, stderr)
+		if !ok {
+			return 1
+		}
+		if err := c.DeleteApp(name); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "deleted %s\n", name)
+		return 0
 	case "app":
 		return cmdApp(*remote, args[1:], stdout, stderr)
 	case "github":
@@ -392,7 +442,18 @@ func openBrowser(url string) error {
 	}
 }
 
+// confirmDelete guards the destructive delete; only "y"/"yes" proceeds.
+func confirmDelete(stdout io.Writer, name string) bool {
+	fmt.Fprintf(stdout, "delete app %q and all its history? [y/N] ", name)
+	sc := bufio.NewScanner(stdinReader)
+	if !sc.Scan() {
+		return false
+	}
+	answer := strings.ToLower(strings.TrimSpace(sc.Text()))
+	return answer == "y" || answer == "yes"
+}
+
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] <version|login|connect|create|deploy|list|status|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] <version|login|connect|create|deploy|list|status|stop|delete|app|github> [args]")
 	return 2
 }
