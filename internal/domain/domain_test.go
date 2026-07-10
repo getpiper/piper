@@ -55,7 +55,8 @@ func (f *fakeIssuer) Obtain(domains []string) ([]byte, []byte, error) {
 	}
 	na := f.notAfter
 	if na.IsZero() {
-		na = time.Now().Add(90 * 24 * time.Hour)
+		// Add 1 hour per call to simulate time passing between Obtain calls
+		na = time.Now().Add(90 * 24 * time.Hour).Add(time.Duration(f.calls) * time.Hour)
 	}
 	c, k := selfSignedPEMForObtain(na, domains)
 	return c, k, nil
@@ -395,5 +396,147 @@ func TestRemoveTearsDown(t *testing.T) {
 	// Removing again is a no-op.
 	if err := m.Remove(); err != nil {
 		t.Fatalf("second Remove: %v", err)
+	}
+}
+
+func TestResumeActiveReloadsWithoutReissuing(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, proxy, _, _ := newTestManager(t, iss)
+	if _, err := st.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateDeployment("blog", "img", "ctr", 40001, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the pre-restart state: active row + valid disk cert.
+	certPEM, keyPEM := selfSignedPEM(t, time.Now().Add(60*24*time.Hour), "*.example.com", "example.com")
+	if err := m.writeCert(certPEM, keyPEM); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetDomainConfig("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateDomainStatus(StatusActive, "", time.Now().Add(60*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	m.Resume()
+
+	if iss.obtainCalls() != 0 {
+		t.Fatalf("Resume re-issued (%d obtains), want disk reload", iss.obtainCalls())
+	}
+	proxy.mu.Lock()
+	replaced := proxy.replaced
+	proxy.mu.Unlock()
+	if replaced == 0 {
+		t.Fatal("Resume did not reload the cert into Caddy")
+	}
+	if p, ok := proxy.route("blog.example.com"); !ok || p != 40001 {
+		t.Fatalf("Resume route = %d,%v", p, ok)
+	}
+}
+
+func TestResumeDamagedCertReissues(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, _, _, _ := newTestManager(t, iss)
+	if err := st.SetDomainConfig("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateDomainStatus(StatusActive, "", time.Now().Add(60*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.writeCert([]byte("garbage"), []byte("garbage")); err != nil {
+		t.Fatal(err)
+	}
+
+	m.Resume()
+
+	waitStatus(t, st, StatusActive)
+	if iss.obtainCalls() == 0 {
+		t.Fatal("damaged disk cert must degrade to re-issuance")
+	}
+}
+
+func TestRenewCheckReissuesNearExpiry(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, proxy, _, _ := newTestManager(t, iss)
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	dcBefore := waitStatus(t, st, StatusActive)
+	callsAfterIssue := iss.obtainCalls()
+	proxy.mu.Lock()
+	replacedAfterIssue := proxy.replaced
+	proxy.mu.Unlock()
+
+	// Not due yet: 90-day cert, check "now".
+	m.renewCheck(time.Now())
+	if iss.obtainCalls() != callsAfterIssue {
+		t.Fatal("renewed a cert that is not due")
+	}
+
+	// Due: pretend it's 20 days before expiry (inside the 30-day window).
+	m.renewCheck(dcBefore.CertNotAfter.Add(-20 * 24 * time.Hour))
+	if iss.obtainCalls() != callsAfterIssue+1 {
+		t.Fatalf("obtains = %d, want one renewal", iss.obtainCalls())
+	}
+	proxy.mu.Lock()
+	replaced := proxy.replaced
+	proxy.mu.Unlock()
+	if replaced != replacedAfterIssue+1 {
+		t.Fatal("renewal did not swap the cert in Caddy")
+	}
+	dcAfter, _ := st.GetDomainConfig()
+	if !dcAfter.CertNotAfter.After(dcBefore.CertNotAfter) {
+		t.Fatal("cert_not_after not advanced by renewal")
+	}
+}
+
+func TestRenewFailureKeepsServing(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, _, _, _ := newTestManager(t, iss)
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	dc := waitStatus(t, st, StatusActive)
+
+	iss.mu.Lock()
+	iss.failures = iss.calls + 100 // all future obtains fail
+	iss.mu.Unlock()
+	m.renewCheck(dc.CertNotAfter.Add(-20 * 24 * time.Hour))
+
+	dcAfter, _ := st.GetDomainConfig()
+	if dcAfter.Status != StatusActive {
+		t.Fatalf("status = %q, want active (old cert still serves)", dcAfter.Status)
+	}
+	if dcAfter.Error == "" {
+		t.Fatal("renewal failure not recorded in error")
+	}
+}
+
+func TestRunEnvIssuesAndRenews(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	proxy := &fakeProxy{}
+	iss := &fakeIssuer{}
+	m := New(Options{Store: st, Proxy: proxy, EnvDomain: "env.example.com",
+		Issuer: func(string, string) (Issuer, error) { return iss, nil }})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.RunEnv(ctx, iss); err != nil {
+		t.Fatalf("RunEnv: %v", err)
+	}
+	if iss.obtainCalls() != 1 {
+		t.Fatalf("obtains = %d, want 1 initial issuance", iss.obtainCalls())
+	}
+	proxy.mu.Lock()
+	replaced := proxy.replaced
+	proxy.mu.Unlock()
+	if replaced != 1 {
+		t.Fatal("initial env cert not loaded")
 	}
 }
