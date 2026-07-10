@@ -23,6 +23,16 @@ func routeID(host string) string { return "piper-" + host }
 // The route carries a stable @id so re-deploys replace it: existing route is
 // removed by id (404 ignored), then a fresh one is appended.
 func (c *Client) UpsertRoute(host string, upstreamHostPort int) error {
+	return c.upsertRoute("piper", host, upstreamHostPort)
+}
+
+// UpsertRouteTLS is UpsertRoute for the piper-tls server — the runtime-enabled
+// HTTPS listener that serves the BYO custom domain (see EnsureHTTPS).
+func (c *Client) UpsertRouteTLS(host string, upstreamHostPort int) error {
+	return c.upsertRoute("piper-tls", host, upstreamHostPort)
+}
+
+func (c *Client) upsertRoute(server, host string, upstreamHostPort int) error {
 	route := map[string]any{
 		"@id":   routeID(host),
 		"match": []map[string]any{{"host": []string{host}}},
@@ -34,17 +44,45 @@ func (c *Client) UpsertRoute(host string, upstreamHostPort int) error {
 	if err := c.RemoveRoute(host); err != nil {
 		return err
 	}
-	body, _ := json.Marshal(route)
-	url := c.base + "/config/apps/http/servers/piper/routes"
-	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	return c.write(http.MethodPost, "/config/apps/http/servers/"+server+"/routes", route)
+}
+
+// EnsureHTTPS arms TLS serving at runtime for managers started HTTP-only:
+// it creates the tls app (empty load_pem) and a dedicated "piper-tls" server
+// on listen. A separate server, because tls_connection_policies applies to a
+// whole server — the "piper" server must keep speaking plaintext on :80 for
+// relay-terminated traffic. Idempotent.
+func (c *Client) EnsureHTTPS(listen string) error {
+	resp, err := c.http.Get(c.base + "/config/apps/")
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("caddy upsert route: status %d", resp.StatusCode)
+	var apps struct {
+		TLS  json.RawMessage `json:"tls"`
+		HTTP struct {
+			Servers map[string]json.RawMessage `json:"servers"`
+		} `json:"http"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&apps); err != nil {
+		return fmt.Errorf("caddy read config: %w", err)
+	}
+	if len(apps.TLS) == 0 || string(apps.TLS) == "null" {
+		tlsApp := map[string]any{"certificates": map[string]any{"load_pem": []any{}}}
+		if err := c.write(http.MethodPut, "/config/apps/tls", tlsApp); err != nil {
+			return err
+		}
+	}
+	if _, ok := apps.HTTP.Servers["piper-tls"]; !ok {
+		srv := map[string]any{
+			"listen":                  []string{listen},
+			"routes":                  []any{},
+			"automatic_https":         map[string]any{"disable": true},
+			"tls_connection_policies": []any{map[string]any{}},
+		}
+		if err := c.write(http.MethodPut, "/config/apps/http/servers/piper-tls", srv); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -100,6 +138,22 @@ func (c *Client) ReplaceCert(certPEM, keyPEM string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("caddy replace cert: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// write sends a JSON body to the admin API and errors on non-2xx.
+func (c *Client) write(method, path string, body any) error {
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(method, c.base+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("caddy %s %s: status %d", method, path, resp.StatusCode)
 	}
 	return nil
 }
