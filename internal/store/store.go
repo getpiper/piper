@@ -468,16 +468,19 @@ func (s *Store) GetDomainConfig() (DomainConfig, error) {
 	return dc, nil
 }
 
-// UpdateDomainStatus records the outcome of an issuance/renewal step. A zero
-// notAfter stores the empty string.
-func (s *Store) UpdateDomainStatus(status, errMsg string, notAfter time.Time) error {
+// UpdateDomainStatus records the outcome of an issuance/renewal step for
+// domain. The update is conditional on the stored domain so a run acting on a
+// stale snapshot (the config was replaced or removed while ACME was in flight)
+// can never stamp another domain's row: ErrNotFound when no row matches. A
+// zero notAfter stores the empty string.
+func (s *Store) UpdateDomainStatus(domain, status, errMsg string, notAfter time.Time) error {
 	na := ""
 	if !notAfter.IsZero() {
 		na = notAfter.UTC().Format(time.RFC3339Nano)
 	}
 	res, err := s.db.Exec(
-		`UPDATE domain_config SET status=?, error=?, cert_not_after=?, updated_at=? WHERE id=1`,
-		status, errMsg, na, time.Now().UTC().Format(time.RFC3339Nano))
+		`UPDATE domain_config SET status=?, error=?, cert_not_after=?, updated_at=? WHERE id=1 AND domain=?`,
+		status, errMsg, na, time.Now().UTC().Format(time.RFC3339Nano), domain)
 	if err != nil {
 		return err
 	}

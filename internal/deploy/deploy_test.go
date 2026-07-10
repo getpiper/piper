@@ -448,7 +448,7 @@ func TestDeployRoutesCustomDomainWhenActive(t *testing.T) {
 	if err := s.SetDomainConfig("shop.dev", "cloudflare", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateDomainStatus("active", "", time.Now().Add(60*24*time.Hour)); err != nil {
+	if err := s.UpdateDomainStatus("shop.dev", "active", "", time.Now().Add(60*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -463,6 +463,38 @@ func TestDeployRoutesCustomDomainWhenActive(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("tlsRoutes = %v, want %s", routes.tlsRoutes, want)
+	}
+}
+
+func TestDeploySkipsCustomDomainWhenNotActive(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+
+	// Fresh config is "issuing": no cert is armed yet, so no TLS route.
+	if err := s.SetDomainConfig("shop.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if len(routes.tlsRoutes) != 0 {
+		t.Fatalf("tlsRoutes = %v, want none while domain is issuing", routes.tlsRoutes)
+	}
+
+	// A failed config must not get one either.
+	if err := s.UpdateDomainStatus("shop.dev", "failed", "acme: boom", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if len(routes.tlsRoutes) != 0 {
+		t.Fatalf("tlsRoutes = %v, want none while domain is failed", routes.tlsRoutes)
 	}
 }
 

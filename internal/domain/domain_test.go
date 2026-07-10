@@ -150,8 +150,38 @@ func (f *fakeNotifier) last() string {
 	}
 	return f.got[len(f.got)-1]
 }
+func (f *fakeNotifier) pushes() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.got...)
+}
+
+// blockingIssuer holds each Obtain call open until the test releases it,
+// exposing the minutes-long ACME window the C1 races live in.
+type blockingIssuer struct {
+	fakeIssuer
+	entered chan struct{} // receives one value when an Obtain enters
+	release chan struct{} // each Obtain proceeds after one receive
+}
+
+func newBlockingIssuer() *blockingIssuer {
+	return &blockingIssuer{
+		entered: make(chan struct{}, 8),
+		release: make(chan struct{}, 8),
+	}
+}
+
+func (b *blockingIssuer) Obtain(domains []string) ([]byte, []byte, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return b.fakeIssuer.Obtain(domains)
+}
 
 func newTestManager(t *testing.T, iss *fakeIssuer) (*Manager, *store.Store, *fakeProxy, *fakeNotifier, string) {
+	return newTestManagerWith(t, iss)
+}
+
+func newTestManagerWith(t *testing.T, iss Issuer) (*Manager, *store.Store, *fakeProxy, *fakeNotifier, string) {
 	t.Helper()
 	dataDir := t.TempDir()
 	st, err := store.Open(filepath.Join(dataDir, "test.db"))
@@ -416,7 +446,7 @@ func TestResumeActiveReloadsWithoutReissuing(t *testing.T) {
 	if err := st.SetDomainConfig("example.com", "cloudflare", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpdateDomainStatus(StatusActive, "", time.Now().Add(60*24*time.Hour)); err != nil {
+	if err := st.UpdateDomainStatus("example.com", StatusActive, "", time.Now().Add(60*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -442,7 +472,7 @@ func TestResumeDamagedCertReissues(t *testing.T) {
 	if err := st.SetDomainConfig("example.com", "cloudflare", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpdateDomainStatus(StatusActive, "", time.Now().Add(60*24*time.Hour)); err != nil {
+	if err := st.UpdateDomainStatus("example.com", StatusActive, "", time.Now().Add(60*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.writeCert([]byte("garbage"), []byte("garbage")); err != nil {
@@ -538,5 +568,152 @@ func TestRunEnvIssuesAndRenews(t *testing.T) {
 	proxy.mu.Unlock()
 	if replaced != 1 {
 		t.Fatal("initial env cert not loaded")
+	}
+}
+
+// C1(a): a Set-replace racing an in-flight issuance must never leave the relay
+// pointing at the replaced domain, and the new domain must actually issue.
+func TestSetReplaceDuringInFlightIssuance(t *testing.T) {
+	bi := newBlockingIssuer()
+	m, st, _, relay, _ := newTestManagerWith(t, bi)
+
+	if _, err := m.Set("old.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	<-bi.entered // old.dev Obtain is in flight
+
+	setDone := make(chan error, 1)
+	go func() {
+		_, err := m.Set("new.dev", "cloudflare", "tok")
+		setDone <- err
+	}()
+	bi.release <- struct{}{} // let the old Obtain finish
+	if err := <-setDone; err != nil {
+		t.Fatalf("replace Set: %v", err)
+	}
+	// The new domain must reach its own Obtain (a stale "active" stamp from
+	// the old run must not short-circuit it).
+	select {
+	case <-bi.entered:
+		bi.release <- struct{}{}
+	case <-time.After(2 * time.Second):
+		t.Fatal("new.dev issuance never started; stale run short-circuited it")
+	}
+
+	dc := waitStatus(t, st, StatusActive)
+	if dc.Domain != "new.dev" {
+		t.Fatalf("active domain = %q, want new.dev", dc.Domain)
+	}
+	if got := relay.last(); got != "new.dev" {
+		t.Fatalf("relay last push = %q, want new.dev", got)
+	}
+	// After the replace's teardown clear (""), the old domain must never be
+	// re-pushed by the stale run.
+	pushes := relay.pushes()
+	cleared := false
+	for _, p := range pushes {
+		if p == "" {
+			cleared = true
+		} else if cleared && p == "old.dev" {
+			t.Fatalf("stale run re-pushed old.dev after teardown: pushes = %v", pushes)
+		}
+	}
+}
+
+// C1(b): a Remove racing an in-flight issuance must win — the relay mapping
+// stays cleared and the cert dir stays deleted.
+func TestRemoveDuringInFlightIssuance(t *testing.T) {
+	bi := newBlockingIssuer()
+	m, st, _, relay, dataDir := newTestManagerWith(t, bi)
+
+	if _, err := m.Set("gone.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	<-bi.entered // gone.dev Obtain is in flight
+
+	remDone := make(chan error, 1)
+	go func() { remDone <- m.Remove() }()
+	bi.release <- struct{}{} // let the in-flight Obtain finish
+	if err := <-remDone; err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	// Give a stale issuance run time to misbehave before asserting.
+	time.Sleep(50 * time.Millisecond)
+	if _, err := st.GetDomainConfig(); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("config survives Remove: %v", err)
+	}
+	if got := relay.last(); got != "" {
+		t.Fatalf("relay last push = %q after Remove, want cleared", got)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "domain")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cert dir resurrected after Remove: %v", err)
+	}
+}
+
+// C1(c): a Remove racing an in-flight renewal must not resurrect the deleted
+// cert dir via the renewal's writeCert.
+func TestRemoveDuringRenewalKeepsCertDirDeleted(t *testing.T) {
+	bi := newBlockingIssuer()
+	m, st, _, _, dataDir := newTestManagerWith(t, bi)
+
+	if _, err := m.Set("shop.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	<-bi.entered
+	bi.release <- struct{}{}
+	dc := waitStatus(t, st, StatusActive)
+
+	go m.renewCheck(dc.CertNotAfter.Add(-20 * 24 * time.Hour))
+	<-bi.entered // renewal Obtain is in flight
+
+	remDone := make(chan error, 1)
+	go func() { remDone <- m.Remove() }()
+	// Let Remove run as far as it can while the renewal Obtain is still in
+	// flight, then release the Obtain.
+	time.Sleep(100 * time.Millisecond)
+	bi.release <- struct{}{}
+	if err := <-remDone; err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(dataDir, "domain")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cert dir resurrected by renewal after Remove: %v", err)
+	}
+	if _, err := st.GetDomainConfig(); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("config survives Remove: %v", err)
+	}
+}
+
+// I3: Remove must fail (keeping the config) when the relay clear fails —
+// deleting the row first would leave the relay splicing the domain forever.
+func TestRemoveFailsWhenRelayClearFails(t *testing.T) {
+	m, st, _, relay, _ := newTestManager(t, &fakeIssuer{})
+	if _, err := m.Set("shop.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusActive)
+
+	relay.mu.Lock()
+	relay.fail = errors.New("tunnel down")
+	relay.mu.Unlock()
+	if err := m.Remove(); err == nil {
+		t.Fatal("Remove with relay down: want error, got nil")
+	}
+	dc, err := st.GetDomainConfig()
+	if err != nil || dc.Domain != "shop.dev" {
+		t.Fatalf("config must survive a failed Remove: %+v, %v", dc, err)
+	}
+
+	relay.mu.Lock()
+	relay.fail = nil
+	relay.mu.Unlock()
+	if err := m.Remove(); err != nil {
+		t.Fatalf("retry Remove: %v", err)
+	}
+	if _, err := st.GetDomainConfig(); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("config survives retried Remove: %v", err)
+	}
+	if got := relay.last(); got != "" {
+		t.Fatalf("relay last push = %q, want cleared", got)
 	}
 }

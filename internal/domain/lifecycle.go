@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -34,7 +35,7 @@ func (m *Manager) Resume() {
 			}
 		}
 		// Damaged or missing disk cert: degrade to re-issuance, not a crash.
-		_ = m.st.UpdateDomainStatus(StatusIssuing, "", time.Time{})
+		_ = m.st.UpdateDomainStatus(dc.Domain, StatusIssuing, "", time.Time{})
 	}
 	go m.issueLoop(dc.Domain)
 }
@@ -68,16 +69,22 @@ func (m *Manager) renewCheck(now time.Time) {
 	if err != nil || !due {
 		return
 	}
-	if err := m.reissue(dc); err != nil {
+	if err := m.reissue(dc); err != nil && !errors.Is(err, errStaleConfig) {
 		// Old cert keeps serving until expiry; surface the error, stay active.
-		_ = m.st.UpdateDomainStatus(StatusActive, "renew: "+err.Error(), dc.CertNotAfter)
+		_ = m.st.UpdateDomainStatus(dc.Domain, StatusActive, "renew: "+err.Error(), dc.CertNotAfter)
 	}
 }
 
 // reissue obtains a fresh cert for an already-active config and swaps it in.
-func (m *Manager) reissue(dc store.DomainConfig) error {
+// Like issueOnce, it re-validates the snapshot under issueMu and aborts with
+// errStaleConfig when the config was replaced or removed meanwhile.
+func (m *Manager) reissue(snap store.DomainConfig) error {
 	m.issueMu.Lock()
 	defer m.issueMu.Unlock()
+	dc, err := m.st.GetDomainConfig()
+	if err != nil || dc.Domain != snap.Domain {
+		return errStaleConfig
+	}
 	iss, err := m.newIssuer(dc.DNSProvider, dc.DNSToken)
 	if err != nil {
 		return err
@@ -85,6 +92,11 @@ func (m *Manager) reissue(dc store.DomainConfig) error {
 	certPEM, keyPEM, err := iss.Obtain([]string{"*." + dc.Domain, dc.Domain})
 	if err != nil {
 		return err
+	}
+	// Defense in depth (see issueOnce): writing the cert for a torn-down
+	// config would resurrect its deleted cert dir.
+	if cur, err := m.st.GetDomainConfig(); err != nil || cur.Domain != dc.Domain {
+		return errStaleConfig
 	}
 	if err := m.writeCert(certPEM, keyPEM); err != nil {
 		return err
@@ -96,7 +108,7 @@ func (m *Manager) reissue(dc store.DomainConfig) error {
 	if err != nil {
 		return err
 	}
-	return m.st.UpdateDomainStatus(StatusActive, "", notAfter)
+	return m.st.UpdateDomainStatus(dc.Domain, StatusActive, "", notAfter)
 }
 
 // RunEnv drives the env-managed (PIPER_BASE_DOMAIN) BYO path: issue the

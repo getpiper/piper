@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -33,6 +34,11 @@ var (
 	ErrUnsupportedProvider = errors.New("unsupported dns provider")
 	ErrTokenRequired       = errors.New("dns_token required")
 )
+
+// errStaleConfig aborts an issuance/renewal run whose config snapshot no
+// longer matches the store (replaced or removed while the run was pending).
+// The run must exit without side effects; the teardown/replacement wins.
+var errStaleConfig = errors.New("domain config changed; aborting stale run")
 
 // Issuer obtains one PEM cert/key covering domains. *certs.Manager satisfies it.
 type Issuer interface {
@@ -138,13 +144,21 @@ func (m *Manager) Set(domainName, provider, token string) (Status, error) {
 	if token == "" {
 		return Status{}, ErrTokenRequired
 	}
+	// issueMu makes the replace atomic w.r.t. issuance: an in-flight run
+	// either completes for the still-current old config (and is then torn
+	// down here) or sees the new config and aborts. Acquiring it can block
+	// for the duration of an in-flight ACME Obtain (minutes, bounded) — a
+	// deliberate trade: correctness of the state machine over PUT latency.
+	m.issueMu.Lock()
 	// Replacing a different domain tears the old one down first.
 	if prev, err := m.st.GetDomainConfig(); err == nil && prev.Domain != d {
 		m.teardown(prev)
 	}
 	if err := m.st.SetDomainConfig(d, provider, token); err != nil {
+		m.issueMu.Unlock()
 		return Status{}, err
 	}
+	m.issueMu.Unlock()
 	go m.issueLoop(d)
 	return m.Status()
 }
@@ -160,8 +174,10 @@ func (m *Manager) issueLoop(domain string) {
 		}
 		if err := m.issueOnce(dc); err == nil {
 			return
+		} else if errors.Is(err, errStaleConfig) {
+			return // replaced or removed; the successor owns the state now
 		} else {
-			_ = m.st.UpdateDomainStatus(StatusFailed, err.Error(), time.Time{})
+			_ = m.st.UpdateDomainStatus(dc.Domain, StatusFailed, err.Error(), time.Time{})
 		}
 		time.Sleep(m.retryDelay(attempt))
 	}
@@ -177,10 +193,16 @@ func defaultRetryDelay(attempt int) time.Duration {
 
 // issueOnce obtains (or reuses) the cert, arms Caddy, then tells the relay.
 // The disk-cert reuse keeps retries and restarts inside LE rate limits: a
-// relay hiccup must not burn a fresh certificate.
-func (m *Manager) issueOnce(dc store.DomainConfig) error {
+// relay hiccup must not burn a fresh certificate. snap is the caller's config
+// snapshot; the run re-reads under issueMu and aborts with errStaleConfig if
+// the stored domain has moved on (Set-replace/Remove won the race).
+func (m *Manager) issueOnce(snap store.DomainConfig) error {
 	m.issueMu.Lock()
 	defer m.issueMu.Unlock()
+	dc, err := m.st.GetDomainConfig()
+	if err != nil || dc.Domain != snap.Domain {
+		return errStaleConfig
+	}
 	certPEM, keyPEM, err := m.readCert()
 	if err != nil || !certCovers(certPEM, dc.Domain, time.Now()) {
 		iss, err := m.newIssuer(dc.DNSProvider, dc.DNSToken)
@@ -190,6 +212,12 @@ func (m *Manager) issueOnce(dc store.DomainConfig) error {
 		certPEM, keyPEM, err = iss.Obtain([]string{"*." + dc.Domain, dc.Domain})
 		if err != nil {
 			return err
+		}
+		// Defense in depth: teardown paths all hold issueMu today, so the
+		// config cannot have changed during Obtain — but re-check before any
+		// side effect in case a future path mutates it without the lock.
+		if cur, err := m.st.GetDomainConfig(); err != nil || cur.Domain != dc.Domain {
+			return errStaleConfig
 		}
 		if err := m.writeCert(certPEM, keyPEM); err != nil {
 			return err
@@ -207,7 +235,7 @@ func (m *Manager) issueOnce(dc store.DomainConfig) error {
 	if err != nil {
 		return err
 	}
-	return m.st.UpdateDomainStatus(StatusActive, "", notAfter)
+	return m.st.UpdateDomainStatus(dc.Domain, StatusActive, "", notAfter)
 }
 
 // arm loads the cert and app routes into Caddy — the box must answer before
@@ -236,10 +264,18 @@ func (m *Manager) arm(dc store.DomainConfig, certPEM, keyPEM []byte) error {
 }
 
 // teardown reverses activation: relay mapping first, then routes, then files.
+// The relay clear is best-effort here (Set-replace only): the subsequent
+// set-domain push for the new domain makes the relay unregister the old one,
+// so a missed clear self-heals. Caller must hold issueMu.
 func (m *Manager) teardown(dc store.DomainConfig) {
 	if r := m.notifier(); r != nil {
 		_ = r.SetCustomDomain("")
 	}
+	m.removeRoutesAndCert(dc)
+}
+
+// removeRoutesAndCert drops the domain's Caddy routes and the on-disk cert.
+func (m *Manager) removeRoutesAndCert(dc store.DomainConfig) {
 	if apps, err := m.st.ListApps(); err == nil {
 		for _, a := range apps {
 			_ = m.proxy.RemoveRoute(a.Name + "." + dc.Domain)
@@ -372,10 +408,17 @@ func (m *Manager) dnsOK(domain string) bool {
 }
 
 // Remove tears down the custom domain. Shared-domain URLs are untouched.
+// The relay clear must succeed before the row is deleted: once the config is
+// gone nothing on the box would ever retry the clear, and the relay would
+// splice the domain forever. A failed clear fails Remove with the config
+// intact so the user can retry DELETE. Holding issueMu can block for an
+// in-flight ACME Obtain (minutes, bounded) — see Set for the rationale.
 func (m *Manager) Remove() error {
 	if m.envDomain != "" {
 		return ErrEnvManaged
 	}
+	m.issueMu.Lock()
+	defer m.issueMu.Unlock()
 	dc, err := m.st.GetDomainConfig()
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
@@ -383,6 +426,11 @@ func (m *Manager) Remove() error {
 	if err != nil {
 		return err
 	}
-	m.teardown(dc)
+	if r := m.notifier(); r != nil {
+		if err := r.SetCustomDomain(""); err != nil {
+			return fmt.Errorf("clear relay domain mapping: %w", err)
+		}
+	}
+	m.removeRoutesAndCert(dc)
 	return m.st.DeleteDomainConfig()
 }

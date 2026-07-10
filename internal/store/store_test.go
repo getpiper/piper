@@ -466,7 +466,7 @@ func TestDomainConfigRoundTrip(t *testing.T) {
 	}
 
 	notAfter := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
-	if err := s.UpdateDomainStatus("active", "", notAfter); err != nil {
+	if err := s.UpdateDomainStatus("example.com", "active", "", notAfter); err != nil {
 		t.Fatalf("UpdateDomainStatus: %v", err)
 	}
 	dc, _ = s.GetDomainConfig()
@@ -474,7 +474,7 @@ func TestDomainConfigRoundTrip(t *testing.T) {
 		t.Fatalf("after update = %+v", dc)
 	}
 
-	if err := s.UpdateDomainStatus("failed", "acme: boom", time.Time{}); err != nil {
+	if err := s.UpdateDomainStatus("example.com", "failed", "acme: boom", time.Time{}); err != nil {
 		t.Fatalf("UpdateDomainStatus failed: %v", err)
 	}
 	dc, _ = s.GetDomainConfig()
@@ -501,7 +501,25 @@ func TestDomainConfigRoundTrip(t *testing.T) {
 
 func TestUpdateDomainStatusWithoutRow(t *testing.T) {
 	s := openTemp(t)
-	if err := s.UpdateDomainStatus("active", "", time.Time{}); !errors.Is(err, ErrNotFound) {
+	if err := s.UpdateDomainStatus("example.com", "active", "", time.Time{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateDomainStatusWrongDomain(t *testing.T) {
+	s := openTemp(t)
+	if err := s.SetDomainConfig("new.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	// A run holding a snapshot of a replaced config must not stamp the new row.
+	if err := s.UpdateDomainStatus("old.dev", "active", "", time.Time{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale-domain update: err = %v, want ErrNotFound", err)
+	}
+	dc, err := s.GetDomainConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dc.Status != "issuing" || dc.Domain != "new.dev" {
+		t.Fatalf("stale update mutated row: %+v", dc)
 	}
 }
