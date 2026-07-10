@@ -74,7 +74,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	for _, col := range []string{"account_id", "control_token"} {
+	for _, col := range []string{"account_id", "control_token", "custom_domain"} {
 		if err := ensureAgentColumn(db, col); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("migrate agents: %w", err)
@@ -155,6 +155,58 @@ func (s *Store) ControlToken(baseDomain string) (string, error) {
 		return "", err
 	}
 	return tok.String, nil
+}
+
+// ErrDomainTaken is returned when another agent already holds a custom domain.
+var ErrDomainTaken = errors.New("domain already in use")
+
+// SetCustomDomain records domain as the BYO custom domain for the agent
+// enrolled at baseDomain and returns the previous value. Empty domain clears.
+// First-come-first-served across agents (ErrDomainTaken); the real ownership
+// proof is the DNS-01 cert the box obtained before asking.
+func (s *Store) SetCustomDomain(baseDomain, domain string) (string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if domain != "" {
+		var other string
+		err := tx.QueryRow(
+			`SELECT base_domain FROM agents WHERE custom_domain=? AND base_domain!=?`,
+			domain, baseDomain).Scan(&other)
+		if err == nil {
+			return "", ErrDomainTaken
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	var prev sql.NullString
+	err = tx.QueryRow(`SELECT custom_domain FROM agents WHERE base_domain=?`, baseDomain).Scan(&prev)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrBadToken
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(`UPDATE agents SET custom_domain=? WHERE base_domain=?`, domain, baseDomain); err != nil {
+		return "", err
+	}
+	return prev.String, tx.Commit()
+}
+
+// CustomDomain returns the agent's BYO custom domain, "" if none is set.
+func (s *Store) CustomDomain(baseDomain string) (string, error) {
+	var d sql.NullString
+	err := s.db.QueryRow(`SELECT custom_domain FROM agents WHERE base_domain=?`, baseDomain).Scan(&d)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrBadToken
+	}
+	if err != nil {
+		return "", err
+	}
+	return d.String, nil
 }
 
 // ensureAgentColumn adds a column to agents if an older DB predates it.

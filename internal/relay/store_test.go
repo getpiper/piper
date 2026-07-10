@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -96,5 +97,48 @@ func TestControlTokenRoundTrip(t *testing.T) {
 	}
 	if _, err := st.ControlToken("nope.example.com"); err == nil {
 		t.Fatal("ControlToken(unknown agent) = nil error, want error")
+	}
+}
+
+func TestSetCustomDomain(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Enroll("bob", "bob.example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, err := st.SetCustomDomain("alice.example.com", "shop.dev")
+	if err != nil || prev != "" {
+		t.Fatalf("first set = %q, %v", prev, err)
+	}
+	got, err := st.CustomDomain("alice.example.com")
+	if err != nil || got != "shop.dev" {
+		t.Fatalf("CustomDomain = %q, %v", got, err)
+	}
+
+	// Uniqueness: bob may not claim alice's domain.
+	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
+		t.Fatalf("bob claiming shop.dev: err = %v, want ErrDomainTaken", err)
+	}
+	// Re-setting your own domain is fine.
+	if prev, err := st.SetCustomDomain("alice.example.com", "shop.dev"); err != nil || prev != "shop.dev" {
+		t.Fatalf("re-set = %q, %v", prev, err)
+	}
+	// Clearing frees it for others.
+	if _, err := st.SetCustomDomain("alice.example.com", ""); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); err != nil {
+		t.Fatalf("bob after clear: %v", err)
+	}
+	// Unknown agent.
+	if _, err := st.SetCustomDomain("nobody.example.com", "x.dev"); !errors.Is(err, ErrBadToken) {
+		t.Fatalf("unknown agent: err = %v, want ErrBadToken", err)
 	}
 }

@@ -231,6 +231,29 @@ func TestControlProvisionRejectsEmptyToken(t *testing.T) {
 	}
 }
 
+func TestSetDomainControlOp(t *testing.T) {
+	sess, _, base, st := startTestRelay(t, nil, nil)
+
+	cs, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "set-domain", Domain: "shop.dev"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs, &resp); err != nil {
+		t.Fatal(err)
+	}
+	cs.Close()
+	if resp.Error != "" {
+		t.Fatalf("set-domain error: %s", resp.Error)
+	}
+	if got, _ := st.CustomDomain(base); got != "shop.dev" {
+		t.Fatalf("stored custom domain = %q", got)
+	}
+}
+
 func TestControlPlaneSNIDispatch(t *testing.T) {
 	cert, key := writeWildcard(t, "public.getpiper.co")
 	tlsCfg, err := LoadWildcardConfig(cert, key)
