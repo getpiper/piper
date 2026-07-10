@@ -24,6 +24,7 @@ Goal: `piper deploy myapp --path .` → build Dockerfile → run container → h
 - ✅ `deploy` — orchestrator (build → run → health → record → route → retire) — [#22](https://github.com/getpiper/piper/pull/22)
 - ✅ `api` — control-plane HTTP API (`/v1/apps`, `/v1/apps/{name}/deploy`) — [#23](https://github.com/getpiper/piper/pull/23)
 - ✅ Deployment history + build/deploy logs on the control API — [#101](https://github.com/getpiper/piper/issues/101)
+- ✅ App lifecycle: stop + delete on the control API and CLI — [#103](https://github.com/getpiper/piper/issues/103)
 - ✅ `client` + CLI — `piper create` / `deploy` / `list` — [#24](https://github.com/getpiper/piper/pull/24)
 - ✅ `piperd` wiring (config → store → docker → caddy → deploy → api) — [#7](https://github.com/getpiper/piper/issues/7)
 - ✅ e2e — real Docker + Caddy, deploy sample app, curl it — [#8](https://github.com/getpiper/piper/issues/8)
