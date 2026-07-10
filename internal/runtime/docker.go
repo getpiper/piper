@@ -10,6 +10,8 @@ import (
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	docker "github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	archive "github.com/moby/go-archive"
 )
@@ -40,16 +42,18 @@ func (d *DockerRuntime) Build(ctx context.Context, srcDir, imageTag string) (Bui
 		return BuildResult{}, err
 	}
 	defer resp.Body.Close()
-	// Drain the build log stream; a failed build leaves no tagged image, which
-	// surfaces below as an ImageInspect "not found" error.
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return BuildResult{}, err
+	// Decode the build's JSON progress stream into a tail-capped plain-text
+	// log. A failing build step arrives on the stream and surfaces as err
+	// here, log in hand.
+	var log TailBuffer
+	if err := jsonmessage.DisplayJSONMessagesStream(resp.Body, &log, 0, false, nil); err != nil {
+		return BuildResult{Log: log.String()}, err
 	}
 	insp, err := d.cli.ImageInspect(ctx, imageTag)
 	if err != nil {
-		return BuildResult{}, fmt.Errorf("inspect built image (build may have failed): %w", err)
+		return BuildResult{Log: log.String()}, fmt.Errorf("inspect built image (build may have failed): %w", err)
 	}
-	return BuildResult{ImageID: insp.ID}, nil
+	return BuildResult{ImageID: insp.ID, Log: log.String()}, nil
 }
 
 func (d *DockerRuntime) Run(ctx context.Context, imageTag string, containerPort int, env map[string]string) (RunResult, error) {
@@ -115,7 +119,17 @@ func (d *DockerRuntime) Stop(ctx context.Context, containerID string) error {
 }
 
 func (d *DockerRuntime) Logs(ctx context.Context, containerID string) (io.ReadCloser, error) {
-	return d.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+	raw, err := d.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: "200",
 	})
+	if err != nil {
+		return nil, err
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		_, err := stdcopy.StdCopy(pw, pw, raw)
+		raw.Close()
+		pw.CloseWithError(err)
+	}()
+	return pr, nil
 }

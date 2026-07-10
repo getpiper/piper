@@ -13,6 +13,8 @@ type FakeRuntime struct {
 	RunResultVal    RunResult
 	RunErr          error
 	HealthErr       error
+	LogsVal         string
+	LogsErr         error
 	Stopped         []string
 	StopContextErrs []error
 }
@@ -34,5 +36,8 @@ func (f *FakeRuntime) Stop(ctx context.Context, id string) error {
 }
 
 func (f *FakeRuntime) Logs(context.Context, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("fake logs\n")), nil
+	if f.LogsErr != nil {
+		return nil, f.LogsErr
+	}
+	return io.NopCloser(strings.NewReader(f.LogsVal)), nil
 }
