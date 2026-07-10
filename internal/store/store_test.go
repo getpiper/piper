@@ -1,8 +1,10 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -114,8 +116,8 @@ func TestLatestRunning(t *testing.T) {
 	if _, err := s.LatestRunning("blog"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("empty LatestRunning err = %v, want ErrNotFound", err)
 	}
-	d1, _ := s.CreateDeployment("blog", "img1", "c1", 40001, "running")
-	s.CreateDeployment("blog", "img2", "c2", 40002, "failed")
+	d1, _ := s.CreateDeployment("blog", "img1", "c1", 40001, "running", "")
+	s.CreateDeployment("blog", "img2", "c2", 40002, "failed", "")
 	got, err := s.LatestRunning("blog")
 	if err != nil {
 		t.Fatalf("LatestRunning: %v", err)
@@ -128,7 +130,7 @@ func TestLatestRunning(t *testing.T) {
 func TestUpdateDeploymentStatus(t *testing.T) {
 	s := openTemp(t)
 	s.CreateApp("blog", 8080)
-	d, _ := s.CreateDeployment("blog", "img1", "c1", 40001, "running")
+	d, _ := s.CreateDeployment("blog", "img1", "c1", 40001, "running", "")
 	if err := s.UpdateDeploymentStatus(d.ID, "stopped"); err != nil {
 		t.Fatalf("UpdateDeploymentStatus: %v", err)
 	}
@@ -139,7 +141,7 @@ func TestUpdateDeploymentStatus(t *testing.T) {
 
 func TestPreviewDeploymentRoundTrip(t *testing.T) {
 	s := openTemp(t)
-	if _, err := s.CreatePreviewDeployment("blog", 7, "img", "cid", 41000, "running"); err != nil {
+	if _, err := s.CreatePreviewDeployment("blog", 7, "img", "cid", 41000, "running", ""); err != nil {
 		t.Fatalf("CreatePreviewDeployment: %v", err)
 	}
 	got, err := s.PreviewRunning("blog", 7)
@@ -156,10 +158,10 @@ func TestPreviewDeploymentRoundTrip(t *testing.T) {
 
 func TestLatestRunningIgnoresPreviews(t *testing.T) {
 	s := openTemp(t)
-	if _, err := s.CreateDeployment("blog", "img", "main-c", 40000, "running"); err != nil {
+	if _, err := s.CreateDeployment("blog", "img", "main-c", 40000, "running", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePreviewDeployment("blog", 3, "img", "preview-c", 41000, "running"); err != nil {
+	if _, err := s.CreatePreviewDeployment("blog", 3, "img", "preview-c", 41000, "running", ""); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.LatestRunning("blog")
@@ -269,8 +271,8 @@ func TestLatestDeployment(t *testing.T) {
 	if _, err := s.LatestDeployment("blog"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("empty LatestDeployment err = %v, want ErrNotFound", err)
 	}
-	s.CreateDeployment("blog", "img1", "c1", 40001, "running")
-	d2, _ := s.CreateDeployment("blog", "img2", "c2", 40002, "failed")
+	s.CreateDeployment("blog", "img1", "c1", 40001, "running", "")
+	d2, _ := s.CreateDeployment("blog", "img2", "c2", 40002, "failed", "")
 	got, err := s.LatestDeployment("blog")
 	if err != nil {
 		t.Fatalf("LatestDeployment: %v", err)
@@ -283,14 +285,160 @@ func TestLatestDeployment(t *testing.T) {
 func TestLatestDeploymentIgnoresPreviews(t *testing.T) {
 	s := openTemp(t)
 	s.CreateApp("blog", 8080)
-	s.CreateDeployment("blog", "img", "main-c", 40000, "running")
+	s.CreateDeployment("blog", "img", "main-c", 40000, "running", "")
 	// Created later, so it would win on created_at if pr>0 rows weren't excluded.
-	s.CreatePreviewDeployment("blog", 3, "img", "preview-c", 41000, "failed")
+	s.CreatePreviewDeployment("blog", 3, "img", "preview-c", 41000, "failed", "")
 	got, err := s.LatestDeployment("blog")
 	if err != nil {
 		t.Fatalf("LatestDeployment: %v", err)
 	}
 	if got.ContainerID != "main-c" || got.Status != "running" {
 		t.Errorf("LatestDeployment = %+v, want main-c/running", got)
+	}
+}
+
+func TestDeploymentLogsRoundTripAndScoping(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed", "step 1/2\nboom\n")
+	if err != nil {
+		t.Fatalf("CreateDeployment: %v", err)
+	}
+
+	logs, err := s.DeploymentLogs("blog", d.ID)
+	if err != nil {
+		t.Fatalf("DeploymentLogs: %v", err)
+	}
+	if !strings.Contains(logs, "boom") {
+		t.Errorf("logs = %q, want build output", logs)
+	}
+	// Same id under another app must not resolve.
+	if _, err := s.DeploymentLogs("api", d.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-app lookup err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.DeploymentLogs("blog", "no-such-id"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListDeploymentsNewestFirst(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img2", "c2", 40002, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePreviewDeployment("blog", 5, "img3", "c3", 40003, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	deps, err := s.ListDeployments("blog")
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+	if len(deps) != 3 {
+		t.Fatalf("len = %d, want 3 (previews included)", len(deps))
+	}
+	if deps[0].ImageID != "img3" || deps[2].ImageID != "img1" {
+		t.Errorf("order = [%s %s %s], want newest first", deps[0].ImageID, deps[1].ImageID, deps[2].ImageID)
+	}
+	if deps[0].PR != 5 {
+		t.Errorf("deps[0].PR = %d, want 5", deps[0].PR)
+	}
+	if empty, err := s.ListDeployments("never-deployed"); err != nil || len(empty) != 0 {
+		t.Errorf("unknown app = %v (err %v), want empty, nil", empty, err)
+	}
+}
+
+func TestDeploymentLogRetentionPrunesTo20PerApp(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("api", "img", "c", 40000, "running", "other-app log"); err != nil {
+		t.Fatal(err)
+	}
+	var last Deployment
+	for i := 0; i < 22; i++ {
+		var err error
+		last, err = s.CreateDeployment("blog", "img", "c", 40001, "running", "log body")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var withLogs int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM deployments WHERE app='blog' AND logs != ''`).Scan(&withLogs); err != nil {
+		t.Fatal(err)
+	}
+	if withLogs != 20 {
+		t.Errorf("blog rows with logs = %d, want 20", withLogs)
+	}
+	var rows int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM deployments WHERE app='blog'`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 22 {
+		t.Errorf("blog rows = %d, want 22 (rows are history; only logs are pruned)", rows)
+	}
+	// The newest deployment's log survives; the other app is untouched.
+	if logs, err := s.DeploymentLogs("blog", last.ID); err != nil || logs != "log body" {
+		t.Errorf("newest logs = %q (err %v), want kept", logs, err)
+	}
+	var otherWithLogs int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM deployments WHERE app='api' AND logs != ''`).Scan(&otherWithLogs); err != nil {
+		t.Fatal(err)
+	}
+	if otherWithLogs != 1 {
+		t.Errorf("api rows with logs = %d, want 1", otherWithLogs)
+	}
+}
+
+func TestMigrateAddsLogsColumnToExistingDB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A pre-#101 database: deployments table without the logs column.
+	if _, err := db.Exec(`
+		CREATE TABLE apps (name TEXT PRIMARY KEY, port INTEGER NOT NULL,
+			repo TEXT NOT NULL DEFAULT '', branch TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+		CREATE TABLE deployments (id TEXT PRIMARY KEY, app TEXT NOT NULL REFERENCES apps(name),
+			image_id TEXT NOT NULL, container_id TEXT NOT NULL, host_port INTEGER NOT NULL,
+			status TEXT NOT NULL, created_at TEXT NOT NULL, pr INTEGER NOT NULL DEFAULT 0);`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open over old db: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.CreateDeployment("blog", "img", "c", 40001, "failed", "migrated log")
+	if err != nil {
+		t.Fatalf("CreateDeployment on migrated db: %v", err)
+	}
+	if logs, err := s.DeploymentLogs("blog", d.ID); err != nil || logs != "migrated log" {
+		t.Errorf("logs = %q (err %v), want migrated log", logs, err)
 	}
 }

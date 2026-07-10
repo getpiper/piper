@@ -96,13 +96,13 @@ func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.De
 	}
 
 	build, run, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int) {
-		_, _ = d.store.CreateDeployment(appName, img, cid, hp, "failed")
+		_, _ = d.store.CreateDeployment(appName, img, cid, hp, "failed", "")
 	})
 	if err != nil {
 		return store.Deployment{}, err
 	}
 
-	dep, err := d.store.CreateDeployment(appName, build.ImageID, run.ContainerID, run.HostPort, "running")
+	dep, err := d.store.CreateDeployment(appName, build.ImageID, run.ContainerID, run.HostPort, "running", "")
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -134,13 +134,13 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 	}
 
 	build, run, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int) {
-		_, _ = d.store.CreatePreviewDeployment(appName, pr, img, cid, hp, "failed")
+		_, _ = d.store.CreatePreviewDeployment(appName, pr, img, cid, hp, "failed", "")
 	})
 	if err != nil {
 		return store.Deployment{}, err
 	}
 
-	dep, err := d.store.CreatePreviewDeployment(appName, pr, build.ImageID, run.ContainerID, run.HostPort, "running")
+	dep, err := d.store.CreatePreviewDeployment(appName, pr, build.ImageID, run.ContainerID, run.HostPort, "running", "")
 	if err != nil {
 		return store.Deployment{}, err
 	}

@@ -68,6 +68,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE apps ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE apps ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE deployments ADD COLUMN pr INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE deployments ADD COLUMN logs TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") {
@@ -143,21 +144,26 @@ func (s *Store) ListApps() ([]App, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) CreateDeployment(app, imageID, containerID string, hostPort int, status string) (Deployment, error) {
+// logRetentionPerApp bounds stored log blobs: only the newest N deployments
+// per app keep their logs. Rows themselves are never deleted — they are the
+// deployment history.
+const logRetentionPerApp = 20
+
+func (s *Store) CreateDeployment(app, imageID, containerID string, hostPort int, status, logs string) (Deployment, error) {
 	d := Deployment{
 		ID: uuid.NewString(), App: app, ImageID: imageID,
 		ContainerID: containerID, HostPort: hostPort, Status: status,
 		CreatedAt: time.Now().UTC(),
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO deployments(id, app, image_id, container_id, host_port, status, created_at)
-		 VALUES(?,?,?,?,?,?,?)`,
-		d.ID, d.App, d.ImageID, d.ContainerID, d.HostPort, d.Status,
+		`INSERT INTO deployments(id, app, image_id, container_id, host_port, status, logs, created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		d.ID, d.App, d.ImageID, d.ContainerID, d.HostPort, d.Status, logs,
 		d.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return Deployment{}, err
 	}
-	return d, nil
+	return d, s.pruneDeploymentLogs(app)
 }
 
 func (s *Store) UpdateDeploymentStatus(id, status string) error {
@@ -229,21 +235,21 @@ func (s *Store) LatestDeployment(app string) (Deployment, error) {
 	return d, nil
 }
 
-func (s *Store) CreatePreviewDeployment(app string, pr int, imageID, containerID string, hostPort int, status string) (Deployment, error) {
+func (s *Store) CreatePreviewDeployment(app string, pr int, imageID, containerID string, hostPort int, status, logs string) (Deployment, error) {
 	d := Deployment{
 		ID: uuid.NewString(), App: app, PR: pr, ImageID: imageID,
 		ContainerID: containerID, HostPort: hostPort, Status: status,
 		CreatedAt: time.Now().UTC(),
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO deployments(id, app, image_id, container_id, host_port, status, created_at, pr)
-		 VALUES(?,?,?,?,?,?,?,?)`,
-		d.ID, d.App, d.ImageID, d.ContainerID, d.HostPort, d.Status,
+		`INSERT INTO deployments(id, app, image_id, container_id, host_port, status, logs, created_at, pr)
+		 VALUES(?,?,?,?,?,?,?,?,?)`,
+		d.ID, d.App, d.ImageID, d.ContainerID, d.HostPort, d.Status, logs,
 		d.CreatedAt.Format(time.RFC3339Nano), d.PR)
 	if err != nil {
 		return Deployment{}, err
 	}
-	return d, nil
+	return d, s.pruneDeploymentLogs(app)
 }
 
 func (s *Store) PreviewRunning(app string, pr int) (Deployment, error) {
@@ -262,6 +268,50 @@ func (s *Store) PreviewRunning(app string, pr int) (Deployment, error) {
 	}
 	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, ts)
 	return d, nil
+}
+
+func (s *Store) pruneDeploymentLogs(app string) error {
+	_, err := s.db.Exec(
+		`UPDATE deployments SET logs='' WHERE app=? AND logs != '' AND id NOT IN (
+		   SELECT id FROM deployments WHERE app=? ORDER BY created_at DESC LIMIT ?)`,
+		app, app, logRetentionPerApp)
+	return err
+}
+
+// ListDeployments returns every deployment for app (previews included),
+// newest first.
+func (s *Store) ListDeployments(app string) ([]Deployment, error) {
+	rows, err := s.db.Query(
+		`SELECT id, app, pr, image_id, container_id, host_port, status, created_at
+		 FROM deployments WHERE app=? ORDER BY created_at DESC`, app)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Deployment
+	for rows.Next() {
+		var d Deployment
+		var ts string
+		if err := rows.Scan(&d.ID, &d.App, &d.PR, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts); err != nil {
+			return nil, err
+		}
+		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, ts)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DeploymentLogs returns the captured log for one deployment, scoped by app
+// so an id from another app is ErrNotFound. Empty string when the log was
+// pruned by retention.
+func (s *Store) DeploymentLogs(app, id string) (string, error) {
+	var logs string
+	err := s.db.QueryRow(
+		`SELECT logs FROM deployments WHERE app=? AND id=?`, app, id).Scan(&logs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return logs, err
 }
 
 // ErrBadToken is returned when a token is unknown or has been revoked.

@@ -285,7 +285,7 @@ func TestListAppsIncludesDeployStatus(t *testing.T) {
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "running"); err != nil {
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "running", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,7 +313,7 @@ func TestGetAppIncludesDeployStatus(t *testing.T) {
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed"); err != nil {
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed", ""); err != nil {
 		t.Fatal(err)
 	}
 
