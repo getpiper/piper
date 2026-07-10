@@ -539,3 +539,138 @@ func TestDeployCombinedLogIsTailCapped(t *testing.T) {
 		t.Error("error text must be the tail (recorded after container output)")
 	}
 }
+
+func TestStopRetiresRunningAndRemovesRoute(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "c1" {
+		t.Errorf("stopped = %v, want [c1]", rt.Stopped)
+	}
+	if len(routes.removed()) != 1 || routes.removed()[0] != "blog.piper.localhost" {
+		t.Errorf("removed = %v, want [blog.piper.localhost]", routes.removed())
+	}
+	if _, err := s.LatestRunning("blog"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("LatestRunning after stop err = %v, want ErrNotFound", err)
+	}
+	// App and history remain: latest deployment is the same row, now stopped.
+	dep, err := s.LatestDeployment("blog")
+	if err != nil || dep.Status != "stopped" || dep.ContainerID != "c1" {
+		t.Errorf("latest = %+v (err %v), want c1 stopped", dep, err)
+	}
+}
+
+func TestStopNothingRunningIsNoOp(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop no-op err = %v, want nil", err)
+	}
+	if len(rt.Stopped) != 0 || len(routes.removed()) != 0 {
+		t.Errorf("no-op stop touched runtime/routes: %v %v", rt.Stopped, routes.removed())
+	}
+}
+
+func TestStopUnknownAppIsNotFound(t *testing.T) {
+	s, _ := newStore(t)
+	d := New(s, &runtime.FakeRuntime{}, newFakeCaddy(), "piper.localhost")
+	if err := d.Stop(context.Background(), "ghost"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Stop(ghost) err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStopRemovesCustomDomainRoute(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if err := s.SetDomainConfig("shop.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDomainStatus("shop.dev", "active", "", time.Now().Add(60*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	got := routes.removed()
+	want := map[string]bool{"blog.piper.localhost": true, "blog.shop.dev": true}
+	if len(got) != 2 || !want[got[0]] || !want[got[1]] {
+		t.Errorf("removed = %v, want both primary and custom-domain hosts", got)
+	}
+}
+
+func TestStopTerminatedRemovesAssignedHostname(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "public.getpiper.co")
+	reg := &fakeRegistrar{}
+	d.SetHostnameRegistrar(reg)
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if len(routes.removed()) != 1 || routes.removed()[0] != "hash-blog-alice.public.getpiper.co" {
+		t.Errorf("removed = %v, want the assigned hostname", routes.removed())
+	}
+	if len(reg.deregs) != 0 {
+		t.Errorf("deregs = %v, stop must not deregister (delete-only)", reg.deregs)
+	}
+}
+
+func TestStopTerminatedRelayDownSkipsRouteBestEffort(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "public.getpiper.co")
+	reg := &fakeRegistrar{}
+	d.SetHostnameRegistrar(reg)
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	reg.failing = true // relay unreachable at stop time
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop with relay down err = %v, want nil (best-effort)", err)
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "c1" {
+		t.Errorf("stopped = %v, want [c1] despite relay outage", rt.Stopped)
+	}
+	if len(routes.removed()) != 0 {
+		t.Errorf("removed = %v, want none (hostname unknown)", routes.removed())
+	}
+	dep, err := s.LatestDeployment("blog")
+	if err != nil || dep.Status != "stopped" {
+		t.Errorf("latest = %+v (err %v), want stopped", dep, err)
+	}
+}

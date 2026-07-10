@@ -205,3 +205,55 @@ func (d *Deployer) TeardownPreview(ctx context.Context, appName string, pr int) 
 	}
 	return d.store.UpdateDeploymentStatus(dep.ID, "stopped")
 }
+
+// primaryHost resolves the app's routed production host: the relay-assigned
+// name in registrar mode (recovered via the idempotent Register), else
+// <app>.<baseDom>. ok is false when the relay is unreachable and the
+// hostname can't be recovered — callers skip route work best-effort.
+func (d *Deployer) primaryHost(appName string) (string, bool) {
+	if d.registrar == nil {
+		return d.hostFor(appName), true
+	}
+	host, err := d.registrar.Register(appName)
+	return host, err == nil
+}
+
+// removeCustomDomainRoute drops <app>.<custom> when a BYO custom domain is
+// active; without one it's a no-op (mirrors the upsert in Deploy).
+func (d *Deployer) removeCustomDomainRoute(appName string) error {
+	dc, err := d.store.GetDomainConfig()
+	if err != nil || dc.Status != "active" {
+		return nil
+	}
+	if err := d.routes.RemoveRoute(appName + "." + dc.Domain); err != nil {
+		return fmt.Errorf("unroute custom domain: %w", err)
+	}
+	return nil
+}
+
+// Stop retires the app's running production container: stop it, drop its
+// routes, mark the deployment "stopped". The app and its history remain.
+// Nothing running is a no-op; previews are untouched. The relay keeps the
+// app's hostname registration (Deregister is delete-only).
+func (d *Deployer) Stop(ctx context.Context, appName string) error {
+	if _, err := d.store.GetApp(appName); err != nil {
+		return err
+	}
+	dep, err := d.store.LatestRunning(appName)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_ = d.runtime.Stop(ctx, dep.ContainerID)
+	if host, ok := d.primaryHost(appName); ok {
+		if err := d.routes.RemoveRoute(host); err != nil {
+			return fmt.Errorf("unroute: %w", err)
+		}
+	}
+	if err := d.removeCustomDomainRoute(appName); err != nil {
+		return err
+	}
+	return d.store.UpdateDeploymentStatus(dep.ID, "stopped")
+}
