@@ -5,10 +5,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +29,7 @@ import (
 	"github.com/getpiper/piper/internal/certs"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/deploy"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/runtime"
 	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
@@ -194,6 +199,32 @@ func main() {
 
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
 
+	var domMgr *domain.Manager
+	if cfg.RelayAddr != "" {
+		relayHost := cfg.RelayAddr
+		if h, _, err := net.SplitHostPort(cfg.RelayAddr); err == nil {
+			relayHost = h
+		}
+		opts := domain.Options{
+			Store: st, Proxy: caddy.NewClient(cfg.CaddyAdmin),
+			DataDir: cfg.DataDir, RelayHost: relayHost, HTTPSListen: ":443",
+			Issuer: func(provider, token string) (domain.Issuer, error) {
+				if os.Getenv("PIPER_TEST_ISSUER") == "selfsigned" {
+					return testSelfSignedIssuer{}, nil
+				}
+				key, err := certs.LoadOrCreateAccountKey(filepath.Join(cfg.DataDir, "acme_account.key"))
+				if err != nil {
+					return nil, err
+				}
+				return certs.NewCloudflareIssuer(cfg.ACMEEmail, cfg.ACMECA, token, key)
+			},
+		}
+		if !cfg.Terminated {
+			opts.EnvDomain = cfg.BaseDomain // env-managed BYO: API writes are 409
+		}
+		domMgr = domain.New(opts)
+	}
+
 	// Relay mode: dial the relay and forward its streams. Terminated (free-tier)
 	// mode holds no box cert and serves apps on :80; the relay terminates TLS and
 	// opens KindHTTP streams. Non-terminated (BYO-domain) mode obtains a wildcard
@@ -213,8 +244,26 @@ func main() {
 				}
 			}
 		} else {
-			if err := setupRelayTLS(ctx, cfg); err != nil {
-				log.Fatalf("relay tls: %v", err)
+			if cfg.TLSCertFile != "" {
+				certPEM, err := os.ReadFile(cfg.TLSCertFile)
+				if err != nil {
+					log.Fatalf("relay tls: %v", err)
+				}
+				keyPEM, err := os.ReadFile(cfg.TLSKeyFile)
+				if err != nil {
+					log.Fatalf("relay tls: %v", err)
+				}
+				if err := caddy.NewClient(cfg.CaddyAdmin).LoadCert(string(certPEM), string(keyPEM)); err != nil {
+					log.Fatalf("relay tls: %v", err)
+				}
+			} else {
+				iss, err := newEnvIssuer(cfg)
+				if err != nil {
+					log.Fatalf("relay tls: %v", err)
+				}
+				if err := domMgr.RunEnv(ctx, iss); err != nil {
+					log.Fatalf("relay tls: %v", err)
+				}
 			}
 			dialLocal = func(kind byte) (net.Conn, error) {
 				if kind == tunnel.KindControlAPI {
@@ -229,6 +278,11 @@ func main() {
 		if cfg.Terminated {
 			dep.SetHostnameRegistrar(tc)
 		}
+		domMgr.SetRelay(tc)
+		if cfg.Terminated {
+			domMgr.Resume()
+			go domMgr.StartRenewals(ctx)
+		}
 
 		wh = newWebhookStarter(cfg, st, rt)
 		if _, err := st.GetGitHubApp(); err == nil {
@@ -240,11 +294,15 @@ func main() {
 
 	// After `piper github setup` stores App creds at runtime, start serving
 	// webhooks immediately (relay mode only) instead of waiting for a restart.
+	var dm api.DomainManager
+	if domMgr != nil {
+		dm = domMgr
+	}
 	handler := api.RequireToken(st, api.New(st, dep, cfg.BaseDomain, "", func() {
 		if wh != nil {
 			wh.start()
 		}
-	}, nil))
+	}, dm))
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
 	go func() {
@@ -404,41 +462,6 @@ func (w *webhookStarter) cancel() {
 	}
 }
 
-// setupRelayTLS loads a wildcard cert into Caddy: a static PEM if configured
-// (tests / BYO), otherwise ACME DNS-01 via lego.
-func setupRelayTLS(ctx context.Context, cfg config.Config) error {
-	cc := caddy.NewClient(cfg.CaddyAdmin)
-	if cfg.TLSCertFile != "" {
-		certPEM, err := os.ReadFile(cfg.TLSCertFile)
-		if err != nil {
-			return err
-		}
-		keyPEM, err := os.ReadFile(cfg.TLSKeyFile)
-		if err != nil {
-			return err
-		}
-		return cc.LoadCert(string(certPEM), string(keyPEM))
-	}
-	provider, err := newDNSProvider(cfg.DNSProvider)
-	if err != nil {
-		return err
-	}
-	acctKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	mgr, err := certs.New(certs.Config{
-		Email: cfg.ACMEEmail, CADirURL: cfg.ACMECA,
-		DNSProvider: provider, AccountKey: acctKey,
-	})
-	if err != nil {
-		return err
-	}
-	certPEM, keyPEM, err := mgr.Obtain([]string{"*." + cfg.BaseDomain, cfg.BaseDomain})
-	if err != nil {
-		return err
-	}
-	go renewLoop(ctx, mgr, cc, cfg.BaseDomain, certPEM)
-	return cc.LoadCert(string(certPEM), string(keyPEM))
-}
-
 func newDNSProvider(name string) (challenge.Provider, error) {
 	switch name {
 	case "", "cloudflare":
@@ -448,41 +471,53 @@ func newDNSProvider(name string) (challenge.Provider, error) {
 	}
 }
 
-type certificateManager interface {
-	Obtain([]string) ([]byte, []byte, error)
-}
+// testSelfSignedIssuer is an e2e hook (PIPER_TEST_ISSUER=selfsigned): it
+// issues a self-signed wildcard cert instead of ACME so end-to-end tests can
+// exercise the domain-config flow without a CA or real DNS.
+type testSelfSignedIssuer struct{}
 
-type certificateReplacer interface {
-	ReplaceCert(certPEM, keyPEM string) error
-}
-
-// renewLoop re-obtains and reloads the cert when it nears expiry.
-func renewLoop(ctx context.Context, mgr certificateManager, cc certificateReplacer, base string, certPEM []byte) {
-	ticker := time.NewTicker(12 * time.Hour)
-	defer ticker.Stop()
-	runRenewLoop(ctx, mgr, cc, base, certPEM, ticker.C, time.Now)
-}
-
-func runRenewLoop(ctx context.Context, mgr certificateManager, cc certificateReplacer, base string, certPEM []byte, ticks <-chan time.Time, now func() time.Time) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticks:
-			due, err := certs.NeedsRenewal(certPEM, 30*24*time.Hour, now())
-			if err != nil || !due {
-				continue
-			}
-			newCert, newKey, err := mgr.Obtain([]string{"*." + base, base})
-			if err != nil {
-				log.Printf("renew: %v", err)
-				continue
-			}
-			if err := cc.ReplaceCert(string(newCert), string(newKey)); err != nil {
-				log.Printf("renew load: %v", err)
-				continue
-			}
-			certPEM = newCert
-		}
+func (testSelfSignedIssuer) Obtain(domains []string) ([]byte, []byte, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, err
 	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: domains[0]},
+		DNSNames:     domains,
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(90 * 24 * time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return nil, nil, err
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	kb, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})
+	return certPEM, keyPEM, nil
+}
+
+// newEnvIssuer builds the env-managed issuer: DNS provider by name with creds
+// from the provider's own env vars (the pre-#102 path), ACME account key
+// persisted in the data dir.
+func newEnvIssuer(cfg config.Config) (domain.Issuer, error) {
+	if os.Getenv("PIPER_TEST_ISSUER") == "selfsigned" {
+		return testSelfSignedIssuer{}, nil
+	}
+	provider, err := newDNSProvider(cfg.DNSProvider)
+	if err != nil {
+		return nil, err
+	}
+	key, err := certs.LoadOrCreateAccountKey(filepath.Join(cfg.DataDir, "acme_account.key"))
+	if err != nil {
+		return nil, err
+	}
+	return certs.New(certs.Config{
+		Email: cfg.ACMEEmail, CADirURL: cfg.ACMECA,
+		DNSProvider: provider, AccountKey: key,
+	})
 }
