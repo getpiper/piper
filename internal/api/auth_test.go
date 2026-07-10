@@ -47,7 +47,7 @@ func TestRequireTokenRejectsAndAccepts(t *testing.T) {
 
 func TestDeploymentEndpointsRequireToken(t *testing.T) {
 	s := newTestStore(t)
-	h := RequireToken(s, New(s, &fakeDeployer{}, "piper.localhost", "", nil))
+	h := RequireToken(s, New(s, &fakeDeployer{}, "piper.localhost", "", nil, nil))
 	for _, path := range []string{
 		"/v1/apps/blog/deployments",
 		"/v1/apps/blog/deployments/dep1/logs",

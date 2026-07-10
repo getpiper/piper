@@ -244,7 +244,7 @@ func main() {
 		if wh != nil {
 			wh.start()
 		}
-	}))
+	}, nil))
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
 	go func() {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
 )
@@ -40,9 +41,17 @@ func latestStatus(s *store.Store, app string) (string, error) {
 	return d.Status, nil
 }
 
+// DomainManager is the domain-config surface (#102). Nil when the box has no
+// relay configured: the endpoints then answer 409.
+type DomainManager interface {
+	Set(domain, provider, token string) (domain.Status, error)
+	Status() (domain.Status, error)
+	Remove() error
+}
+
 // onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
 // exchange endpoint, so the daemon can start serving webhooks without a restart.
-func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func()) http.Handler {
+func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -220,6 +229,67 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		}
 		if onGitHubApp != nil {
 			onGitHubApp()
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	noRelay := func(w http.ResponseWriter) bool {
+		if dom == nil {
+			http.Error(w, "domain config requires a relay: connect this box to a relay first", http.StatusConflict)
+			return true
+		}
+		return false
+	}
+	mux.HandleFunc("GET /v1/domain", func(w http.ResponseWriter, r *http.Request) {
+		if noRelay(w) {
+			return
+		}
+		st, err := dom.Status()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+	})
+	mux.HandleFunc("PUT /v1/domain", func(w http.ResponseWriter, r *http.Request) {
+		if noRelay(w) {
+			return
+		}
+		var in struct {
+			Domain      string `json:"domain"`
+			DNSProvider string `json:"dns_provider"`
+			DNSToken    string `json:"dns_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		st, err := dom.Set(in.Domain, in.DNSProvider, in.DNSToken)
+		switch {
+		case errors.Is(err, domain.ErrEnvManaged):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case errors.Is(err, domain.ErrInvalidDomain),
+			errors.Is(err, domain.ErrUnsupportedProvider),
+			errors.Is(err, domain.ErrTokenRequired):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+	})
+	mux.HandleFunc("DELETE /v1/domain", func(w http.ResponseWriter, r *http.Request) {
+		if noRelay(w) {
+			return
+		}
+		if err := dom.Remove(); errors.Is(err, domain.ErrEnvManaged) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
