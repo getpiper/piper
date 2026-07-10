@@ -310,6 +310,7 @@ func (m *Manager) Status() (Status, error) {
 		Status: dc.Status, Error: dc.Error,
 		DNSRecords: m.dnsRecords(dc.Domain),
 	}
+	st.DNSOK = m.dnsOK(dc.Domain)
 	if !dc.CertNotAfter.IsZero() {
 		t := dc.CertNotAfter
 		st.CertNotAfter = &t
@@ -343,6 +344,31 @@ func (m *Manager) dnsRecords(domain string) []DNSRecord {
 		{Type: "CNAME", Name: "*." + domain, Value: m.relayHost},
 		{Type: "CNAME", Name: domain, Value: m.relayHost},
 	}
+}
+
+// dnsOK reports whether a wildcard lookup under domain reaches the relay:
+// piper-probe.<domain> (any label matches the user's wildcard record) must
+// resolve to an address the relay host also resolves to. Traffic readiness —
+// independent of issuance, which needs only the DNS API token.
+func (m *Manager) dnsOK(domain string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	probe, err := m.resolve(ctx, "piper-probe."+domain)
+	if err != nil {
+		return false
+	}
+	relay, err := m.resolve(ctx, m.relayHost)
+	if err != nil {
+		return false
+	}
+	for _, p := range probe {
+		for _, r := range relay {
+			if p.Equal(r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Remove tears down the custom domain. Shared-domain URLs are untouched.

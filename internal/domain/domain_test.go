@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -295,5 +297,103 @@ func TestSetEnvManaged(t *testing.T) {
 	}
 	if err := m.Remove(); !errors.Is(err, ErrEnvManaged) {
 		t.Fatalf("Remove on env-managed: %v", err)
+	}
+}
+
+func TestStatusDNSOK(t *testing.T) {
+	m, st, _, _, _ := newTestManager(t, &fakeIssuer{})
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusActive)
+
+	// Probe and relay host resolve to the same address → dns_ok.
+	m.resolve = func(_ context.Context, host string) ([]net.IP, error) {
+		switch host {
+		case "piper-probe.example.com", "relay.example.net":
+			return []net.IP{net.ParseIP("203.0.113.7")}, nil
+		}
+		return nil, errors.New("nxdomain")
+	}
+	s, err := m.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.DNSOK {
+		t.Fatal("want dns_ok=true when probe matches relay")
+	}
+	if s.DNSTokenSet != true || s.Domain != "example.com" || s.Source != "api" {
+		t.Fatalf("status = %+v", s)
+	}
+	want := []DNSRecord{
+		{Type: "CNAME", Name: "*.example.com", Value: "relay.example.net"},
+		{Type: "CNAME", Name: "example.com", Value: "relay.example.net"},
+	}
+	if len(s.DNSRecords) != 2 || s.DNSRecords[0] != want[0] || s.DNSRecords[1] != want[1] {
+		t.Fatalf("dns_records = %+v", s.DNSRecords)
+	}
+
+	// Probe resolving elsewhere → not ok.
+	m.resolve = func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "piper-probe.example.com" {
+			return []net.IP{net.ParseIP("198.51.100.9")}, nil
+		}
+		return []net.IP{net.ParseIP("203.0.113.7")}, nil
+	}
+	s, _ = m.Status()
+	if s.DNSOK {
+		t.Fatal("want dns_ok=false on mismatch")
+	}
+}
+
+func TestStatusUnconfigured(t *testing.T) {
+	m, _, _, _, _ := newTestManager(t, &fakeIssuer{})
+	s, err := m.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Status != "" || s.Domain != "" || s.Source != "api" {
+		t.Fatalf("unconfigured status = %+v", s)
+	}
+}
+
+func TestRemoveTearsDown(t *testing.T) {
+	m, st, proxy, relay, dataDir := newTestManager(t, &fakeIssuer{})
+	if _, err := st.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateDeployment("blog", "img", "ctr", 40001, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusActive)
+
+	if err := m.Remove(); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got := relay.last(); got != "" {
+		t.Fatalf("relay last notify = %q, want cleared", got)
+	}
+	proxy.mu.Lock()
+	removed := append([]string(nil), proxy.removed...)
+	proxy.mu.Unlock()
+	found := false
+	for _, h := range removed {
+		found = found || h == "blog.example.com"
+	}
+	if !found {
+		t.Fatalf("removed routes = %v, want blog.example.com", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "domain")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cert dir survives Remove: %v", err)
+	}
+	if _, err := st.GetDomainConfig(); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("config survives Remove: %v", err)
+	}
+	// Removing again is a no-op.
+	if err := m.Remove(); err != nil {
+		t.Fatalf("second Remove: %v", err)
 	}
 }
