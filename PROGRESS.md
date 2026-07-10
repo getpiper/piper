@@ -23,6 +23,7 @@ Goal: `piper deploy myapp --path .` → build Dockerfile → run container → h
 - ✅ `caddy` — admin-API client (upsert/remove route) + in-process manager (Caddy embedded as a library) — [#3](https://github.com/getpiper/piper/issues/3), [#39](https://github.com/getpiper/piper/issues/39)
 - ✅ `deploy` — orchestrator (build → run → health → record → route → retire) — [#22](https://github.com/getpiper/piper/pull/22)
 - ✅ `api` — control-plane HTTP API (`/v1/apps`, `/v1/apps/{name}/deploy`) — [#23](https://github.com/getpiper/piper/pull/23)
+- ✅ Deployment history + build/deploy logs on the control API — [#101](https://github.com/getpiper/piper/issues/101)
 - ✅ `client` + CLI — `piper create` / `deploy` / `list` — [#24](https://github.com/getpiper/piper/pull/24)
 - ✅ `piperd` wiring (config → store → docker → caddy → deploy → api) — [#7](https://github.com/getpiper/piper/issues/7)
 - ✅ e2e — real Docker + Caddy, deploy sample app, curl it — [#8](https://github.com/getpiper/piper/issues/8)

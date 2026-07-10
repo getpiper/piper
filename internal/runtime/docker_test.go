@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,5 +53,25 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 
 	if err := r.WaitHealthy(ctx, run.HostPort); err != nil {
 		t.Fatalf("WaitHealthy: %v", err)
+	}
+}
+
+func TestDockerBuildFailureReturnsLog(t *testing.T) {
+	r := dockerAvailable(t)
+	dir := t.TempDir()
+	df := "FROM busybox:1.36\nRUN exit 7\n"
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := r.Build(context.Background(), dir, "piper-runtime-failtest:latest")
+	if err == nil {
+		t.Fatal("expected build error")
+	}
+	if b.Log == "" {
+		t.Fatal("expected non-empty build log on failure")
+	}
+	if !strings.Contains(b.Log, "exit 7") {
+		t.Errorf("log should show the failing step, got:\n%s", b.Log)
 	}
 }

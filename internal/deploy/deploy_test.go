@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/getpiper/piper/internal/runtime"
@@ -332,5 +333,122 @@ func TestDeployTerminatedRegistrarFails(t *testing.T) {
 	d.SetHostnameRegistrar(&fakeRegistrar{failing: true})
 	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
 		t.Fatal("expected deploy to fail when registration fails")
+	}
+}
+
+func deploymentLog(t *testing.T, s *store.Store, app string) string {
+	t.Helper()
+	deps, err := s.ListDeployments(app)
+	if err != nil || len(deps) == 0 {
+		t.Fatalf("ListDeployments: %v (%d rows)", err, len(deps))
+	}
+	logs, err := s.DeploymentLogs(app, deps[0].ID)
+	if err != nil {
+		t.Fatalf("DeploymentLogs: %v", err)
+	}
+	return logs
+}
+
+func TestDeployBuildFailurePersistsBuildLog(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{Log: "Step 1/2 : FROM busybox\nboom\n"},
+		BuildErr:       errors.New("build failed"),
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("expected build error")
+	}
+	logs := deploymentLog(t, s, "blog")
+	if !strings.Contains(logs, "boom") {
+		t.Errorf("failed deployment logs = %q, want build output", logs)
+	}
+}
+
+func TestDeployHealthFailureAppendsContainerOutput(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1", Log: "build ok\n"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+		HealthErr:      errors.New("unhealthy"),
+		LogsVal:        "panic: kaboom\n",
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("expected health error")
+	}
+	logs := deploymentLog(t, s, "blog")
+	for _, want := range []string{"build ok", "--- container output ---", "panic: kaboom", "unhealthy"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("logs missing %q:\n%s", want, logs)
+		}
+	}
+	if strings.Index(logs, "build ok") > strings.Index(logs, "container output") {
+		t.Error("build log must precede container output")
+	}
+	if strings.Index(logs, "panic: kaboom") > strings.Index(logs, "unhealthy") {
+		t.Error("error text must follow container output")
+	}
+}
+
+func TestDeployBuildFailureFromStageRecordsErrorInLog(t *testing.T) {
+	s, _ := newStore(t)
+	buildErr := errors.New(`The command '/bin/sh -c false' returned a non-zero code: 7`)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{Log: ""},
+		BuildErr:       buildErr,
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("expected build error")
+	}
+	logs := deploymentLog(t, s, "blog")
+	if !strings.Contains(logs, buildErr.Error()) {
+		t.Errorf("failed deployment logs = %q, want build error text", logs)
+	}
+}
+
+func TestDeploySuccessPersistsBuildLog(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1", Log: "build ok\n"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	logs := deploymentLog(t, s, "blog")
+	if logs != "build ok\n" {
+		t.Errorf("logs = %q, want build log only (no container output on success)", logs)
+	}
+}
+
+func TestDeployCombinedLogIsTailCapped(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1", Log: strings.Repeat("b", runtime.LogCap)},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+		HealthErr:      errors.New("unhealthy"),
+		LogsVal:        "THE END",
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("expected health error")
+	}
+	logs := deploymentLog(t, s, "blog")
+	if !strings.HasPrefix(logs, "[log truncated]\n") {
+		t.Error("combined log over cap must carry the truncation marker")
+	}
+	if !strings.Contains(logs, "THE END") {
+		t.Error("tail (container output) must be kept")
+	}
+	if !strings.HasSuffix(logs, "unhealthy\n") {
+		t.Error("error text must be the tail (recorded after container output)")
 	}
 }

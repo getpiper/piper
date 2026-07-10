@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/getpiper/piper/internal/runtime"
@@ -61,28 +62,56 @@ func (d *Deployer) stopPartial(ctx context.Context, containerID string) {
 	_ = d.runtime.Stop(cleanupCtx, containerID)
 }
 
-// buildRunHealthy builds, runs, and health-checks app.  On failure it invokes
-// recordFailed with whatever ids are known so the caller persists a "failed"
-// record for the right (app, pr) row, then returns a wrapped error.
-func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir string, recordFailed func(imageID, containerID string, hostPort int)) (runtime.BuildResult, runtime.RunResult, error) {
+// buildRunHealthy builds, runs, and health-checks app, capturing one
+// tail-capped log blob (build output, plus container output when the run or
+// health check fails). On failure it invokes recordFailed with whatever ids
+// and log are known so the caller persists a "failed" record for the right
+// (app, pr) row, then returns a wrapped error.
+func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir string, recordFailed func(imageID, containerID string, hostPort int, logs string)) (runtime.BuildResult, runtime.RunResult, string, error) {
 	tag := fmt.Sprintf("piper/%s:%d", app.Name, time.Now().Unix())
+	var log runtime.TailBuffer
 	build, err := d.runtime.Build(ctx, srcDir, tag)
+	_, _ = io.WriteString(&log, build.Log)
 	if err != nil {
-		recordFailed(build.ImageID, "", 0)
-		return build, runtime.RunResult{}, fmt.Errorf("build: %w", err)
+		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
+		recordFailed(build.ImageID, "", 0, log.String())
+		return build, runtime.RunResult{}, log.String(), fmt.Errorf("build: %w", err)
 	}
 	run, err := d.runtime.Run(ctx, tag, app.Port, map[string]string{"PORT": fmt.Sprint(app.Port)})
 	if err != nil {
+		d.appendContainerOutput(ctx, &log, run.ContainerID)
+		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
 		d.stopPartial(ctx, run.ContainerID)
-		recordFailed(build.ImageID, run.ContainerID, run.HostPort)
-		return build, run, fmt.Errorf("run: %w", err)
+		recordFailed(build.ImageID, run.ContainerID, run.HostPort, log.String())
+		return build, run, log.String(), fmt.Errorf("run: %w", err)
 	}
 	if err := d.runtime.WaitHealthy(ctx, run.HostPort); err != nil {
+		d.appendContainerOutput(ctx, &log, run.ContainerID)
+		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
 		d.stopPartial(ctx, run.ContainerID)
-		recordFailed(build.ImageID, run.ContainerID, run.HostPort)
-		return build, run, fmt.Errorf("health: %w", err)
+		recordFailed(build.ImageID, run.ContainerID, run.HostPort, log.String())
+		return build, run, log.String(), fmt.Errorf("health: %w", err)
 	}
-	return build, run, nil
+	return build, run, log.String(), nil
+}
+
+// appendContainerOutput best-effort appends the container's stdout/stderr to
+// log; it must run before stopPartial removes the container. A fetch failure
+// never masks the deploy error. Detached context so a cancelled deploy can
+// still capture (same rationale as stopPartial).
+func (d *Deployer) appendContainerOutput(ctx context.Context, log io.Writer, containerID string) {
+	if containerID == "" {
+		return
+	}
+	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deploymentCleanupTimeout)
+	defer cancel()
+	rc, err := d.runtime.Logs(logCtx, containerID)
+	if err != nil {
+		return
+	}
+	defer rc.Close()
+	_, _ = io.WriteString(log, "\n--- container output ---\n")
+	_, _ = io.Copy(log, rc)
 }
 
 func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.Deployment, error) {
@@ -95,14 +124,14 @@ func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.De
 		return store.Deployment{}, err
 	}
 
-	build, run, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int) {
-		_, _ = d.store.CreateDeployment(appName, img, cid, hp, "failed")
+	build, run, logs, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int, logs string) {
+		_, _ = d.store.CreateDeployment(appName, img, cid, hp, "failed", logs)
 	})
 	if err != nil {
 		return store.Deployment{}, err
 	}
 
-	dep, err := d.store.CreateDeployment(appName, build.ImageID, run.ContainerID, run.HostPort, "running")
+	dep, err := d.store.CreateDeployment(appName, build.ImageID, run.ContainerID, run.HostPort, "running", logs)
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -133,14 +162,14 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 		return store.Deployment{}, err
 	}
 
-	build, run, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int) {
-		_, _ = d.store.CreatePreviewDeployment(appName, pr, img, cid, hp, "failed")
+	build, run, logs, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int, logs string) {
+		_, _ = d.store.CreatePreviewDeployment(appName, pr, img, cid, hp, "failed", logs)
 	})
 	if err != nil {
 		return store.Deployment{}, err
 	}
 
-	dep, err := d.store.CreatePreviewDeployment(appName, pr, build.ImageID, run.ContainerID, run.HostPort, "running")
+	dep, err := d.store.CreatePreviewDeployment(appName, pr, build.ImageID, run.ContainerID, run.HostPort, "running", logs)
 	if err != nil {
 		return store.Deployment{}, err
 	}

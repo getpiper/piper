@@ -6,7 +6,13 @@ import (
 	"io"
 )
 
-type BuildResult struct{ ImageID string }
+// BuildResult carries the built image id and the build's plain-text log.
+// Log is populated even when Build returns an error — that failing output is
+// the whole point of capturing it.
+type BuildResult struct {
+	ImageID string
+	Log     string
+}
 
 type RunResult struct {
 	ContainerID string

@@ -108,6 +108,38 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		}
 		writeJSON(w, http.StatusOK, App{App: app, Status: status})
 	})
+	mux.HandleFunc("GET /v1/apps/{name}/deployments", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if _, err := s.GetApp(name); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		deps, err := s.ListDeployments(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if deps == nil {
+			deps = []store.Deployment{}
+		}
+		writeJSON(w, http.StatusOK, deps)
+	})
+	mux.HandleFunc("GET /v1/apps/{name}/deployments/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
+		logs, err := s.DeploymentLogs(r.PathValue("name"), r.PathValue("id"))
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown deployment", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, logs)
+	})
 	mux.HandleFunc("POST /v1/apps/{name}/deploy", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		if _, err := s.GetApp(name); errors.Is(err, store.ErrNotFound) {
