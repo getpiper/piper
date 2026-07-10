@@ -421,3 +421,75 @@ func (s *Store) DeleteToken(label string) error {
 	_, err := s.db.Exec(`DELETE FROM tokens WHERE label=?`, label)
 	return err
 }
+
+// DomainConfig is the box's BYO custom-domain config (single row). DNSToken is
+// a secret: it is stored for issuance and must never leave the box via the API.
+type DomainConfig struct {
+	Domain       string
+	DNSProvider  string
+	DNSToken     string
+	Status       string // "issuing" | "active" | "failed"
+	Error        string
+	CertNotAfter time.Time
+	UpdatedAt    time.Time
+}
+
+// SetDomainConfig upserts the custom-domain config, resetting it to a fresh
+// "issuing" state.
+func (s *Store) SetDomainConfig(domain, provider, token string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO domain_config(id, domain, dns_provider, dns_token, status, error, cert_not_after, updated_at)
+		 VALUES(1,?,?,?,'issuing','','',?)
+		 ON CONFLICT(id) DO UPDATE SET domain=excluded.domain,
+		   dns_provider=excluded.dns_provider, dns_token=excluded.dns_token,
+		   status='issuing', error='', cert_not_after='', updated_at=excluded.updated_at`,
+		domain, provider, token, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// GetDomainConfig returns the config, or ErrNotFound when no domain is set.
+func (s *Store) GetDomainConfig() (DomainConfig, error) {
+	var dc DomainConfig
+	var notAfter, updated string
+	err := s.db.QueryRow(
+		`SELECT domain, dns_provider, dns_token, status, error, cert_not_after, updated_at
+		 FROM domain_config WHERE id=1`).
+		Scan(&dc.Domain, &dc.DNSProvider, &dc.DNSToken, &dc.Status, &dc.Error, &notAfter, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DomainConfig{}, ErrNotFound
+	}
+	if err != nil {
+		return DomainConfig{}, err
+	}
+	if notAfter != "" {
+		dc.CertNotAfter, _ = time.Parse(time.RFC3339Nano, notAfter)
+	}
+	dc.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	return dc, nil
+}
+
+// UpdateDomainStatus records the outcome of an issuance/renewal step. A zero
+// notAfter stores the empty string.
+func (s *Store) UpdateDomainStatus(status, errMsg string, notAfter time.Time) error {
+	na := ""
+	if !notAfter.IsZero() {
+		na = notAfter.UTC().Format(time.RFC3339Nano)
+	}
+	res, err := s.db.Exec(
+		`UPDATE domain_config SET status=?, error=?, cert_not_after=?, updated_at=? WHERE id=1`,
+		status, errMsg, na, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteDomainConfig removes the custom-domain config. Deleting an absent
+// config is not an error.
+func (s *Store) DeleteDomainConfig() error {
+	_, err := s.db.Exec(`DELETE FROM domain_config WHERE id=1`)
+	return err
+}

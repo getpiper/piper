@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func openTemp(t *testing.T) *Store {
@@ -440,5 +441,67 @@ func TestMigrateAddsLogsColumnToExistingDB(t *testing.T) {
 	}
 	if logs, err := s.DeploymentLogs("blog", d.ID); err != nil || logs != "migrated log" {
 		t.Errorf("logs = %q (err %v), want migrated log", logs, err)
+	}
+}
+
+func TestDomainConfigRoundTrip(t *testing.T) {
+	s := openTemp(t)
+
+	if _, err := s.GetDomainConfig(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetDomainConfig on empty store: err = %v, want ErrNotFound", err)
+	}
+
+	if err := s.SetDomainConfig("example.com", "cloudflare", "cf-token"); err != nil {
+		t.Fatalf("SetDomainConfig: %v", err)
+	}
+	dc, err := s.GetDomainConfig()
+	if err != nil {
+		t.Fatalf("GetDomainConfig: %v", err)
+	}
+	if dc.Domain != "example.com" || dc.DNSProvider != "cloudflare" || dc.DNSToken != "cf-token" {
+		t.Fatalf("round-trip = %+v", dc)
+	}
+	if dc.Status != "issuing" || dc.Error != "" || !dc.CertNotAfter.IsZero() {
+		t.Fatalf("fresh config = %+v, want status=issuing, no error, zero not-after", dc)
+	}
+
+	notAfter := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
+	if err := s.UpdateDomainStatus("active", "", notAfter); err != nil {
+		t.Fatalf("UpdateDomainStatus: %v", err)
+	}
+	dc, _ = s.GetDomainConfig()
+	if dc.Status != "active" || !dc.CertNotAfter.Equal(notAfter) {
+		t.Fatalf("after update = %+v", dc)
+	}
+
+	if err := s.UpdateDomainStatus("failed", "acme: boom", time.Time{}); err != nil {
+		t.Fatalf("UpdateDomainStatus failed: %v", err)
+	}
+	dc, _ = s.GetDomainConfig()
+	if dc.Status != "failed" || dc.Error != "acme: boom" {
+		t.Fatalf("failed update = %+v", dc)
+	}
+
+	// Re-Set replaces the row and resets status/error.
+	if err := s.SetDomainConfig("other.dev", "cloudflare", "tok2"); err != nil {
+		t.Fatalf("re-SetDomainConfig: %v", err)
+	}
+	dc, _ = s.GetDomainConfig()
+	if dc.Domain != "other.dev" || dc.Status != "issuing" || dc.Error != "" {
+		t.Fatalf("after re-set = %+v", dc)
+	}
+
+	if err := s.DeleteDomainConfig(); err != nil {
+		t.Fatalf("DeleteDomainConfig: %v", err)
+	}
+	if _, err := s.GetDomainConfig(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateDomainStatusWithoutRow(t *testing.T) {
+	s := openTemp(t)
+	if err := s.UpdateDomainStatus("active", "", time.Time{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
