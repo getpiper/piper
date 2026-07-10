@@ -254,6 +254,44 @@ func TestSetDomainControlOp(t *testing.T) {
 	}
 }
 
+// A hostile set-domain over the tunnel must be rejected with the error
+// surfaced in ControlResponse.Error — claiming another agent's base domain
+// (or the apex) would splice that victim's traffic to the attacker's box.
+func TestSetDomainControlOpRejectsHijack(t *testing.T) {
+	sess, _, base, st := startTestRelay(t, nil, nil)
+	if _, err := st.Enroll("victim", "victim.example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range []string{
+		"victim.example.com",      // another agent's base domain
+		"blog.victim.example.com", // subdomain of it
+		"public.getpiper.co",      // the relay apex
+		"api.public.getpiper.co",  // the relay's own control host
+		base,                      // the requester's own base domain
+		"Bad_Domain",              // malformed
+	} {
+		cs, err := sess.OpenKind(tunnel.KindControl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "set-domain", Domain: d}); err != nil {
+			t.Fatal(err)
+		}
+		var resp tunnel.ControlResponse
+		if err := tunnel.ReadMsg(cs, &resp); err != nil {
+			t.Fatal(err)
+		}
+		cs.Close()
+		if resp.Error == "" {
+			t.Errorf("set-domain %q accepted, want rejection", d)
+		}
+	}
+	if got, _ := st.CustomDomain(base); got != "" {
+		t.Fatalf("custom domain = %q after rejected claims, want none", got)
+	}
+}
+
 func TestControlPlaneSNIDispatch(t *testing.T) {
 	cert, key := writeWildcard(t, "public.getpiper.co")
 	tlsCfg, err := LoadWildcardConfig(cert, key)

@@ -142,3 +142,91 @@ func TestSetCustomDomain(t *testing.T) {
 		t.Fatalf("unknown agent: err = %v, want ErrBadToken", err)
 	}
 }
+
+// A modified agent must not be able to claim relay-managed names as its
+// "custom domain": another agent's base domain (SNI hijack), the apex, a
+// DNS-label parent/child of either, or its own base domain.
+func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.Configure("public.getpiper.co", 3, 10)
+	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Enroll("bob", "bob.example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range []string{
+		"alice.example.com",      // another agent's base domain
+		"shop.alice.example.com", // subdomain of it
+		"example.com",            // DNS-label parent of enrolled bases
+		"bob.example.com",        // the requester's own base domain
+		"public.getpiper.co",     // the relay apex
+		"x.public.getpiper.co",   // subdomain of the apex (incl. api.<apex>)
+		"getpiper.co",            // parent of the apex
+	} {
+		if _, err := st.SetCustomDomain("bob.example.com", d); !errors.Is(err, ErrDomainReserved) {
+			t.Errorf("SetCustomDomain(%q) err = %v, want ErrDomainReserved", d, err)
+		}
+	}
+	for _, d := range []string{
+		"Not.A.Domain", // uppercase
+		"no-dots",
+		"-bad.example.dev",
+		"shop..dev",
+	} {
+		if _, err := st.SetCustomDomain("bob.example.com", d); !errors.Is(err, ErrInvalidDomain) {
+			t.Errorf("SetCustomDomain(%q) err = %v, want ErrInvalidDomain", d, err)
+		}
+	}
+	// Nothing above may have stuck.
+	if got, _ := st.CustomDomain("bob.example.com"); got != "" {
+		t.Fatalf("custom domain = %q, want none", got)
+	}
+	// A legitimate unrelated domain still works.
+	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); err != nil {
+		t.Fatalf("legit domain rejected: %v", err)
+	}
+	// "Suffix" means DNS labels, not raw strings: xalice.example.comx shares a
+	// raw suffix with alice.example.com but is a different DNS name.
+	if _, err := st.SetCustomDomain("bob.example.com", "xalice.example.comx"); err != nil {
+		t.Fatalf("raw-suffix lookalike rejected: %v", err)
+	}
+}
+
+// The partial unique index closes the SELECT-then-UPDATE FCFS race at the
+// schema level: even a write that skips the pre-check cannot duplicate a
+// custom domain. Cleared rows (” / NULL) stay unconstrained.
+func TestCustomDomainUniqueIndex(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Enroll("bob", "bob.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatal(err)
+	}
+	// Bypass the pre-check: the index itself must refuse the duplicate.
+	if _, err := st.db.Exec(
+		`UPDATE agents SET custom_domain='shop.dev' WHERE base_domain='bob.example.com'`); err == nil {
+		t.Fatal("duplicate custom_domain accepted; unique index missing")
+	}
+	// Two cleared agents may coexist.
+	if _, err := st.SetCustomDomain("alice.example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(
+		`UPDATE agents SET custom_domain='' WHERE base_domain='bob.example.com'`); err != nil {
+		t.Fatalf("empty custom_domain must not collide: %v", err)
+	}
+}
