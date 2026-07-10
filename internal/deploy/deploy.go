@@ -16,6 +16,7 @@ const deploymentCleanupTimeout = 5 * time.Second
 
 type RouteSetter interface {
 	UpsertRoute(host string, upstreamHostPort int) error
+	UpsertRouteTLS(host string, upstreamHostPort int) error
 	RemoveRoute(host string) error
 }
 
@@ -144,6 +145,13 @@ func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.De
 	}
 	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
 		return store.Deployment{}, fmt.Errorf("route: %w", err)
+	}
+	// An active BYO custom domain (#102) serves the app at <app>.<custom> over
+	// the box-terminated :443 alongside the primary host.
+	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {
+		if err := d.routes.UpsertRouteTLS(appName+"."+dc.Domain, run.HostPort); err != nil {
+			return store.Deployment{}, fmt.Errorf("route custom domain: %w", err)
+		}
 	}
 	if previous.ContainerID != "" && previous.ContainerID != run.ContainerID {
 		_ = d.runtime.Stop(ctx, previous.ContainerID)

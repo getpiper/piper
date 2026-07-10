@@ -4,17 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getpiper/piper/internal/runtime"
 	"github.com/getpiper/piper/internal/store"
 )
 
 type fakeCaddy struct {
-	upserts map[string]int
-	removes []string
+	upserts   map[string]int
+	removes   []string
+	tlsRoutes []string
 }
 
 func newFakeCaddy() *fakeCaddy {
@@ -23,6 +26,11 @@ func newFakeCaddy() *fakeCaddy {
 
 func (f *fakeCaddy) UpsertRoute(host string, port int) error {
 	f.upserts[host] = port
+	return nil
+}
+
+func (f *fakeCaddy) UpsertRouteTLS(host string, port int) error {
+	f.tlsRoutes = append(f.tlsRoutes, fmt.Sprintf("%s->%d", host, port))
 	return nil
 }
 
@@ -425,6 +433,53 @@ func TestDeploySuccessPersistsBuildLog(t *testing.T) {
 	logs := deploymentLog(t, s, "blog")
 	if logs != "build ok\n" {
 		t.Errorf("logs = %q, want build log only (no container output on success)", logs)
+	}
+}
+
+func TestDeployRoutesCustomDomainWhenActive(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+
+	if err := s.SetDomainConfig("shop.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDomainStatus("active", "", time.Now().Add(60*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	want := "blog.shop.dev->40001"
+	found := false
+	for _, r := range routes.tlsRoutes {
+		found = found || r == want
+	}
+	if !found {
+		t.Fatalf("tlsRoutes = %v, want %s", routes.tlsRoutes, want)
+	}
+}
+
+func TestDeploySkipsCustomDomainWhenAbsent(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if len(routes.tlsRoutes) != 0 {
+		t.Fatalf("tlsRoutes = %v, want none without an active custom domain", routes.tlsRoutes)
 	}
 }
 
