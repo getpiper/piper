@@ -293,3 +293,43 @@ func TestTunnelClientOnConnectFires(t *testing.T) {
 		t.Fatal("OnConnect did not fire after session establishment")
 	}
 }
+
+func TestTunnelClientSetCustomDomain(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+		return nil, errors.New("no local dials expected")
+	})
+	relaySess := <-sessCh
+
+	got := make(chan tunnel.ControlRequest, 1)
+	go func() {
+		kind, stream, err := relaySess.AcceptKind()
+		if err != nil || kind != tunnel.KindControl {
+			return
+		}
+		var req tunnel.ControlRequest
+		_ = tunnel.ReadMsg(stream, &req)
+		got <- req
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+		stream.Close()
+	}()
+
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err = c.SetCustomDomain("shop.example.com"); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("SetCustomDomain: %v", err)
+	}
+	req := <-got
+	if req.Op != "set-domain" || req.Domain != "shop.example.com" {
+		t.Fatalf("relay saw %+v, want op=set-domain domain=shop.example.com", req)
+	}
+}

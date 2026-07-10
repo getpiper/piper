@@ -98,6 +98,14 @@ func (c *TunnelClient) Provision(token string) error {
 	return err
 }
 
+// SetCustomDomain tells the relay to splice SNI for domain (and subdomains)
+// down this tunnel as passthrough. Empty domain clears the mapping. It rides
+// the authenticated session, so it can only ever set this agent's domain.
+func (c *TunnelClient) SetCustomDomain(domain string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "set-domain", Domain: domain})
+	return err
+}
+
 func (c *TunnelClient) control(req tunnel.ControlRequest) (string, error) {
 	sess := c.current()
 	if sess == nil {
