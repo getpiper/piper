@@ -111,6 +111,29 @@ func (s *Store) UpdateAppRepo(name, repo, branch string) error {
 	return nil
 }
 
+// DeleteApp removes the app and its entire deployment history in one
+// transaction — the single exception to deployment rows never being deleted
+// (they exist as history only while their app does). ErrNotFound when the
+// app doesn't exist.
+func (s *Store) DeleteApp(name string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM deployments WHERE app=?`, name); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`DELETE FROM apps WHERE name=?`, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 type rowScanner interface{ Scan(dest ...any) error }
 
 func (s *Store) scanApp(row rowScanner) (App, error) {
@@ -146,7 +169,7 @@ func (s *Store) ListApps() ([]App, error) {
 
 // logRetentionPerApp bounds stored log blobs: only the newest N deployments
 // per app keep their logs. Rows themselves are never deleted — they are the
-// deployment history.
+// deployment history — except by DeleteApp, which removes the app wholesale.
 const logRetentionPerApp = 20
 
 func (s *Store) CreateDeployment(app, imageID, containerID string, hostPort int, status, logs string) (Deployment, error) {

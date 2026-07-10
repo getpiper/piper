@@ -523,3 +523,44 @@ func TestUpdateDomainStatusWrongDomain(t *testing.T) {
 		t.Fatalf("stale update mutated row: %+v", dc)
 	}
 }
+
+func TestDeleteAppRemovesAppAndHistory(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "running", "log"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("api", "img2", "c2", 40002, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteApp("blog"); err != nil {
+		t.Fatalf("DeleteApp: %v", err)
+	}
+	if _, err := s.GetApp("blog"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetApp after delete err = %v, want ErrNotFound", err)
+	}
+	deps, err := s.ListDeployments("blog")
+	if err != nil || len(deps) != 0 {
+		t.Errorf("deployments after delete = %v (err %v), want none", deps, err)
+	}
+	// Other apps and their history are untouched.
+	if _, err := s.GetApp("api"); err != nil {
+		t.Errorf("GetApp(api) after delete: %v", err)
+	}
+	if deps, _ := s.ListDeployments("api"); len(deps) != 1 {
+		t.Errorf("api deployments = %d, want 1", len(deps))
+	}
+}
+
+func TestDeleteAppUnknownIsNotFound(t *testing.T) {
+	s := openTemp(t)
+	if err := s.DeleteApp("ghost"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteApp(ghost) err = %v, want ErrNotFound", err)
+	}
+}
