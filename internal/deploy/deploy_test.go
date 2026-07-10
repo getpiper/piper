@@ -380,13 +380,34 @@ func TestDeployHealthFailureAppendsContainerOutput(t *testing.T) {
 		t.Fatal("expected health error")
 	}
 	logs := deploymentLog(t, s, "blog")
-	for _, want := range []string{"build ok", "--- container output ---", "panic: kaboom"} {
+	for _, want := range []string{"build ok", "--- container output ---", "panic: kaboom", "unhealthy"} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("logs missing %q:\n%s", want, logs)
 		}
 	}
 	if strings.Index(logs, "build ok") > strings.Index(logs, "container output") {
 		t.Error("build log must precede container output")
+	}
+	if strings.Index(logs, "panic: kaboom") > strings.Index(logs, "unhealthy") {
+		t.Error("error text must follow container output")
+	}
+}
+
+func TestDeployBuildFailureFromStageRecordsErrorInLog(t *testing.T) {
+	s, _ := newStore(t)
+	buildErr := errors.New(`The command '/bin/sh -c false' returned a non-zero code: 7`)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{Log: ""},
+		BuildErr:       buildErr,
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("expected build error")
+	}
+	logs := deploymentLog(t, s, "blog")
+	if !strings.Contains(logs, buildErr.Error()) {
+		t.Errorf("failed deployment logs = %q, want build error text", logs)
 	}
 }
 
@@ -424,7 +445,10 @@ func TestDeployCombinedLogIsTailCapped(t *testing.T) {
 	if !strings.HasPrefix(logs, "[log truncated]\n") {
 		t.Error("combined log over cap must carry the truncation marker")
 	}
-	if !strings.HasSuffix(logs, "THE END") {
+	if !strings.Contains(logs, "THE END") {
 		t.Error("tail (container output) must be kept")
+	}
+	if !strings.HasSuffix(logs, "unhealthy\n") {
+		t.Error("error text must be the tail (recorded after container output)")
 	}
 }

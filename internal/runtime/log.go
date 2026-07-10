@@ -14,7 +14,8 @@ type TailBuffer struct {
 func (t *TailBuffer) Write(p []byte) (int, error) {
 	t.buf = append(t.buf, p...)
 	if len(t.buf) > LogCap {
-		t.buf = append([]byte(nil), t.buf[len(t.buf)-LogCap:]...)
+		copy(t.buf, t.buf[len(t.buf)-LogCap:])
+		t.buf = t.buf[:LogCap]
 		t.truncated = true
 	}
 	return len(p), nil

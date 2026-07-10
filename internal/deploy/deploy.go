@@ -73,18 +73,21 @@ func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir st
 	build, err := d.runtime.Build(ctx, srcDir, tag)
 	_, _ = io.WriteString(&log, build.Log)
 	if err != nil {
+		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
 		recordFailed(build.ImageID, "", 0, log.String())
 		return build, runtime.RunResult{}, log.String(), fmt.Errorf("build: %w", err)
 	}
 	run, err := d.runtime.Run(ctx, tag, app.Port, map[string]string{"PORT": fmt.Sprint(app.Port)})
 	if err != nil {
 		d.appendContainerOutput(ctx, &log, run.ContainerID)
+		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
 		d.stopPartial(ctx, run.ContainerID)
 		recordFailed(build.ImageID, run.ContainerID, run.HostPort, log.String())
 		return build, run, log.String(), fmt.Errorf("run: %w", err)
 	}
 	if err := d.runtime.WaitHealthy(ctx, run.HostPort); err != nil {
 		d.appendContainerOutput(ctx, &log, run.ContainerID)
+		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
 		d.stopPartial(ctx, run.ContainerID)
 		recordFailed(build.ImageID, run.ContainerID, run.HostPort, log.String())
 		return build, run, log.String(), fmt.Errorf("health: %w", err)
