@@ -20,3 +20,16 @@ func NeedsRenewal(certPEM []byte, within time.Duration, now time.Time) (bool, er
 	}
 	return now.Add(within).After(crt.NotAfter), nil
 }
+
+// NotAfter returns the leaf certificate's expiry.
+func NotAfter(certPEM []byte) (time.Time, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return time.Time{}, fmt.Errorf("no PEM block in cert")
+	}
+	crt, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse cert: %w", err)
+	}
+	return crt.NotAfter, nil
+}
