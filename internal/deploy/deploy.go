@@ -257,3 +257,41 @@ func (d *Deployer) Stop(ctx context.Context, appName string) error {
 	}
 	return d.store.UpdateDeploymentStatus(dep.ID, "stopped")
 }
+
+// Delete tears the app down completely: stops every running deployment
+// (production and previews), drops all its routes, releases the relay
+// hostname, and deletes the app plus its whole deployment history. Relay
+// steps are best-effort; state is deleted last so a failed teardown leaves
+// delete retryable.
+func (d *Deployer) Delete(ctx context.Context, appName string) error {
+	if _, err := d.store.GetApp(appName); err != nil {
+		return err
+	}
+	deps, err := d.store.ListDeployments(appName)
+	if err != nil {
+		return err
+	}
+	for _, dep := range deps {
+		if dep.Status != "running" {
+			continue
+		}
+		_ = d.runtime.Stop(ctx, dep.ContainerID)
+		if dep.PR > 0 {
+			if err := d.routes.RemoveRoute(d.hostForPreview(appName, dep.PR)); err != nil {
+				return fmt.Errorf("unroute: %w", err)
+			}
+		}
+	}
+	if host, ok := d.primaryHost(appName); ok {
+		if err := d.routes.RemoveRoute(host); err != nil {
+			return fmt.Errorf("unroute: %w", err)
+		}
+		if d.registrar != nil {
+			_ = d.registrar.Deregister(host)
+		}
+	}
+	if err := d.removeCustomDomainRoute(appName); err != nil {
+		return err
+	}
+	return d.store.DeleteApp(appName)
+}
