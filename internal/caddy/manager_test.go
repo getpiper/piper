@@ -1,11 +1,20 @@
 package caddy
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // freeAddr returns a currently-free 127.0.0.1:port.
@@ -126,4 +135,71 @@ func TestStartManagerRunsCaddyWithoutExternalBinary(t *testing.T) {
 	if !strings.Contains(string(body), httpListen) {
 		t.Fatalf("running config missing our http listener %q: %s", httpListen, body)
 	}
+}
+
+// EnsureHTTPS at runtime must leave :80-style plaintext serving intact while
+// the new piper-tls server terminates TLS with a load_pem cert (coexistence).
+func TestEnsureHTTPSServesTLSAlongsidePlaintext(t *testing.T) {
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	admin := "http://" + freeAddr(t)
+	httpListen := freeAddr(t)
+	httpsListen := freeAddr(t)
+
+	m, err := StartManager(admin, httpListen)
+	if err != nil {
+		t.Fatalf("StartManager: %v", err)
+	}
+	defer m.Stop()
+
+	c := NewClient(admin)
+	if err := c.EnsureHTTPS(httpsListen); err != nil {
+		t.Fatalf("EnsureHTTPS: %v", err)
+	}
+	// Idempotent second call.
+	if err := c.EnsureHTTPS(httpsListen); err != nil {
+		t.Fatalf("EnsureHTTPS twice: %v", err)
+	}
+
+	certPEM, keyPEM := selfSignedPEM(t, "shop.example.com")
+	if err := c.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+		t.Fatalf("ReplaceCert: %v", err)
+	}
+
+	// Plaintext HTTP on the original listener still answers.
+	resp, err := http.Get("http://" + httpListen + "/")
+	if err != nil {
+		t.Fatalf("plaintext GET after EnsureHTTPS: %v", err)
+	}
+	resp.Body.Close()
+
+	// TLS handshake on the new listener serves the loaded cert.
+	conn, err := tls.Dial("tcp", httpsListen, &tls.Config{
+		ServerName: "blog.shop.example.com", InsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("TLS dial piper-tls: %v", err)
+	}
+	conn.Close()
+}
+
+func selfSignedPEM(t *testing.T, base string) (certPEM, keyPEM []byte) {
+	t.Helper()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "*." + base},
+		DNSNames:     []string{"*." + base, base},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	kb, _ := x509.MarshalECPrivateKey(key)
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})
+	return certPEM, keyPEM
 }

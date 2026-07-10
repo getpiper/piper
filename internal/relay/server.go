@@ -106,6 +106,9 @@ func acceptTunnels(ln net.Listener, st *Store, router *Router) {
 				return
 			}
 			router.Register(sess)
+			if cd, err := st.CustomDomain(sess.BaseDomain); err == nil && cd != "" {
+				router.RegisterCustom(cd, sess)
+			}
 			log.Printf("agent registered: %s", sess.BaseDomain)
 			go serveControl(sess, st, router)
 			<-sess.CloseChan()
@@ -164,6 +167,22 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 		if err := st.SetControlToken(sess.BaseDomain, req.Token); err != nil {
 			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
 			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "set-domain":
+		// BYO custom domain (#102). Rides the authenticated session, so it can
+		// only ever set the session agent's own domain. The box already proved
+		// domain control by obtaining its DNS-01 cert before asking.
+		prev, err := st.SetCustomDomain(sess.BaseDomain, req.Domain)
+		if err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		if prev != "" && prev != req.Domain {
+			router.UnregisterCustom(prev)
+		}
+		if req.Domain != "" {
+			router.RegisterCustom(req.Domain, sess)
 		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	default:

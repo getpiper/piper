@@ -124,6 +124,12 @@ func (c *recordingCaddy) UpsertRoute(host string, port int) error {
 	c.mu.Unlock()
 	return nil
 }
+func (c *recordingCaddy) UpsertRouteTLS(host string, port int) error {
+	c.mu.Lock()
+	c.routes[host] = port
+	c.mu.Unlock()
+	return nil
+}
 func (c *recordingCaddy) RemoveRoute(host string) error {
 	c.mu.Lock()
 	delete(c.routes, host)

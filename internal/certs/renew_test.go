@@ -47,3 +47,26 @@ func TestNeedsRenewal(t *testing.T) {
 		t.Fatal("garbage PEM: want error")
 	}
 }
+
+func TestNotAfter(t *testing.T) {
+	want := time.Now().Add(48 * time.Hour).Truncate(time.Second).UTC()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     want,
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+
+	got, err := NotAfter(certPEM)
+	if err != nil {
+		t.Fatalf("NotAfter: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Fatalf("NotAfter = %v, want %v", got, want)
+	}
+	if _, err := NotAfter([]byte("not pem")); err == nil {
+		t.Fatal("garbage input: want error")
+	}
+}

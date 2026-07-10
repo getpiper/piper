@@ -30,3 +30,13 @@ CREATE TABLE IF NOT EXISTS tokens (
     created_at TEXT NOT NULL,
     revoked_at TEXT
 );
+CREATE TABLE IF NOT EXISTS domain_config (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    domain         TEXT NOT NULL,
+    dns_provider   TEXT NOT NULL,
+    dns_token      TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    error          TEXT NOT NULL DEFAULT '',
+    cert_not_after TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL
+);

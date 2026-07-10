@@ -50,11 +50,28 @@ func (r *Router) LookupHost(hostname string) (*tunnel.Session, bool) {
 	return s, ok
 }
 
+// RegisterCustom maps a BYO custom domain to sess. It shares byBase so
+// Lookup's exact + subdomain matching applies unchanged.
+func (r *Router) RegisterCustom(domain string, sess *tunnel.Session) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byBase[domain] = sess
+}
+
+// UnregisterCustom removes a custom-domain mapping.
+func (r *Router) UnregisterCustom(domain string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.byBase, domain)
+}
+
 func (r *Router) Unregister(sess *tunnel.Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.byBase[sess.BaseDomain] == sess {
-		delete(r.byBase, sess.BaseDomain)
+	for base, s := range r.byBase {
+		if s == sess {
+			delete(r.byBase, base)
+		}
 	}
 	for host, s := range r.byHost {
 		if s == sess {

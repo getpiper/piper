@@ -51,3 +51,32 @@ func TestRouterByHost(t *testing.T) {
 		t.Fatal("s2 host must survive s1 teardown")
 	}
 }
+
+func TestRouterCustomDomain(t *testing.T) {
+	r := NewRouter()
+	sess := &tunnel.Session{BaseDomain: "alice.example.com"}
+	r.Register(sess)
+	r.RegisterCustom("shop.dev", sess)
+
+	if s, ok := r.Lookup("blog.shop.dev"); !ok || s != sess {
+		t.Fatal("subdomain of custom domain should route to the session")
+	}
+	if s, ok := r.Lookup("shop.dev"); !ok || s != sess {
+		t.Fatal("custom apex should route to the session")
+	}
+
+	r.UnregisterCustom("shop.dev")
+	if _, ok := r.Lookup("blog.shop.dev"); ok {
+		t.Fatal("custom domain should be gone after UnregisterCustom")
+	}
+
+	// Unregister(sess) sweeps custom entries too.
+	r.RegisterCustom("shop.dev", sess)
+	r.Unregister(sess)
+	if _, ok := r.Lookup("blog.shop.dev"); ok {
+		t.Fatal("custom domain should be swept by Unregister")
+	}
+	if _, ok := r.Lookup("x.alice.example.com"); ok {
+		t.Fatal("base domain should be swept by Unregister")
+	}
+}
