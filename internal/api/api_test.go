@@ -330,3 +330,75 @@ func TestGetAppIncludesDeployStatus(t *testing.T) {
 		t.Errorf("app = %+v, want blog failed", app)
 	}
 }
+
+func TestListDeploymentsEndpoint(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed", "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img2", "c2", 40002, "running", "ok"); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/apps/blog/deployments", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var deps []store.Deployment
+	if err := json.NewDecoder(rr.Body).Decode(&deps); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(deps) != 2 || deps[0].ImageID != "img2" || deps[1].Status != "failed" {
+		t.Errorf("deps = %+v, want [img2 running, img1 failed]", deps)
+	}
+
+	missing := httptest.NewRecorder()
+	h.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/apps/nope/deployments", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Errorf("unknown app status = %d, want 404", missing.Code)
+	}
+}
+
+func TestDeploymentLogsEndpoint(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	dep, err := s.CreateDeployment("blog", "img1", "c1", 40001, "failed", "Step 1/2\nboom\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/apps/blog/deployments/"+dep.ID+"/logs", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+	if !strings.Contains(rr.Body.String(), "boom") {
+		t.Errorf("body = %q, want build output", rr.Body.String())
+	}
+
+	// The same deployment id under a different app must 404.
+	crossApp := httptest.NewRecorder()
+	h.ServeHTTP(crossApp, httptest.NewRequest(http.MethodGet, "/v1/apps/api/deployments/"+dep.ID+"/logs", nil))
+	if crossApp.Code != http.StatusNotFound {
+		t.Errorf("cross-app status = %d, want 404", crossApp.Code)
+	}
+	unknown := httptest.NewRecorder()
+	h.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, "/v1/apps/blog/deployments/no-such-id/logs", nil))
+	if unknown.Code != http.StatusNotFound {
+		t.Errorf("unknown id status = %d, want 404", unknown.Code)
+	}
+}

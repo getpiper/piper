@@ -44,3 +44,18 @@ func TestRequireTokenRejectsAndAccepts(t *testing.T) {
 		})
 	}
 }
+
+func TestDeploymentEndpointsRequireToken(t *testing.T) {
+	s := newTestStore(t)
+	h := RequireToken(s, New(s, &fakeDeployer{}, "piper.localhost", "", nil))
+	for _, path := range []string{
+		"/v1/apps/blog/deployments",
+		"/v1/apps/blog/deployments/dep1/logs",
+	} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("%s without token = %d, want 401", path, rr.Code)
+		}
+	}
+}
