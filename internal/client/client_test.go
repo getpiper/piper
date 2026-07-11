@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -283,5 +284,20 @@ func TestDeleteApp(t *testing.T) {
 	defer srv.Close()
 	if err := New(srv.URL, "").DeleteApp("blog"); err != nil {
 		t.Fatalf("DeleteApp: %v", err)
+	}
+}
+
+func TestResponseErrorsCarryHTTPStatusCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, "bad").ListApps()
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("error = %v (%T), want *StatusError", err, err)
+	}
+	if se.Code != http.StatusUnauthorized {
+		t.Fatalf("Code = %d, want %d", se.Code, http.StatusUnauthorized)
 	}
 }
