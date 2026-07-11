@@ -26,6 +26,7 @@ Goal: `piper deploy myapp --path .` → build Dockerfile → run container → h
 - ✅ Deployment history + build/deploy logs on the control API — [#101](https://github.com/getpiper/piper/issues/101)
 - ✅ App lifecycle: stop + delete on the control API and CLI — [#103](https://github.com/getpiper/piper/issues/103)
 - ✅ `client` + CLI — `piper create` / `deploy` / `list` — [#24](https://github.com/getpiper/piper/pull/24)
+- ✅ Async deploy progress — POST returns a `building` row (202), build runs in the background, `piper deploy` streams live build output by polling — [#140](https://github.com/getpiper/piper/issues/140)
 - ✅ `piperd` wiring (config → store → docker → caddy → deploy → api) — [#7](https://github.com/getpiper/piper/issues/7)
 - ✅ e2e — real Docker + Caddy, deploy sample app, curl it — [#8](https://github.com/getpiper/piper/issues/8)
 
