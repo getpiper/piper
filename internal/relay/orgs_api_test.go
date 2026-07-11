@@ -316,3 +316,32 @@ func TestEnrollIntoOrg(t *testing.T) {
 		t.Fatalf("personal base domain = %q, want the alice slug", en.BaseDomain)
 	}
 }
+
+func TestOrgDeleteEndpoint(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	orgWithMember(t, st, aliceCred, bobCred)
+
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme", bobCred, ""); rr.Code != http.StatusForbidden {
+		t.Fatalf("member delete: %d, want 403", rr.Code)
+	}
+	alice, _ := st.AuthenticateAccount(aliceCred)
+	org, _, err := st.OrgRole("acme", alice.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnrollForAccount(org); err != nil {
+		t.Fatal(err)
+	}
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme", aliceCred, ""); rr.Code != http.StatusConflict {
+		t.Fatalf("delete with agents: %d, want 409", rr.Code)
+	}
+	if _, err := st.db.Exec(`DELETE FROM agents WHERE account_id=?`, org); err != nil {
+		t.Fatal(err)
+	}
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme", aliceCred, ""); rr.Code != http.StatusOK {
+		t.Fatalf("delete: %d", rr.Code)
+	}
+	if rr := apiReq(t, api, "GET", "/v1/orgs/acme/members", aliceCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("org survived: %d, want 404", rr.Code)
+	}
+}

@@ -340,3 +340,36 @@ func TestAgentsVisibleToMergesPersonalAndOrg(t *testing.T) {
 		t.Fatalf("empty AgentsVisibleTo = %+v (%v), want none", got, err)
 	}
 }
+
+func TestDeleteOrgRefusedWhileAgentsExist(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	st.CreateInvite(org.ID, "someone", alice.ID)
+
+	if _, err := st.EnrollForAccount(org.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteOrg(org.ID); !errors.Is(err, ErrOrgHasAgents) {
+		t.Fatalf("delete with agents err = %v, want ErrOrgHasAgents", err)
+	}
+
+	// Clear the agent, then deletion sweeps members, invites, and the slug.
+	if _, err := st.db.Exec(`DELETE FROM agents WHERE account_id=?`, org.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteOrg(org.ID); err != nil {
+		t.Fatalf("DeleteOrg: %v", err)
+	}
+	if orgs, _ := st.OrgsForAccount(alice.ID); len(orgs) != 0 {
+		t.Fatalf("membership survived delete: %+v", orgs)
+	}
+	if _, _, err := st.OrgRole("acme", alice.ID); !errors.Is(err, ErrNoOrg) {
+		t.Fatalf("org survived delete: %v", err)
+	}
+	// The slug is free again.
+	if _, err := st.CreateOrg(alice.ID, "acme"); err != nil {
+		t.Fatalf("slug not freed: %v", err)
+	}
+}

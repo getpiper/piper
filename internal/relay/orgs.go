@@ -417,3 +417,35 @@ func (s *Store) AgentsVisibleTo(accountID string) ([]OwnedAgent, error) {
 	}
 	return agents, rows.Err()
 }
+
+// ErrOrgHasAgents is returned when deleting an org that still owns agents —
+// boxes must be re-homed or retired first, never orphaned.
+var ErrOrgHasAgents = errors.New("org still owns agents")
+
+// DeleteOrg removes an empty org: its memberships, pending invites, hostname
+// rows, and the account row itself. Refused while the org owns agents.
+func (s *Store) DeleteOrg(orgID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var agents int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM agents WHERE account_id = ?`, orgID).Scan(&agents); err != nil {
+		return err
+	}
+	if agents > 0 {
+		return ErrOrgHasAgents
+	}
+	for _, stmt := range []string{
+		`DELETE FROM org_invites WHERE org_id = ?`,
+		`DELETE FROM org_members WHERE org_id = ?`,
+		`DELETE FROM hostnames WHERE account_id = ?`,
+		`DELETE FROM accounts WHERE id = ? AND type = 'org'`,
+	} {
+		if _, err := tx.Exec(stmt, orgID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

@@ -23,6 +23,7 @@ func (a *api) registerOrgRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/invites", a.myInvites)
 	mux.HandleFunc("POST /v1/invites/{slug}/accept", a.inviteAccept)
 	mux.HandleFunc("POST /v1/invites/{slug}/decline", a.inviteDecline)
+	mux.HandleFunc("DELETE /v1/orgs/{slug}", a.orgDelete)
 }
 
 func (a *api) orgCreate(w http.ResponseWriter, r *http.Request) {
@@ -283,4 +284,25 @@ func (a *api) consumeInvite(w http.ResponseWriter, r *http.Request, act func(acc
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{verb: slug})
+}
+
+func (a *api) orgDelete(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, ok := a.requireOwner(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	err := a.st.DeleteOrg(orgID)
+	if errors.Is(err, ErrOrgHasAgents) {
+		http.Error(w, "org still owns agents", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": r.PathValue("slug")})
 }
