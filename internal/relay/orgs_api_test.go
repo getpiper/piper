@@ -191,3 +191,86 @@ func TestOrgMemberRemovalAndSelfLeave(t *testing.T) {
 		t.Fatalf("after leave: %d, want 404", rr.Code)
 	}
 }
+
+func TestInviteEndpointsFullFlow(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	alice, _ := st.AuthenticateAccount(aliceCred)
+	if _, err := st.CreateOrg(alice.ID, "acme"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Owner-only invite creation; members/strangers can't see the surface.
+	if rr := apiReq(t, api, "POST", "/v1/orgs/acme/invites", bobCred, `{"github_username":"x"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("non-member invites: %d, want 404", rr.Code)
+	}
+	if rr := apiReq(t, api, "POST", "/v1/orgs/acme/invites", aliceCred, `{}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("empty username: %d, want 400", rr.Code)
+	}
+	if rr := apiReq(t, api, "POST", "/v1/orgs/acme/invites", aliceCred, `{"github_username":"Bob"}`); rr.Code != http.StatusOK {
+		t.Fatalf("invite: %d (body %s)", rr.Code, rr.Body.String())
+	}
+
+	// Owner sees it pending; the invitee sees it under /v1/invites.
+	rr := apiReq(t, api, "GET", "/v1/orgs/acme/invites", aliceCred, "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"bob"`) {
+		t.Fatalf("pending list: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = apiReq(t, api, "GET", "/v1/invites", bobCred, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("my invites: %d", rr.Code)
+	}
+	var mine struct {
+		Invites []struct {
+			Org string `json:"org"`
+		} `json:"invites"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&mine); err != nil {
+		t.Fatal(err)
+	}
+	if len(mine.Invites) != 1 || mine.Invites[0].Org != "acme" {
+		t.Fatalf("my invites = %+v, want [acme]", mine.Invites)
+	}
+
+	// Accept → member; invite consumed; re-accept 404.
+	if rr := apiReq(t, api, "POST", "/v1/invites/acme/accept", bobCred, ""); rr.Code != http.StatusOK {
+		t.Fatalf("accept: %d", rr.Code)
+	}
+	if rr := apiReq(t, api, "GET", "/v1/orgs/acme/members", bobCred, ""); rr.Code != http.StatusOK {
+		t.Fatalf("bob not a member after accept: %d", rr.Code)
+	}
+	if rr := apiReq(t, api, "POST", "/v1/invites/acme/accept", bobCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("re-accept: %d, want 404", rr.Code)
+	}
+	// Inviting an existing member → 409.
+	if rr := apiReq(t, api, "POST", "/v1/orgs/acme/invites", aliceCred, `{"github_username":"bob"}`); rr.Code != http.StatusConflict {
+		t.Fatalf("invite member: %d, want 409", rr.Code)
+	}
+}
+
+func TestInviteDeclineAndRevokeEndpoints(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	alice, _ := st.AuthenticateAccount(aliceCred)
+	if _, err := st.CreateOrg(alice.ID, "acme"); err != nil {
+		t.Fatal(err)
+	}
+
+	apiReq(t, api, "POST", "/v1/orgs/acme/invites", aliceCred, `{"github_username":"bob"}`)
+	if rr := apiReq(t, api, "POST", "/v1/invites/acme/decline", bobCred, ""); rr.Code != http.StatusOK {
+		t.Fatalf("decline: %d", rr.Code)
+	}
+	if rr := apiReq(t, api, "GET", "/v1/orgs/acme/members", bobCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("decline must not add membership: %d, want 404", rr.Code)
+	}
+
+	apiReq(t, api, "POST", "/v1/orgs/acme/invites", aliceCred, `{"github_username":"bob"}`)
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme/invites/bob", aliceCred, ""); rr.Code != http.StatusOK {
+		t.Fatalf("revoke: %d", rr.Code)
+	}
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme/invites/bob", aliceCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("re-revoke: %d, want 404", rr.Code)
+	}
+	// Accepting a nonexistent org's invite → 404 (no existence probe).
+	if rr := apiReq(t, api, "POST", "/v1/invites/ghost/accept", bobCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("accept unknown org: %d, want 404", rr.Code)
+	}
+}

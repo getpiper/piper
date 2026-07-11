@@ -17,6 +17,12 @@ func (a *api) registerOrgRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/orgs/{slug}/members", a.orgMembers)
 	mux.HandleFunc("PUT /v1/orgs/{slug}/members/{username}", a.orgSetRole)
 	mux.HandleFunc("DELETE /v1/orgs/{slug}/members/{username}", a.orgRemoveMember)
+	mux.HandleFunc("POST /v1/orgs/{slug}/invites", a.orgInvite)
+	mux.HandleFunc("GET /v1/orgs/{slug}/invites", a.orgInvitesList)
+	mux.HandleFunc("DELETE /v1/orgs/{slug}/invites/{login}", a.orgRevokeInvite)
+	mux.HandleFunc("GET /v1/invites", a.myInvites)
+	mux.HandleFunc("POST /v1/invites/{slug}/accept", a.inviteAccept)
+	mux.HandleFunc("POST /v1/invites/{slug}/decline", a.inviteDecline)
 }
 
 func (a *api) orgCreate(w http.ResponseWriter, r *http.Request) {
@@ -151,4 +157,130 @@ func (a *api) orgRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"removed": target})
+}
+
+// requireOwner is orgForMember plus the owner gate shared by the owner-only
+// management endpoints.
+func (a *api) requireOwner(w http.ResponseWriter, r *http.Request, accID string) (orgID string, ok bool) {
+	orgID, role, ok := a.orgForMember(w, r, accID)
+	if !ok {
+		return "", false
+	}
+	if role != "owner" {
+		http.Error(w, "owner role required", http.StatusForbidden)
+		return "", false
+	}
+	return orgID, true
+}
+
+func (a *api) orgInvite(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, ok := a.requireOwner(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	var req struct {
+		GithubUsername string `json:"github_username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.GithubUsername) == "" {
+		http.Error(w, "github_username required", http.StatusBadRequest)
+		return
+	}
+	err := a.st.CreateInvite(orgID, req.GithubUsername, acc.ID)
+	if errors.Is(err, ErrAlreadyMember) {
+		http.Error(w, "already a member", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, "invite failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"invited": strings.ToLower(req.GithubUsername)})
+}
+
+func (a *api) orgInvitesList(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, ok := a.requireOwner(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	logins, err := a.st.OrgInvites(orgID)
+	if err != nil {
+		http.Error(w, "list failed", http.StatusInternalServerError)
+		return
+	}
+	if logins == nil {
+		logins = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invites": logins})
+}
+
+func (a *api) orgRevokeInvite(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, ok := a.requireOwner(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	err := a.st.RevokeInvite(orgID, r.PathValue("login"))
+	if errors.Is(err, ErrNoInvite) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "revoke failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"revoked": strings.ToLower(r.PathValue("login"))})
+}
+
+func (a *api) myInvites(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	slugs, err := a.st.InvitesForAccount(acc.ID)
+	if err != nil {
+		http.Error(w, "list failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]string, 0, len(slugs))
+	for _, s := range slugs {
+		out = append(out, map[string]string{"org": s})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invites": out})
+}
+
+func (a *api) inviteAccept(w http.ResponseWriter, r *http.Request) {
+	a.consumeInvite(w, r, a.st.AcceptInvite, "accepted")
+}
+
+func (a *api) inviteDecline(w http.ResponseWriter, r *http.Request) {
+	a.consumeInvite(w, r, a.st.DeclineInvite, "declined")
+}
+
+func (a *api) consumeInvite(w http.ResponseWriter, r *http.Request, act func(accountID, orgSlug string) error, verb string) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	slug := r.PathValue("slug")
+	err := act(acc.ID, slug)
+	if errors.Is(err, ErrNoInvite) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "invite error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{verb: slug})
 }
