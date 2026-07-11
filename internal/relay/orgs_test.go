@@ -183,3 +183,99 @@ func TestRemoveMemberGuardsLastOwner(t *testing.T) {
 		t.Fatalf("bob still in orgs: %+v", orgs)
 	}
 }
+
+func TestInviteLifecycle(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "Bob-Builder")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+
+	// Invite by GitHub username, any case; duplicate is idempotent.
+	if err := st.CreateInvite(org.ID, "BOB-builder", alice.ID); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if err := st.CreateInvite(org.ID, "bob-builder", alice.ID); err != nil {
+		t.Fatalf("duplicate invite: %v, want nil (idempotent)", err)
+	}
+	pending, err := st.OrgInvites(org.ID)
+	if err != nil || len(pending) != 1 || pending[0] != "bob-builder" {
+		t.Fatalf("OrgInvites = %v (%v), want [bob-builder]", pending, err)
+	}
+	mine, err := st.InvitesForAccount(bob.ID)
+	if err != nil || len(mine) != 1 || mine[0] != "acme" {
+		t.Fatalf("InvitesForAccount = %v (%v), want [acme]", mine, err)
+	}
+
+	// Accept: membership as member, invite consumed.
+	if err := st.AcceptInvite(bob.ID, "acme"); err != nil {
+		t.Fatalf("AcceptInvite: %v", err)
+	}
+	orgs, _ := st.OrgsForAccount(bob.ID)
+	if len(orgs) != 1 || orgs[0].Role != "member" {
+		t.Fatalf("bob's orgs = %+v, want [acme member]", orgs)
+	}
+	if pending, _ := st.OrgInvites(org.ID); len(pending) != 0 {
+		t.Fatalf("invite not consumed: %v", pending)
+	}
+	if err := st.AcceptInvite(bob.ID, "acme"); !errors.Is(err, ErrNoInvite) {
+		t.Fatalf("re-accept err = %v, want ErrNoInvite", err)
+	}
+
+	// Inviting an existing member is refused.
+	if err := st.CreateInvite(org.ID, "Bob-Builder", alice.ID); !errors.Is(err, ErrAlreadyMember) {
+		t.Fatalf("invite member err = %v, want ErrAlreadyMember", err)
+	}
+}
+
+func TestInviteBeforeFirstLogin(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+
+	// Invited before ever logging into the relay.
+	if err := st.CreateInvite(org.ID, "Newbie", alice.ID); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	newbie, _ := st.UpsertAccount("gh-newbie", "Newbie")
+	mine, err := st.InvitesForAccount(newbie.ID)
+	if err != nil || len(mine) != 1 || mine[0] != "acme" {
+		t.Fatalf("InvitesForAccount = %v (%v), want [acme]", mine, err)
+	}
+	if err := st.AcceptInvite(newbie.ID, "acme"); err != nil {
+		t.Fatalf("AcceptInvite: %v", err)
+	}
+}
+
+func TestDeclineAndRevokeInvite(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "bob")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+
+	st.CreateInvite(org.ID, "bob", alice.ID)
+	if err := st.DeclineInvite(bob.ID, "acme"); err != nil {
+		t.Fatalf("DeclineInvite: %v", err)
+	}
+	if orgs, _ := st.OrgsForAccount(bob.ID); len(orgs) != 0 {
+		t.Fatalf("decline created membership: %+v", orgs)
+	}
+	if err := st.DeclineInvite(bob.ID, "acme"); !errors.Is(err, ErrNoInvite) {
+		t.Fatalf("re-decline err = %v, want ErrNoInvite", err)
+	}
+
+	st.CreateInvite(org.ID, "bob", alice.ID)
+	if err := st.RevokeInvite(org.ID, "BOB"); err != nil {
+		t.Fatalf("RevokeInvite: %v", err)
+	}
+	if err := st.RevokeInvite(org.ID, "bob"); !errors.Is(err, ErrNoInvite) {
+		t.Fatalf("re-revoke err = %v, want ErrNoInvite", err)
+	}
+	// A consumed/revoked invite no longer accepts.
+	if err := st.AcceptInvite(bob.ID, "acme"); !errors.Is(err, ErrNoInvite) {
+		t.Fatalf("accept revoked err = %v, want ErrNoInvite", err)
+	}
+	// Accepting a nonexistent org is the same error (no existence leak).
+	if err := st.AcceptInvite(bob.ID, "nope"); !errors.Is(err, ErrNoInvite) {
+		t.Fatalf("accept unknown org err = %v, want ErrNoInvite", err)
+	}
+}

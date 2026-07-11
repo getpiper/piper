@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -209,6 +210,165 @@ func (s *Store) RemoveMember(orgID, username string) error {
 	}
 	if _, err := tx.Exec(
 		`DELETE FROM org_members WHERE org_id=? AND account_id=?`, orgID, targetID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ErrAlreadyMember is returned when inviting someone who is already a member.
+var ErrAlreadyMember = errors.New("already a member")
+
+// ErrNoInvite is returned when no matching pending invite exists — including
+// for a nonexistent org, so accept/decline don't leak org existence.
+var ErrNoInvite = errors.New("no such invite")
+
+// CreateInvite records a pending invite for a GitHub username (stored
+// lowercased; matching is case-insensitive). Inviting an existing member is
+// ErrAlreadyMember; re-inviting the same login is idempotent. The username is
+// not validated against GitHub — a typo'd invite sits pending until revoked.
+func (s *Store) CreateInvite(orgID, githubLogin, inviterID string) error {
+	login := strings.ToLower(githubLogin)
+	var n int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM org_members m JOIN accounts a ON a.id = m.account_id
+		  WHERE m.org_id = ? AND lower(a.github_login) = ?`, orgID, login).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrAlreadyMember
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO org_invites(org_id, github_login, invited_by, created_at) VALUES(?,?,?,?)`,
+		orgID, login, inviterID, time.Now().UTC().Format(time.RFC3339Nano))
+	if isUniqueViolation(err) {
+		return nil // an identical pending invite already exists
+	}
+	return err
+}
+
+// OrgInvites lists an org's pending invite logins, oldest first.
+func (s *Store) OrgInvites(orgID string) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT github_login FROM org_invites WHERE org_id = ? ORDER BY rowid`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var logins []string
+	for rows.Next() {
+		var l string
+		if err := rows.Scan(&l); err != nil {
+			return nil, err
+		}
+		logins = append(logins, l)
+	}
+	return logins, rows.Err()
+}
+
+// RevokeInvite withdraws a pending invite. ErrNoInvite if none matches.
+func (s *Store) RevokeInvite(orgID, githubLogin string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM org_invites WHERE org_id = ? AND github_login = ?`,
+		orgID, strings.ToLower(githubLogin))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoInvite
+	}
+	return nil
+}
+
+// InvitesForAccount lists the org slugs holding a pending invite for the
+// account's current GitHub login. An account with no stored login (pre-org
+// migration, hasn't re-logged in) has no matchable invites.
+func (s *Store) InvitesForAccount(accountID string) ([]string, error) {
+	var login sql.NullString
+	if err := s.db.QueryRow(
+		`SELECT github_login FROM accounts WHERE id = ?`, accountID).Scan(&login); err != nil {
+		return nil, err
+	}
+	if !login.Valid || login.String == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT o.username FROM org_invites i JOIN accounts o ON o.id = i.org_id
+		  WHERE i.github_login = ? ORDER BY i.rowid`, strings.ToLower(login.String))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var slugs []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		slugs = append(slugs, slug)
+	}
+	return slugs, rows.Err()
+}
+
+// takeInvite consumes (deletes) the pending invite matching accountID's
+// current GitHub login in the org named orgSlug, returning the org id.
+// Any miss — unknown org, no stored login, no invite — is ErrNoInvite.
+func takeInvite(tx *sql.Tx, accountID, orgSlug string) (orgID string, err error) {
+	err = tx.QueryRow(
+		`SELECT id FROM accounts WHERE username = ? AND type = 'org'`, orgSlug).Scan(&orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNoInvite
+	}
+	if err != nil {
+		return "", err
+	}
+	var login sql.NullString
+	if err := tx.QueryRow(
+		`SELECT github_login FROM accounts WHERE id = ?`, accountID).Scan(&login); err != nil {
+		return "", err
+	}
+	if !login.Valid || login.String == "" {
+		return "", ErrNoInvite
+	}
+	res, err := tx.Exec(
+		`DELETE FROM org_invites WHERE org_id = ? AND github_login = ?`,
+		orgID, strings.ToLower(login.String))
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", ErrNoInvite
+	}
+	return orgID, nil
+}
+
+// AcceptInvite consumes accountID's pending invite to orgSlug and adds the
+// membership as "member" (owners promote afterwards).
+func (s *Store) AcceptInvite(accountID, orgSlug string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	orgID, err := takeInvite(tx, accountID, orgSlug)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO org_members(org_id, account_id, role, created_at) VALUES(?,?,'member',?)`,
+		orgID, accountID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeclineInvite consumes the invite without creating a membership.
+func (s *Store) DeclineInvite(accountID, orgSlug string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := takeInvite(tx, accountID, orgSlug); err != nil {
 		return err
 	}
 	return tx.Commit()
