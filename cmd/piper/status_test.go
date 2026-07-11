@@ -22,7 +22,7 @@ func TestRunStatusLocal(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode([]api.App{
 			{App: store.App{Name: "api", Port: 3000}},
-			{App: store.App{Name: "blog", Port: 8080}, Status: "running"},
+			{App: store.App{Name: "blog", Port: 8080, Hostname: "blog.piper.localhost"}, Status: "running"},
 		})
 	}))
 	defer srv.Close()
@@ -34,7 +34,7 @@ func TestRunStatusLocal(t *testing.T) {
 	if code := run([]string{"status"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	want := "api\tstatus=-\tport=3000\nblog\tstatus=running\tport=8080\n"
+	want := "api\tstatus=-\tport=3000\nblog\tstatus=running\tport=8080\thttp://blog.piper.localhost\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
 	}
@@ -52,7 +52,7 @@ func TestRunStatusRemoteConnected(t *testing.T) {
 			})
 		case "/agents/box.public.getpiper.co/v1/apps":
 			_ = json.NewEncoder(w).Encode([]api.App{
-				{App: store.App{Name: "blog", Port: 8080}, Status: "running"},
+				{App: store.App{Name: "blog", Port: 8080, Hostname: "ab12-alice.public.getpiper.co"}, Status: "running"},
 			})
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -67,7 +67,7 @@ func TestRunStatusRemoteConnected(t *testing.T) {
 	if code := run([]string{"--remote", "box.public.getpiper.co", "status"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	want := "box box.public.getpiper.co: connected\nblog\tstatus=running\tport=8080\n"
+	want := "box box.public.getpiper.co: connected\nblog\tstatus=running\tport=8080\thttps://ab12-alice.public.getpiper.co\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
 	}
