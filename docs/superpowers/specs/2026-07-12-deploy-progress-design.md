@@ -30,7 +30,11 @@ side benefit.
   by polling the existing `deployments` + `deployments/{id}/logs` endpoints.
 - **Deploy stays one code path.** `Deployer.Deploy` remains a synchronous
   orchestration used unchanged by the webhook; the API handler is what runs it
-  in a goroutine. Webhook deploys get a `building` row + live logs for free.
+  in a goroutine.
+- **Production only.** Only the production `Deploy` path moves to the
+  `building`-row lifecycle. `DeployPreview` keeps today's behavior (row created
+  at the end); it just passes `nil` progress to the shared build step. Narrows
+  the change to #140's actual surface.
 - **Breaking the deploy response** (200 `DeployResult` → 202 `{id, app,
   status}`) is acceptable pre-1.0; the CLI and piperd move in lockstep.
 - **No new endpoint.** The CLI reads status from the existing deployments
@@ -61,18 +65,27 @@ the end" to "created empty at start, filled in as it runs." No schema change —
 
 ## 2. Deploy
 
-`Deploy` is split so sync (webhook) and async (API) callers share one
-orchestration:
+The production `Deploy` is split so its sync (webhook) and async (API) callers
+share one orchestration:
 
 - `Begin(appName) (store.Deployment, error)` — captures the previous running
   deployment (for later retirement), then creates the `building` row and
   returns it. Its id is what the API hands back immediately.
 - `Finish(ctx, dep store.Deployment, srcDir string) error` — build → run →
-  health → route → hostname → `FinalizeDeployment`. On failure it finalizes the
-  row `failed` with the captured log (replacing today's separate `recordFailed`
-  insert). Retires the previous running container/route on success, as today.
+  health → route → hostname → `FinalizeDeployment`. It runs the shared
+  `buildRunHealthy` with the store-backed sink and a `recordFailed` callback
+  that **finalizes the existing `building` row** `failed`; on success it
+  finalizes it `running` (replacing today's terminal `CreateDeployment`).
+  Retires the previous running container/route on success, as today.
 - `Deploy(ctx, appName, srcDir)` becomes a thin `Begin`+`Finish` wrapper, so
   the webhook path is unchanged in shape.
+
+`DeployPreview` is **untouched** beyond the mechanical `buildRunHealthy`
+signature: it passes `nil` progress and keeps its `recordFailed` callback that
+inserts a failed row at the end (`CreatePreviewDeployment`), exactly as today.
+`buildRunHealthy` gains a `progress io.Writer` param it forwards to `Build` and
+writes stage lines into; `nil` makes it silent, so the preview path is
+behavior-identical.
 
 **Log capture.** `Finish` passes a **store-backed log sink** as the build's
 progress `io.Writer`. The sink is a `runtime.TailBuffer` (existing 1 MiB tail
@@ -90,8 +103,8 @@ as today.
 the buffer still feeds the finalized log; `progress` gets the same plain-text
 lines live. `progress == nil` preserves today's behavior. The fake runtime
 gains a settable build-output string it writes to `progress`. `Build`'s single
-caller is `deploy`, and `DeployPreview` passes the same store-backed sink so
-preview deploys also grow a `building` row.
+caller is `buildRunHealthy`; the production path passes the store-backed sink,
+the preview path passes `nil`.
 
 ## 3. API
 
@@ -135,8 +148,9 @@ TDD, failing-test-first per layer:
   prunes by count across the new lifecycle.
 - **Deploy** (fake runtime): `Begin` yields a `building` row; `Finish`
   persists incremental logs and finalizes `running`; a build failure finalizes
-  `failed` with the captured log; the `Deploy` wrapper equals `Begin`+`Finish`;
-  `nil` progress path stays silent.
+  the same row `failed` with the captured log; the `Deploy` wrapper equals
+  `Begin`+`Finish`. `DeployPreview` is unchanged: `nil` progress, row still
+  created at the end.
 - **Runtime** (Docker-gated, skips without Docker): a real build writes
   non-empty live output to a `progress` buffer.
 - **API**: POST returns 202 with a `building` id; the goroutine drives the row
