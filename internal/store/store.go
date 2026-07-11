@@ -26,6 +26,7 @@ type App struct {
 	Port      int
 	Repo      string
 	Branch    string
+	Hostname  string
 	CreatedAt time.Time
 }
 
@@ -67,6 +68,7 @@ func migrate(db *sql.DB) error {
 	for _, stmt := range []string{
 		`ALTER TABLE apps ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE apps ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE apps ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE deployments ADD COLUMN pr INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE deployments ADD COLUMN logs TEXT NOT NULL DEFAULT ''`,
 	} {
@@ -92,12 +94,26 @@ func (s *Store) CreateApp(name string, port int) (App, error) {
 
 func (s *Store) GetApp(name string) (App, error) {
 	return s.scanApp(s.db.QueryRow(
-		`SELECT name, port, repo, branch, created_at FROM apps WHERE name=?`, name))
+		`SELECT name, port, repo, branch, hostname, created_at FROM apps WHERE name=?`, name))
 }
 
 func (s *Store) AppByRepo(repo string) (App, error) {
 	return s.scanApp(s.db.QueryRow(
-		`SELECT name, port, repo, branch, created_at FROM apps WHERE repo=?`, repo))
+		`SELECT name, port, repo, branch, hostname, created_at FROM apps WHERE repo=?`, repo))
+}
+
+// SetAppHostname records the public hostname the app is currently routed on —
+// relay-assigned when relay-terminated, "<app>.<baseDom>" for LAN/BYO. The
+// Deployer writes it on each successful deploy. ErrNotFound if the app is gone.
+func (s *Store) SetAppHostname(name, hostname string) error {
+	res, err := s.db.Exec(`UPDATE apps SET hostname=? WHERE name=?`, hostname, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateAppRepo(name, repo, branch string) error {
@@ -139,7 +155,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func (s *Store) scanApp(row rowScanner) (App, error) {
 	var a App
 	var ts string
-	err := row.Scan(&a.Name, &a.Port, &a.Repo, &a.Branch, &ts)
+	err := row.Scan(&a.Name, &a.Port, &a.Repo, &a.Branch, &a.Hostname, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -151,7 +167,7 @@ func (s *Store) scanApp(row rowScanner) (App, error) {
 }
 
 func (s *Store) ListApps() ([]App, error) {
-	rows, err := s.db.Query(`SELECT name, port, repo, branch, created_at FROM apps ORDER BY name`)
+	rows, err := s.db.Query(`SELECT name, port, repo, branch, hostname, created_at FROM apps ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

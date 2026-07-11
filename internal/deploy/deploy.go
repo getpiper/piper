@@ -146,6 +146,11 @@ func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.De
 	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
 		return store.Deployment{}, fmt.Errorf("route: %w", err)
 	}
+	// Record the host the app is now served on so the apps API (#100) and deploy
+	// response (#93) can report the real URL, not a guessed one.
+	if err := d.store.SetAppHostname(appName, host); err != nil {
+		return store.Deployment{}, fmt.Errorf("record hostname: %w", err)
+	}
 	// An active BYO custom domain (#102) serves the app at <app>.<custom> over
 	// the box-terminated :443 alongside the primary host.
 	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {

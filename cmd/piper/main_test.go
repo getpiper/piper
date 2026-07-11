@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -60,7 +61,10 @@ func TestRunDeploySupportsNameFirstFlags(t *testing.T) {
 		} else if err == nil && hdr.Name != "Dockerfile" {
 			t.Errorf("tar entry = %q", hdr.Name)
 		}
-		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "running"})
+		_ = json.NewEncoder(w).Encode(api.DeployResult{
+			Deployment: store.Deployment{ID: "dep1", App: "blog", Status: "running"},
+			Hostname:   "blog.piper.localhost",
+		})
 	}))
 	defer srv.Close()
 	t.Setenv("PIPER_ADDR", srv.URL)
@@ -69,8 +73,9 @@ func TestRunDeploySupportsNameFirstFlags(t *testing.T) {
 	if code := run([]string{"deploy", "blog", "--path", srcDir}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "deployed blog") || !strings.Contains(got, "running") {
-		t.Errorf("stdout = %q", got)
+	want := "deployed blog: http://blog.piper.localhost (running)\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
 

@@ -335,6 +335,41 @@ func TestDeployTerminatedRoutesAssignedHostname(t *testing.T) {
 	}
 }
 
+func TestDeployPersistsRoutedHostname(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+
+	// LAN/BYO: the app row records "<app>.<baseDom>".
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	app, err := s.GetApp("blog")
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if app.Hostname != "blog.piper.localhost" {
+		t.Fatalf("LAN hostname = %q, want blog.piper.localhost", app.Hostname)
+	}
+
+	// Relay-terminated: the app row records the relay-assigned hostname.
+	dt := New(s, rt, newFakeCaddy(), "public.getpiper.co")
+	dt.SetHostnameRegistrar(&fakeRegistrar{})
+	if _, err := dt.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("terminated Deploy: %v", err)
+	}
+	app, err = s.GetApp("blog")
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if app.Hostname != "hash-blog-alice.public.getpiper.co" {
+		t.Fatalf("terminated hostname = %q", app.Hostname)
+	}
+}
+
 func TestDeployTerminatedRegistrarFails(t *testing.T) {
 	s, _ := newStore(t)
 	rt := &runtime.FakeRuntime{
