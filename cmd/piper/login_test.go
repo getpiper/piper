@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/getpiper/piper/internal/config"
@@ -53,6 +54,31 @@ func TestLoginRejectsBadToken(t *testing.T) {
 	cc, _ := config.LoadClient()
 	if cc.Token != "" {
 		t.Fatalf("token should not be saved, got %q", cc.Token)
+	}
+	if !strings.Contains(errb.String(), "token rejected") {
+		t.Fatalf("stderr = %q, want token rejected", errb.String())
+	}
+}
+
+func TestLoginConnectivityErrorIsNotTokenRejected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	// Grab a URL that refuses connections: the dial fails before any token
+	// is ever evaluated.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	addr := srv.URL
+	srv.Close()
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"login", "--addr", addr, "--token", "tok"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if strings.Contains(errb.String(), "token rejected") {
+		t.Fatalf("connectivity failure reported as auth failure: %s", errb.String())
+	}
+	if !strings.Contains(errb.String(), "cannot reach piperd at "+addr) {
+		t.Fatalf("stderr = %q, want cannot-reach message", errb.String())
 	}
 }
 

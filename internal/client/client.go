@@ -191,12 +191,26 @@ func (c *Client) ExchangeGitHub(code string) error {
 	return nil
 }
 
+// StatusError is the error for a request that reached the server but got a
+// non-2xx response; Code lets callers tell auth failures (401) from other
+// HTTP errors and from transport errors (which are never a StatusError).
+type StatusError struct {
+	Action string
+	Code   int
+	Status string
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s: %s: %s", e.Action, e.Status, e.Body)
+}
+
 func responseError(action string, resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("%s: %s: read response: %w", action, resp.Status, err)
 	}
-	return fmt.Errorf("%s: %s: %s", action, resp.Status, strings.TrimSpace(string(body)))
+	return &StatusError{Action: action, Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(body))}
 }
 
 // TarDir writes the regular files under dir to w using relative, slash-separated names.

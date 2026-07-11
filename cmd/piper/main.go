@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"html"
@@ -64,7 +65,15 @@ func login(addr, token string, stdout, stderr io.Writer) int {
 		addr = cc.Addr
 	}
 	if _, err := client.New(addr, token).ListApps(); err != nil {
-		fmt.Fprintln(stderr, "error: token rejected:", err)
+		var se *client.StatusError
+		switch {
+		case errors.As(err, &se) && se.Code == http.StatusUnauthorized:
+			fmt.Fprintln(stderr, "error: token rejected:", err)
+		case errors.As(err, &se):
+			fmt.Fprintln(stderr, "error:", err)
+		default:
+			fmt.Fprintf(stderr, "error: cannot reach piperd at %s: %v\n", addr, err)
+		}
 		return 1
 	}
 	if err := config.SaveClient(config.ClientConfig{Addr: addr, Token: token}); err != nil {
