@@ -43,13 +43,14 @@ curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 As root this installs `piper` to `/usr/local/bin`; unprivileged, to
 `~/.local/bin`. The control API requires a bearer token, so mint one on the
 box and log the CLI in first (running `piperd token create` on the box is
-itself the proof you own it — no auth needed for that step). The control API
-binds to loopback by default — override `PIPER_API_ADDR` on the box to reach
-it from elsewhere on your LAN:
+itself the proof you own it — no auth needed for that step; on a systemd
+install it needs `sudo` to reach the service's data dir and will say so if
+you forget). The control API binds to loopback by default — override
+`PIPER_API_ADDR` on the box to reach it from elsewhere on your LAN:
 
 ```bash
 # on the box:
-piperd token create --name laptop              # prints a token once
+sudo piperd token create --name laptop         # prints a token once
 # on the client:
 piper login --token <token> --addr http://your-box:8088
 piper list                                     # now authenticated
@@ -58,7 +59,7 @@ piper list                                     # now authenticated
 `piper login` verifies the token against the box and saves it (with the
 address) to `~/.piper/piper/config.json`, mode `0600`; `PIPER_TOKEN` /
 `PIPER_ADDR` override the saved values per command. Manage tokens on the box
-with `piperd token list` and `piperd token revoke <name>`.
+with `sudo piperd token list` and `sudo piperd token revoke <name>`.
 
 ### Join the public relay (self-service)
 
