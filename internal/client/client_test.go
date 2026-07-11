@@ -334,6 +334,66 @@ func TestDeleteApp(t *testing.T) {
 	}
 }
 
+func TestApp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps/web" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		writeJSONTest(w, api.App{
+			App:    store.App{Name: "web", Port: 8080, Hostname: "web.piper.localhost"},
+			Status: "running",
+		})
+	}))
+	defer srv.Close()
+
+	app, err := New(srv.URL, "").App("web")
+	if err != nil {
+		t.Fatalf("App: %v", err)
+	}
+	if app.Name != "web" || app.Hostname != "web.piper.localhost" || app.Status != "running" {
+		t.Errorf("app = %+v", app)
+	}
+}
+
+func TestDeployments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps/web/deployments" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		writeJSONTest(w, []store.Deployment{
+			{ID: "dep1", App: "web", Status: "running"},
+			{ID: "dep2", App: "web", Status: "failed"},
+		})
+	}))
+	defer srv.Close()
+
+	deps, err := New(srv.URL, "").Deployments("web")
+	if err != nil {
+		t.Fatalf("Deployments: %v", err)
+	}
+	if len(deps) != 2 || deps[0].ID != "dep1" || deps[0].Status != "running" || deps[1].ID != "dep2" || deps[1].Status != "failed" {
+		t.Errorf("deployments = %+v", deps)
+	}
+}
+
+func TestDeploymentLogs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps/web/deployments/dep1/logs" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		io.WriteString(w, "line1\nline2\n")
+	}))
+	defer srv.Close()
+
+	logs, err := New(srv.URL, "").DeploymentLogs("web", "dep1")
+	if err != nil {
+		t.Fatalf("DeploymentLogs: %v", err)
+	}
+	if logs != "line1\nline2\n" {
+		t.Errorf("logs = %q", logs)
+	}
+}
+
 func TestResponseErrorsCarryHTTPStatusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "no", http.StatusUnauthorized)
