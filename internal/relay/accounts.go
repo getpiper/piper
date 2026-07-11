@@ -128,6 +128,16 @@ var ErrBadCredential = errors.New("bad credential")
 // MintAccountCredential issues a fresh random credential for accountID and stores
 // only its hash. The plaintext is returned once, to the caller.
 func (s *Store) MintAccountCredential(accountID string) (string, error) {
+	// Orgs are inert principals: they never hold credentials, so they can
+	// never authenticate (belt-and-braces on top of the NULL github_id).
+	var typ string
+	if err := s.db.QueryRow(`SELECT type FROM accounts WHERE id=?`, accountID).Scan(&typ); err != nil {
+		return "", err
+	}
+	if typ != "user" {
+		return "", errors.New("only user accounts hold credentials")
+	}
+
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
