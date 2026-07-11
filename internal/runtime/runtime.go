@@ -21,7 +21,7 @@ type RunResult struct {
 
 // Runtime builds, runs, health-checks, and stops app containers.
 type Runtime interface {
-	Build(ctx context.Context, srcDir, imageTag string) (BuildResult, error)
+	Build(ctx context.Context, srcDir, imageTag string, progress io.Writer) (BuildResult, error)
 	Run(ctx context.Context, imageTag string, containerPort int, env map[string]string) (RunResult, error)
 	WaitHealthy(ctx context.Context, hostPort int) error
 	Stop(ctx context.Context, containerID string) error

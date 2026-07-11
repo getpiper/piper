@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -34,12 +35,16 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	b, err := r.Build(ctx, dir, "piper-runtime-test:latest")
+	var progress bytes.Buffer
+	b, err := r.Build(ctx, dir, "piper-runtime-test:latest", &progress)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if b.ImageID == "" {
 		t.Fatal("empty image id")
+	}
+	if progress.Len() == 0 {
+		t.Fatalf("expected live build output on progress writer")
 	}
 
 	run, err := r.Run(ctx, "piper-runtime-test:latest", 8080, map[string]string{"PORT": "8080"})
@@ -64,7 +69,8 @@ func TestDockerBuildFailureReturnsLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b, err := r.Build(context.Background(), dir, "piper-runtime-failtest:latest")
+	var progress bytes.Buffer
+	b, err := r.Build(context.Background(), dir, "piper-runtime-failtest:latest", &progress)
 	if err == nil {
 		t.Fatal("expected build error")
 	}
