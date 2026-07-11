@@ -33,6 +33,7 @@ func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Rout
 	mux.HandleFunc("GET /v1/login/web", a.loginWeb)
 	mux.HandleFunc("GET /v1/login/callback", a.loginCallback)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
+	a.registerOrgRoutes(mux)
 	if router != nil {
 		proxy := NewControlProxy(st, router)
 		// Bare /agents (account's agent list, #98) plus the per-agent subtree;
@@ -215,18 +216,8 @@ func (a *api) loginPoll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
-	cred, ok := bearerToken(r)
+	acc, ok := a.authAccount(w, r)
 	if !ok {
-		http.Error(w, "missing bearer credential", http.StatusUnauthorized)
-		return
-	}
-	acc, err := a.st.AuthenticateAccount(cred)
-	if errors.Is(err, ErrBadCredential) {
-		http.Error(w, "bad credential", http.StatusUnauthorized)
-		return
-	}
-	if err != nil {
-		http.Error(w, "auth error", http.StatusInternalServerError)
 		return
 	}
 	en, err := a.st.EnrollForAccount(acc.ID)
@@ -243,6 +234,26 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 		"base_domain":      en.BaseDomain,
 		"tunnel_endpoint":  a.tunnelEndpoint,
 	})
+}
+
+// authAccount authenticates the request's bearer account credential, writing
+// the error response itself when it fails.
+func (a *api) authAccount(w http.ResponseWriter, r *http.Request) (Account, bool) {
+	cred, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "missing bearer credential", http.StatusUnauthorized)
+		return Account{}, false
+	}
+	acc, err := a.st.AuthenticateAccount(cred)
+	if errors.Is(err, ErrBadCredential) {
+		http.Error(w, "bad credential", http.StatusUnauthorized)
+		return Account{}, false
+	}
+	if err != nil {
+		http.Error(w, "auth error", http.StatusInternalServerError)
+		return Account{}, false
+	}
+	return acc, true
 }
 
 // bearerToken extracts a "Bearer <tok>" Authorization header.
