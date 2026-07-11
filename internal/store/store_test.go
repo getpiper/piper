@@ -596,6 +596,46 @@ func TestDeleteAppRemovesAppAndHistory(t *testing.T) {
 	}
 }
 
+func TestBuildingRowLifecycle(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	dep, err := s.CreateDeployment("web", "", "", 0, "building", "")
+	if err != nil {
+		t.Fatalf("CreateDeployment: %v", err)
+	}
+	if dep.Status != "building" {
+		t.Fatalf("status = %q, want building", dep.Status)
+	}
+
+	if err := s.UpdateDeploymentLogs(dep.ID, "pulling base image...\n"); err != nil {
+		t.Fatalf("UpdateDeploymentLogs: %v", err)
+	}
+	logs, err := s.DeploymentLogs("web", dep.ID)
+	if err != nil {
+		t.Fatalf("DeploymentLogs: %v", err)
+	}
+	if logs != "pulling base image...\n" {
+		t.Fatalf("logs = %q", logs)
+	}
+
+	if err := s.FinalizeDeployment(dep.ID, "img-1", "cid-1", 40001, "running", "done\n"); err != nil {
+		t.Fatalf("FinalizeDeployment: %v", err)
+	}
+	got, err := s.LatestDeployment("web")
+	if err != nil {
+		t.Fatalf("LatestDeployment: %v", err)
+	}
+	if got.Status != "running" || got.ImageID != "img-1" || got.ContainerID != "cid-1" || got.HostPort != 40001 {
+		t.Fatalf("finalized row = %+v", got)
+	}
+	logs, _ = s.DeploymentLogs("web", dep.ID)
+	if logs != "done\n" {
+		t.Fatalf("finalized logs = %q", logs)
+	}
+}
+
 func TestDeleteAppUnknownIsNotFound(t *testing.T) {
 	s := openTemp(t)
 	if err := s.DeleteApp("ghost"); !errors.Is(err, ErrNotFound) {
