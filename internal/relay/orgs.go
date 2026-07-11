@@ -373,3 +373,47 @@ func (s *Store) DeclineInvite(accountID, orgSlug string) error {
 	}
 	return tx.Commit()
 }
+
+// CanControl reports whether caller may drive agents owned by owner: the
+// owner itself, or any member of the owning org. Role does not matter here —
+// owners and members both drive; role only gates org management.
+func (s *Store) CanControl(callerID, ownerID string) (bool, error) {
+	if callerID == ownerID {
+		return true, nil
+	}
+	var n int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM org_members WHERE org_id = ? AND account_id = ?`,
+		ownerID, callerID).Scan(&n)
+	return n > 0, err
+}
+
+// OwnedAgent is one row of an account's visible-agents list.
+type OwnedAgent struct {
+	BaseDomain string
+	Owner      string // owning account/org slug
+}
+
+// AgentsVisibleTo returns the agents accountID may drive — its own plus those
+// of every org it belongs to — in enrollment order, tagged with the owner slug.
+func (s *Store) AgentsVisibleTo(accountID string) ([]OwnedAgent, error) {
+	rows, err := s.db.Query(
+		`SELECT ag.base_domain, acc.username
+		   FROM agents ag JOIN accounts acc ON acc.id = ag.account_id
+		  WHERE ag.account_id = ?
+		     OR ag.account_id IN (SELECT org_id FROM org_members WHERE account_id = ?)
+		  ORDER BY ag.rowid`, accountID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var agents []OwnedAgent
+	for rows.Next() {
+		var a OwnedAgent
+		if err := rows.Scan(&a.BaseDomain, &a.Owner); err != nil {
+			return nil, err
+		}
+		agents = append(agents, a)
+	}
+	return agents, rows.Err()
+}

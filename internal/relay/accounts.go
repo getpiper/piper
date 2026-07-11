@@ -96,26 +96,6 @@ func (s *Store) UpsertAccount(githubID, login string) (Account, error) {
 	}
 }
 
-// AgentsForAccount returns the base domains of every agent enrolled by
-// accountID, in enrollment order. An account with no agents lists empty.
-func (s *Store) AgentsForAccount(accountID string) ([]string, error) {
-	rows, err := s.db.Query(
-		`SELECT base_domain FROM agents WHERE account_id=? ORDER BY rowid`, accountID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var bases []string
-	for rows.Next() {
-		var base string
-		if err := rows.Scan(&base); err != nil {
-			return nil, err
-		}
-		bases = append(bases, base)
-	}
-	return bases, rows.Err()
-}
-
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint failure.
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")

@@ -43,15 +43,15 @@ func NewControlProxy(st *Store, router *Router) http.Handler {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			bases, err := st.AgentsForAccount(acc.ID)
+			visible, err := st.AgentsVisibleTo(acc.ID)
 			if err != nil {
 				http.Error(w, "list failed", http.StatusInternalServerError)
 				return
 			}
-			agents := make([]map[string]any, 0, len(bases))
-			for _, b := range bases {
-				_, connected := router.Lookup(b)
-				agents = append(agents, map[string]any{"agent": b, "connected": connected})
+			agents := make([]map[string]any, 0, len(visible))
+			for _, a := range visible {
+				_, connected := router.Lookup(a.BaseDomain)
+				agents = append(agents, map[string]any{"agent": a.BaseDomain, "connected": connected})
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 			return

@@ -159,43 +159,6 @@ func TestAuthenticateRejectsDisabledAccountAgent(t *testing.T) {
 	}
 }
 
-func TestAgentsForAccountListsOnlyOwnAgents(t *testing.T) {
-	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
-	alice, _ := st.UpsertAccount("sub-alice", "alice")
-	bob, _ := st.UpsertAccount("sub-bob", "bob")
-
-	var want []string
-	for i := 0; i < 2; i++ {
-		en, err := st.EnrollForAccount(alice.ID)
-		if err != nil {
-			t.Fatalf("enroll alice %d: %v", i, err)
-		}
-		want = append(want, en.BaseDomain)
-	}
-	if _, err := st.EnrollForAccount(bob.ID); err != nil {
-		t.Fatalf("enroll bob: %v", err)
-	}
-
-	got, err := st.AgentsForAccount(alice.ID)
-	if err != nil {
-		t.Fatalf("AgentsForAccount: %v", err)
-	}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("AgentsForAccount = %v, want %v (enrollment order)", got, want)
-	}
-
-	// An account with no agents lists empty, not an error.
-	carol, _ := st.UpsertAccount("sub-carol", "carol")
-	got, err = st.AgentsForAccount(carol.ID)
-	if err != nil {
-		t.Fatalf("AgentsForAccount(empty): %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("AgentsForAccount(empty) = %v, want none", got)
-	}
-}
-
 func TestUpsertAccountStoresAndRefreshesGithubLogin(t *testing.T) {
 	st := openTestStore(t)
 

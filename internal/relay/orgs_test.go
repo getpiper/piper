@@ -279,3 +279,64 @@ func TestDeclineAndRevokeInvite(t *testing.T) {
 		t.Fatalf("accept unknown org err = %v, want ErrNoInvite", err)
 	}
 }
+
+func TestCanControlOwnerAndOrgMember(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "bob")
+	mallory, _ := st.UpsertAccount("gh-mallory", "mallory")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	addMember(t, st, org.ID, bob.ID, "member")
+
+	cases := []struct {
+		name          string
+		caller, owner string
+		want          bool
+	}{
+		{"self", alice.ID, alice.ID, true},
+		{"org owner", alice.ID, org.ID, true},
+		{"org member", bob.ID, org.ID, true},
+		{"non-member", mallory.ID, org.ID, false},
+		{"other user's box", mallory.ID, alice.ID, false},
+	}
+	for _, c := range cases {
+		got, err := st.CanControl(c.caller, c.owner)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got != c.want {
+			t.Errorf("CanControl(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestAgentsVisibleToMergesPersonalAndOrg(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "bob")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	addMember(t, st, org.ID, bob.ID, "member")
+
+	personal, _ := st.EnrollForAccount(bob.ID)
+	orgEn, _ := st.EnrollForAccount(org.ID)
+	st.EnrollForAccount(alice.ID) // alice's personal box: invisible to bob
+
+	got, err := st.AgentsVisibleTo(bob.ID)
+	if err != nil {
+		t.Fatalf("AgentsVisibleTo: %v", err)
+	}
+	want := []OwnedAgent{
+		{BaseDomain: personal.BaseDomain, Owner: "bob"},
+		{BaseDomain: orgEn.BaseDomain, Owner: "acme"},
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("AgentsVisibleTo = %+v, want %+v", got, want)
+	}
+
+	// An account with nothing visible lists empty, not an error.
+	carol, _ := st.UpsertAccount("gh-carol", "carol")
+	if got, err := st.AgentsVisibleTo(carol.ID); err != nil || len(got) != 0 {
+		t.Fatalf("empty AgentsVisibleTo = %+v (%v), want none", got, err)
+	}
+}
