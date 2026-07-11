@@ -3,6 +3,7 @@ package caddy
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -81,6 +82,14 @@ func StartManager(adminBase, httpListen string, opts ...Option) (*Manager, error
 	for _, opt := range opts {
 		opt(o)
 	}
+	addrs := []string{o.adminAddr, o.httpListen}
+	if o.httpsListen != "" {
+		addrs = append(addrs, o.httpsListen)
+	}
+	if err := preflightListen(addrs); err != nil {
+		managerActive.Store(false)
+		return nil, err
+	}
 	cfg, _ := json.Marshal(o.baseConfig())
 	if err := caddy.Load(cfg, true); err != nil {
 		managerActive.Store(false)
@@ -92,6 +101,23 @@ func StartManager(adminBase, httpListen string, opts ...Option) (*Manager, error
 		return nil, err
 	}
 	return m, nil
+}
+
+// preflightListen verifies no other process already holds any of addrs. Caddy
+// binds with SO_REUSEPORT, so a foreign listener never surfaces as a bind
+// error — the kernel silently splits traffic between the two processes (#126).
+// A plain net.Listen (no SO_REUSEPORT) does fail against any existing binder,
+// which is exactly the signal Caddy's own bind hides; on success the probe is
+// closed and Caddy binds the port for real.
+func preflightListen(addrs []string) error {
+	for _, addr := range addrs {
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("listen address %s is already held by another process (a stray caddy?) — piperd would start but receive no traffic: %w", addr, err)
+		}
+		l.Close()
+	}
+	return nil
 }
 
 func waitAdmin(base string, d time.Duration) error {
