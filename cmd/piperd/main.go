@@ -151,7 +151,10 @@ func runTokenCmd(st tokenStore, args []string, out io.Writer) error {
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "token" {
-		dataDir := config.Load().DataDir
+		dataDir, err := resolveTokenDataDir(os.Args[2:])
+		if err != nil {
+			log.Fatalf("token: %v", err)
+		}
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
 			log.Fatalf("data dir: %v", err)
 		}
