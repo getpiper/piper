@@ -14,9 +14,10 @@ import (
 
 // Account is a relay tenant. One account owns many agents.
 type Account struct {
-	ID       string
-	Username string
-	Disabled bool
+	ID          string
+	Username    string
+	GithubLogin string // raw GitHub login, refreshed at every login; "" pre-migration
+	Disabled    bool
 }
 
 // deriveUsername turns a GitHub login into a DNS-safe label component:
@@ -51,10 +52,19 @@ func deriveUsername(login string) string {
 func (s *Store) UpsertAccount(githubID, login string) (Account, error) {
 	var acc Account
 	var disabled int
-	err := s.db.QueryRow(`SELECT id, username, disabled FROM accounts WHERE github_id=?`, githubID).
-		Scan(&acc.ID, &acc.Username, &disabled)
+	var storedLogin sql.NullString
+	err := s.db.QueryRow(
+		`SELECT id, username, disabled, github_login FROM accounts WHERE github_id=?`, githubID).
+		Scan(&acc.ID, &acc.Username, &disabled, &storedLogin)
 	if err == nil {
 		acc.Disabled = disabled != 0
+		acc.GithubLogin = login
+		if storedLogin.String != login {
+			// GitHub logins can be renamed; keep the invite-matching login fresh.
+			if _, err := s.db.Exec(`UPDATE accounts SET github_login=? WHERE id=?`, login, acc.ID); err != nil {
+				return Account{}, err
+			}
+		}
 		return acc, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -70,10 +80,11 @@ func (s *Store) UpsertAccount(githubID, login string) (Account, error) {
 			username = base + "-" + strconv.Itoa(i)
 		}
 		_, err := s.db.Exec(
-			`INSERT INTO accounts(id, github_id, username, disabled, created_at) VALUES(?,?,?,0,?)`,
-			id, githubID, username, now)
+			`INSERT INTO accounts(id, github_id, github_login, username, type, disabled, created_at)
+			 VALUES(?,?,?,?,'user',0,?)`,
+			id, githubID, login, username, now)
 		if err == nil {
-			return Account{ID: id, Username: username}, nil
+			return Account{ID: id, Username: username, GithubLogin: login}, nil
 		}
 		if isUniqueViolation(err) {
 			// Another account already holds this username; try the next suffix.
@@ -136,11 +147,12 @@ func (s *Store) MintAccountCredential(accountID string) (string, error) {
 func (s *Store) AuthenticateAccount(cred string) (Account, error) {
 	var acc Account
 	var disabled int
+	var gl sql.NullString
 	err := s.db.QueryRow(
-		`SELECT a.id, a.username, a.disabled
+		`SELECT a.id, a.username, a.github_login, a.disabled
 		   FROM account_creds c JOIN accounts a ON a.id = c.account_id
 		  WHERE c.token_hash = ?`, hashToken(cred)).
-		Scan(&acc.ID, &acc.Username, &disabled)
+		Scan(&acc.ID, &acc.Username, &gl, &disabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Account{}, ErrBadCredential
 	}
@@ -150,6 +162,7 @@ func (s *Store) AuthenticateAccount(cred string) (Account, error) {
 	if disabled != 0 {
 		return Account{}, ErrBadCredential
 	}
+	acc.GithubLogin = gl.String
 	acc.Disabled = false
 	return acc, nil
 }
