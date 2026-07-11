@@ -52,7 +52,7 @@ func (s *Store) maxAppsOrDefault() int {
 
 func (s *Store) apexOrDefault() string {
 	if s.apex == "" {
-		return "public.getpiper.co"
+		return "public.getpiper.dev"
 	}
 	return s.apex
 }

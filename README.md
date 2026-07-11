@@ -84,19 +84,19 @@ the install:
 Either way piperd picks up the enrollment at startup and dials the tunnel.
 
 `piper login --relay <url>` targets a self-hosted relay instead of the default
-`https://api.public.getpiper.co`. Environment variables (`PIPER_RELAY_ADDR`,
+`https://api.public.getpiper.dev`. Environment variables (`PIPER_RELAY_ADDR`,
 `PIPER_RELAY_TOKEN`, `PIPER_BASE_DOMAIN`) still override `relay.json`.
 
 `piper connect` claims the box in **terminated** mode: piperd holds no cert and
 serves apps on `:80`; the relay assigns each app a single-label hostname
-`<app-hash>-<username>.public.getpiper.co`, terminates its HTTPS with its
+`<app-hash>-<username>.public.getpiper.dev`, terminates its HTTPS with its
 wildcard cert, and forwards plaintext HTTP over the tunnel.
 
 ```bash
 piper login                  # GitHub device-flow; stores your account credential
 piper connect                # claims this box (terminated) and writes relay.json
 sudo systemctl restart piperd
-piper deploy blog --path .   # → https://<hash>-<you>.public.getpiper.co
+piper deploy blog --path .   # → https://<hash>-<you>.public.getpiper.dev
 ```
 
 Bring-your-own-domain apps stay **end-to-end** (the box terminates TLS; the relay
@@ -111,9 +111,9 @@ can target one of your relay-connected boxes from anywhere, by the base
 domain `piper connect` printed:
 
 ```bash
-piper --remote ab12-alice.public.getpiper.co list
-piper --remote ab12-alice.public.getpiper.co status  # box up? what's deployed?
-export PIPER_REMOTE=ab12-alice.public.getpiper.co   # or set it once
+piper --remote ab12-alice.public.getpiper.dev list
+piper --remote ab12-alice.public.getpiper.dev status  # box up? what's deployed?
+export PIPER_REMOTE=ab12-alice.public.getpiper.dev   # or set it once
 piper deploy blog --path .
 ```
 

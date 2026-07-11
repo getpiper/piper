@@ -135,7 +135,7 @@ func main() {
 	}
 
 	st.Configure(
-		env("PIPER_RELAY_APEX", "public.getpiper.co"),
+		env("PIPER_RELAY_APEX", "public.getpiper.dev"),
 		atoiOr(env("PIPER_RELAY_MAX_AGENTS", "3"), 3),
 		atoiOr(env("PIPER_RELAY_MAX_APPS", "10"), 10),
 	)

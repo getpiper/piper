@@ -53,7 +53,7 @@ type Client struct {
 }
 
 // New returns a Client for the relay control API at base (e.g.
-// https://api.public.getpiper.co).
+// https://api.public.getpiper.dev).
 func New(base string) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 30 * time.Second}}
 }
