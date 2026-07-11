@@ -51,20 +51,25 @@ func TestRunDeploySupportsNameFirstFlags(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/deploy" {
-			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/blog/deploy":
+			tr := tar.NewReader(r.Body)
+			hdr, err := tr.Next()
+			if err != nil && err != io.EOF {
+				t.Errorf("Next: %v", err)
+			} else if err == nil && hdr.Name != "Dockerfile" {
+				t.Errorf("tar entry = %q", hdr.Name)
+			}
+			_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
+		case r.URL.Path == "/v1/apps/blog/deployments/dep1/logs":
+			io.WriteString(w, "")
+		case r.URL.Path == "/v1/apps/blog/deployments":
+			_ = json.NewEncoder(w).Encode([]store.Deployment{{ID: "dep1", App: "blog", Status: "running"}})
+		case r.URL.Path == "/v1/apps/blog":
+			_ = json.NewEncoder(w).Encode(api.App{App: store.App{Name: "blog", Hostname: "blog.piper.localhost"}, Status: "running"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		tr := tar.NewReader(r.Body)
-		hdr, err := tr.Next()
-		if err != nil && err != io.EOF {
-			t.Errorf("Next: %v", err)
-		} else if err == nil && hdr.Name != "Dockerfile" {
-			t.Errorf("tar entry = %q", hdr.Name)
-		}
-		_ = json.NewEncoder(w).Encode(api.DeployResult{
-			Deployment: store.Deployment{ID: "dep1", App: "blog", Status: "running"},
-			Hostname:   "blog.piper.localhost",
-		})
 	}))
 	defer srv.Close()
 	t.Setenv("PIPER_ADDR", srv.URL)
@@ -76,6 +81,43 @@ func TestRunDeploySupportsNameFirstFlags(t *testing.T) {
 	want := "deployed blog: http://blog.piper.localhost (running)\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDeployStreamsProgressAndReportsURL(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/web/deploy":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "web", Status: "building"})
+		case r.URL.Path == "/v1/apps/web/deployments/dep1/logs":
+			io.WriteString(w, "pulling base image...\nbuilt ok\n")
+		case r.URL.Path == "/v1/apps/web/deployments":
+			json.NewEncoder(w).Encode([]store.Deployment{{ID: "dep1", App: "web", Status: "running"}})
+		case r.URL.Path == "/v1/apps/web":
+			json.NewEncoder(w).Encode(api.App{App: store.App{Name: "web", Hostname: "web.piper.localhost"}, Status: "running"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"deploy", "web", "--path", srcDir}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "pulling base image") {
+		t.Fatalf("progress not streamed to stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "deployed web: http://web.piper.localhost (running)") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
