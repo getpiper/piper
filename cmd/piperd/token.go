@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
+
+	"github.com/getpiper/piper/internal/config"
 )
 
 // ownerOf returns the uid/gid owning path.
@@ -42,4 +45,32 @@ func dropToStateDirOwner(dir string) error {
 		return fmt.Errorf("setuid %d: %w", uid, err)
 	}
 	return nil
+}
+
+// resolveTokenDataDir picks the directory holding the DB `piperd token`
+// operates on. Explicit PIPER_DATA_DIR always wins; otherwise, on a
+// systemd-managed box, it targets the service's state dir — dropping this
+// process to the dir owner's uid/gid when root, and failing with the exact
+// sudo command to run when not — so the command can never silently write a
+// DB the running service ignores (#134). args is the token subcommand line,
+// echoed in that message.
+func resolveTokenDataDir(args []string) (string, error) {
+	if v := os.Getenv("PIPER_DATA_DIR"); v != "" {
+		return v, nil
+	}
+	if !config.SystemManaged() {
+		return config.DefaultDataDir(), nil
+	}
+	if _, err := os.Stat(config.SystemStateDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("service data dir %s does not exist; start the service first: sudo systemctl start piperd", config.SystemStateDir)
+	} else if err != nil {
+		return "", err
+	}
+	if os.Geteuid() != 0 {
+		return "", fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, strings.Join(args, " "))
+	}
+	if err := dropToStateDirOwner(config.SystemStateDir); err != nil {
+		return "", err
+	}
+	return config.SystemStateDir, nil
 }
