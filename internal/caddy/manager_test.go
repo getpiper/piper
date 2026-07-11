@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // freeAddr returns a currently-free 127.0.0.1:port.
@@ -157,7 +159,7 @@ func TestStartManagerFailsWhenPortAlreadyHeld(t *testing.T) {
 		lc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {
 			var soErr error
 			err := c.Control(func(fd uintptr) {
-				soErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+				soErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 			})
 			if err != nil {
 				return err
