@@ -67,10 +67,32 @@ func resolveTokenDataDir(args []string) (string, error) {
 		return "", err
 	}
 	if os.Geteuid() != 0 {
-		return "", fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, strings.Join(args, " "))
+		quoted := make([]string, len(args))
+		for i, a := range args {
+			quoted[i] = shellQuote(a)
+		}
+		return "", fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, strings.Join(quoted, " "))
 	}
 	if err := dropToStateDirOwner(config.SystemStateDir); err != nil {
 		return "", err
 	}
 	return config.SystemStateDir, nil
+}
+
+// shellQuote renders s as a single POSIX-shell word so the sudo hint above can
+// be copy-pasted verbatim. A word made only of safe characters is returned
+// unchanged; anything else (spaces, quotes, globs, …) is wrapped in single
+// quotes, with any embedded single quote escaped the usual POSIX way.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	const safe = "@%+=:,./-_"
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(safe, r) {
+			continue
+		}
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	return s
 }
