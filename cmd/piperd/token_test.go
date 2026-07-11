@@ -138,6 +138,24 @@ func TestResolveTokenDataDirSystemManagedNonRoot(t *testing.T) {
 	}
 }
 
+func TestResolveTokenDataDirSudoHintQuotesSpacedArgs(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root")
+	}
+	t.Setenv("PIPER_DATA_DIR", "")
+	systemManaged(t, t.TempDir())
+
+	// The hint is meant to be pasted verbatim, so a name with a space must stay
+	// a single argument — an unquoted `--name my laptop` re-parses into two (#145).
+	_, err := resolveTokenDataDir([]string{"create", "--name", "my laptop"})
+	if err == nil {
+		t.Fatal("want error for non-root on a systemd-managed box")
+	}
+	if !strings.Contains(err.Error(), "sudo piperd token create --name 'my laptop'") {
+		t.Errorf("error %q does not shell-quote the spaced arg", err)
+	}
+}
+
 func TestResolveTokenDataDirStateDirMissing(t *testing.T) {
 	t.Setenv("PIPER_DATA_DIR", "")
 	systemManaged(t, filepath.Join(t.TempDir(), "absent"))
@@ -148,5 +166,21 @@ func TestResolveTokenDataDirStateDirMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "systemctl start piperd") {
 		t.Errorf("error %q does not say to start the service", err)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"laptop", "laptop"},
+		{"--name", "--name"},
+		{"/var/lib/piper", "/var/lib/piper"},
+		{"", "''"},
+		{"my laptop", "'my laptop'"},
+		{"it's", `'it'\''s'`},
+		{"a&b;c", "'a&b;c'"},
+	} {
+		if got := shellQuote(c.in); got != c.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
