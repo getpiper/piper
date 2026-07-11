@@ -1,6 +1,7 @@
 package caddy
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -135,6 +137,76 @@ func TestStartManagerRunsCaddyWithoutExternalBinary(t *testing.T) {
 	if !strings.Contains(string(body), httpListen) {
 		t.Fatalf("running config missing our http listener %q: %s", httpListen, body)
 	}
+}
+
+// Caddy binds with SO_REUSEPORT, so a foreign process already holding a listen
+// port never surfaces as a bind error — piperd would start split-brained, with
+// the kernel delivering traffic to the squatter (#126). StartManager must
+// detect the clash and fail loudly instead.
+func TestStartManagerFailsWhenPortAlreadyHeld(t *testing.T) {
+	t.Setenv("PATH", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	// The squatter binds with SO_REUSEPORT, like a real stray Caddy: that is
+	// the case where Caddy's own bind succeeds silently instead of erroring.
+	squat := func(t *testing.T) net.Listener {
+		t.Helper()
+		lc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {
+			var soErr error
+			err := c.Control(func(fd uintptr) {
+				soErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+			})
+			if err != nil {
+				return err
+			}
+			return soErr
+		}}
+		l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("squatter listen: %v", err)
+		}
+		t.Cleanup(func() { l.Close() })
+		return l
+	}
+
+	t.Run("http listener held", func(t *testing.T) {
+		l := squat(t)
+		m, err := StartManager("http://"+freeAddr(t), l.Addr().String())
+		if err == nil {
+			m.Stop()
+			t.Fatal("StartManager with http port held by a foreign listener should error, got nil")
+		}
+		if !strings.Contains(err.Error(), l.Addr().String()) {
+			t.Fatalf("error should name the conflicting address %q, got: %v", l.Addr().String(), err)
+		}
+	})
+
+	t.Run("admin address held", func(t *testing.T) {
+		l := squat(t)
+		m, err := StartManager("http://"+l.Addr().String(), freeAddr(t))
+		if err == nil {
+			m.Stop()
+			t.Fatal("StartManager with admin port held by a foreign listener should error, got nil")
+		}
+		if !strings.Contains(err.Error(), l.Addr().String()) {
+			t.Fatalf("error should name the conflicting address %q, got: %v", l.Addr().String(), err)
+		}
+	})
+
+	t.Run("https listener held", func(t *testing.T) {
+		l := squat(t)
+		m, err := StartManager("http://"+freeAddr(t), freeAddr(t), WithHTTPS(l.Addr().String()))
+		if err == nil {
+			m.Stop()
+			t.Fatal("StartManager with https port held by a foreign listener should error, got nil")
+		}
+		if !strings.Contains(err.Error(), l.Addr().String()) {
+			t.Fatalf("error should name the conflicting address %q, got: %v", l.Addr().String(), err)
+		}
+	})
 }
 
 // EnsureHTTPS at runtime must leave :80-style plaintext serving intact while
