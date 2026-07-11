@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -13,6 +14,9 @@ import (
 func (a *api) registerOrgRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/orgs", a.orgCreate)
 	mux.HandleFunc("GET /v1/orgs", a.orgList)
+	mux.HandleFunc("GET /v1/orgs/{slug}/members", a.orgMembers)
+	mux.HandleFunc("PUT /v1/orgs/{slug}/members/{username}", a.orgSetRole)
+	mux.HandleFunc("DELETE /v1/orgs/{slug}/members/{username}", a.orgRemoveMember)
 }
 
 func (a *api) orgCreate(w http.ResponseWriter, r *http.Request) {
@@ -50,4 +54,101 @@ func (a *api) orgList(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]string{"org": o.Slug, "role": o.Role})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"orgs": out})
+}
+
+// orgForMember resolves {slug} for the authenticated caller. Non-members and
+// unknown orgs both 404 (ErrNoOrg is deliberately ambiguous).
+func (a *api) orgForMember(w http.ResponseWriter, r *http.Request, accID string) (orgID, role string, ok bool) {
+	orgID, role, err := a.st.OrgRole(r.PathValue("slug"), accID)
+	if errors.Is(err, ErrNoOrg) {
+		http.NotFound(w, r)
+		return "", "", false
+	}
+	if err != nil {
+		http.Error(w, "org error", http.StatusInternalServerError)
+		return "", "", false
+	}
+	return orgID, role, true
+}
+
+func (a *api) orgMembers(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, _, ok := a.orgForMember(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	members, err := a.st.Members(orgID)
+	if err != nil {
+		http.Error(w, "list failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]string, 0, len(members))
+	for _, m := range members {
+		out = append(out, map[string]string{"username": m.Username, "role": m.Role})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"members": out})
+}
+
+// writeMembershipErr maps the shared membership store errors onto HTTP.
+func writeMembershipErr(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrNotMember):
+		http.NotFound(w, r)
+	case errors.Is(err, ErrLastOwner):
+		http.Error(w, "an org must keep at least one owner", http.StatusConflict)
+	default:
+		http.Error(w, "membership error", http.StatusInternalServerError)
+	}
+}
+
+func (a *api) orgSetRole(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, role, ok := a.orgForMember(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	if role != "owner" {
+		http.Error(w, "owner role required", http.StatusForbidden)
+		return
+	}
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Role != "owner" && req.Role != "member") {
+		http.Error(w, `role must be "owner" or "member"`, http.StatusBadRequest)
+		return
+	}
+	if err := a.st.SetMemberRole(orgID, r.PathValue("username"), req.Role); err != nil {
+		writeMembershipErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"username": r.PathValue("username"), "role": req.Role})
+}
+
+func (a *api) orgRemoveMember(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, role, ok := a.orgForMember(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	target := r.PathValue("username")
+	// Owners remove anyone; a plain member may only remove themselves (leave).
+	if role != "owner" && target != acc.Username {
+		http.Error(w, "owner role required", http.StatusForbidden)
+		return
+	}
+	if err := a.st.RemoveMember(orgID, target); err != nil {
+		writeMembershipErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"removed": target})
 }

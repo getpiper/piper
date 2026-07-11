@@ -97,3 +97,97 @@ func TestOrgCreateAndList(t *testing.T) {
 		t.Fatalf("bob's list = %+v, want empty non-null array", list.Orgs)
 	}
 }
+
+// orgWithMember: alice owns "acme", bob is a plain member.
+func orgWithMember(t *testing.T, st *Store, aliceCred, bobCred string) (orgID string) {
+	t.Helper()
+	alice, err := st.AuthenticateAccount(aliceCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := st.AuthenticateAccount(bobCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	org, err := st.CreateOrg(alice.ID, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addMember(t, st, org.ID, bob.ID, "member")
+	return org.ID
+}
+
+func TestOrgMembersEndpointRoleMatrix(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	orgWithMember(t, st, aliceCred, bobCred)
+	mallory, _ := st.UpsertAccount("sub-mallory", "mallory")
+	malloryCred, _ := st.MintAccountCredential(mallory.ID)
+
+	// Any member reads the list; a non-member gets 404, not 403 (no leak).
+	rr := apiReq(t, api, "GET", "/v1/orgs/acme/members", bobCred, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("member list: %d", rr.Code)
+	}
+	var list struct {
+		Members []struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
+		} `json:"members"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Members) != 2 || list.Members[0].Username != "alice" || list.Members[0].Role != "owner" ||
+		list.Members[1].Username != "bob" || list.Members[1].Role != "member" {
+		t.Fatalf("members = %+v", list.Members)
+	}
+	if rr := apiReq(t, api, "GET", "/v1/orgs/acme/members", malloryCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("non-member list: %d, want 404", rr.Code)
+	}
+	if rr := apiReq(t, api, "GET", "/v1/orgs/ghost/members", aliceCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown org list: %d, want 404", rr.Code)
+	}
+
+	// Promote: owner-only; members get 403; bad role 400; unknown target 404.
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/members/bob", bobCred, `{"role":"owner"}`); rr.Code != http.StatusForbidden {
+		t.Fatalf("member promote: %d, want 403", rr.Code)
+	}
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/members/bob", aliceCred, `{"role":"admin"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad role: %d, want 400", rr.Code)
+	}
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/members/nobody", aliceCred, `{"role":"member"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown target: %d, want 404", rr.Code)
+	}
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/members/bob", aliceCred, `{"role":"owner"}`); rr.Code != http.StatusOK {
+		t.Fatalf("promote: %d", rr.Code)
+	}
+
+	// Last-owner guard surfaces as 409 (bob demoted back first).
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/members/bob", aliceCred, `{"role":"member"}`); rr.Code != http.StatusOK {
+		t.Fatalf("demote bob: %d", rr.Code)
+	}
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/members/alice", aliceCred, `{"role":"member"}`); rr.Code != http.StatusConflict {
+		t.Fatalf("demote last owner: %d, want 409", rr.Code)
+	}
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme/members/alice", aliceCred, ""); rr.Code != http.StatusConflict {
+		t.Fatalf("remove last owner: %d, want 409", rr.Code)
+	}
+}
+
+func TestOrgMemberRemovalAndSelfLeave(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	orgWithMember(t, st, aliceCred, bobCred)
+
+	// A member cannot remove someone else...
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme/members/alice", bobCred, ""); rr.Code != http.StatusForbidden {
+		t.Fatalf("member removes other: %d, want 403", rr.Code)
+	}
+	// ...but may leave.
+	if rr := apiReq(t, api, "DELETE", "/v1/orgs/acme/members/bob", bobCred, ""); rr.Code != http.StatusOK {
+		t.Fatalf("self-leave: %d", rr.Code)
+	}
+	// Gone: the org now 404s for bob.
+	if rr := apiReq(t, api, "GET", "/v1/orgs/acme/members", bobCred, ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("after leave: %d, want 404", rr.Code)
+	}
+}
