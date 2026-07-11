@@ -12,6 +12,16 @@ import (
 	"github.com/getpiper/piper/internal/config"
 )
 
+// The shipped default must point at the live hosted relay: a stale default
+// (e.g. a domain that no longer resolves) silently breaks first-run onboarding
+// for anyone who doesn't pass --relay.
+func TestDefaultRelayAPIIsLiveHostedRelay(t *testing.T) {
+	const want = "https://api.public.getpiper.dev"
+	if defaultRelayAPI != want {
+		t.Fatalf("defaultRelayAPI = %q, want %q", defaultRelayAPI, want)
+	}
+}
+
 func TestRelayLoginStoresCredential(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")

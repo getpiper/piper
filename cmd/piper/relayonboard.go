@@ -12,7 +12,7 @@ import (
 
 // defaultRelayAPI is the hosted public relay's control API. Override with
 // `piper login --relay <url>` for a self-hosted relay.
-const defaultRelayAPI = "https://api.public.getpiper.co"
+const defaultRelayAPI = "https://api.public.getpiper.dev"
 
 // pollSleep is the device-flow poll delay; a seam so tests don't really sleep.
 var pollSleep = time.Sleep
