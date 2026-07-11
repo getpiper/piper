@@ -9,11 +9,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS agents_base_domain_unique
     ON agents(base_domain);
 
 CREATE TABLE IF NOT EXISTS accounts (
-    id          TEXT PRIMARY KEY,
-    github_id   TEXT NOT NULL UNIQUE,
-    username    TEXT NOT NULL UNIQUE,
-    disabled    INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL
+    id           TEXT PRIMARY KEY,
+    github_id    TEXT UNIQUE,
+    github_login TEXT,
+    username     TEXT NOT NULL UNIQUE,
+    type         TEXT NOT NULL DEFAULT 'user',
+    disabled     INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS account_creds (
@@ -28,4 +30,20 @@ CREATE TABLE IF NOT EXISTS hostnames (
     app         TEXT NOT NULL,
     created_at  TEXT NOT NULL,
     UNIQUE(account_id, app)
+);
+
+CREATE TABLE IF NOT EXISTS org_members (
+    org_id     TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL REFERENCES accounts(id),
+    role       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (org_id, account_id)
+);
+
+CREATE TABLE IF NOT EXISTS org_invites (
+    org_id       TEXT NOT NULL REFERENCES accounts(id),
+    github_login TEXT NOT NULL,
+    invited_by   TEXT NOT NULL REFERENCES accounts(id),
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (org_id, github_login)
 );

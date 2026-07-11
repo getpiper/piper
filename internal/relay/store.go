@@ -76,6 +76,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrateAccounts(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate accounts: %w", err)
+	}
 	for _, col := range []string{"account_id", "control_token", "custom_domain"} {
 		if err := ensureAgentColumn(db, col); err != nil {
 			db.Close()
@@ -312,4 +316,57 @@ func ensureAgentColumn(db *sql.DB, column string) error {
 	}
 	_, err = db.Exec(`ALTER TABLE agents ADD COLUMN ` + column + ` TEXT`)
 	return err
+}
+
+// migrateAccounts rebuilds a legacy accounts table (github_id NOT NULL, no
+// type/github_login) into the org-aware shape. SQLite cannot relax NOT NULL in
+// place, so: create-copy-drop-rename. Legacy is detected by the missing "type"
+// column; migrated rows are type 'user' with github_login left NULL (refreshed
+// at their next login).
+func migrateAccounts(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(accounts)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "type" {
+			return nil // already the new shape
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`CREATE TABLE accounts_new (
+			id           TEXT PRIMARY KEY,
+			github_id    TEXT UNIQUE,
+			github_login TEXT,
+			username     TEXT NOT NULL UNIQUE,
+			type         TEXT NOT NULL DEFAULT 'user',
+			disabled     INTEGER NOT NULL DEFAULT 0,
+			created_at   TEXT NOT NULL
+		)`,
+		`INSERT INTO accounts_new (id, github_id, username, disabled, created_at)
+			SELECT id, github_id, username, disabled, created_at FROM accounts`,
+		`DROP TABLE accounts`,
+		`ALTER TABLE accounts_new RENAME TO accounts`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
