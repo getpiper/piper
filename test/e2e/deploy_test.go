@@ -70,22 +70,38 @@ func TestEndToEndDeploy(t *testing.T) {
 		t.Fatalf("Deploy: %v", err)
 	}
 
-	// Fetch through Caddy on :80 with Host: blog.piper.localhost.
+	// Fetch through Caddy on :80 with Host: blog.piper.localhost. Retry until
+	// we see the sample app's exact response — any 200 isn't enough, since a
+	// stray server squatting on :80 can answer 200 with an empty body (#126).
+	const wantBody = "hello piper\n"
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:80/", nil)
 	req.Host = "blog.piper.localhost"
 	var body string
+	var lastStatus int
+	var lastErr error
+	ok := false
 	for i := 0; i < 20; i++ {
 		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			body = string(b)
+		if err != nil {
+			lastErr = err
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		lastStatus = resp.StatusCode
+		body = string(b)
+		if lastStatus == http.StatusOK && body == wantBody {
+			ok = true
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if body == "" {
-		t.Fatal("no response through Caddy")
+	if !ok {
+		if lastStatus == 0 {
+			t.Fatalf("never connected through Caddy: %v", lastErr)
+		}
+		t.Fatalf("connected through Caddy but never got the app's response: last status %d, body %q (want 200 with %q)", lastStatus, body, wantBody)
 	}
 	fmt.Printf("e2e response: %q\n", body)
 
