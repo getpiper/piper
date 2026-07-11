@@ -259,7 +259,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			if status == "" {
 				status = "-"
 			}
-			fmt.Fprintf(stdout, "%s\tstatus=%s\tport=%d\n", app.Name, status, app.Port)
+			if url := appURL(app.Hostname, *remote != ""); url != "" {
+				fmt.Fprintf(stdout, "%s\tstatus=%s\tport=%d\t%s\n", app.Name, status, app.Port, url)
+			} else {
+				fmt.Fprintf(stdout, "%s\tstatus=%s\tport=%d\n", app.Name, status, app.Port)
+			}
 		}
 		return 0
 	case "stop":
