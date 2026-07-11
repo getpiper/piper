@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateOrgMakesCreatorSoleOwner(t *testing.T) {
@@ -371,5 +372,31 @@ func TestDeleteOrgRefusedWhileAgentsExist(t *testing.T) {
 	// The slug is free again.
 	if _, err := st.CreateOrg(alice.ID, "acme"); err != nil {
 		t.Fatalf("slug not freed: %v", err)
+	}
+}
+
+func TestDeleteOrgRefusesNonOrgAccounts(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+
+	if _, err := st.db.Exec(
+		`INSERT INTO hostnames(hostname, account_id, app, created_at) VALUES(?,?,?,?)`,
+		"alice-app.piper.localhost", alice.ID, "app", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.DeleteOrg(alice.ID); !errors.Is(err, ErrNoOrg) {
+		t.Fatalf("DeleteOrg(user account id) err = %v, want ErrNoOrg", err)
+	}
+	if err := st.DeleteOrg("nope"); !errors.Is(err, ErrNoOrg) {
+		t.Fatalf("DeleteOrg(bogus id) err = %v, want ErrNoOrg", err)
+	}
+
+	var n int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM hostnames WHERE account_id=?`, alice.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("hostnames row survived refused delete = %d, want 1", n)
 	}
 }

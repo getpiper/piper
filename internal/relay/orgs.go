@@ -430,6 +430,17 @@ func (s *Store) DeleteOrg(orgID string) error {
 		return err
 	}
 	defer tx.Rollback()
+	var otype string
+	err = tx.QueryRow(`SELECT type FROM accounts WHERE id = ?`, orgID).Scan(&otype)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoOrg
+	}
+	if err != nil {
+		return err
+	}
+	if otype != "org" {
+		return ErrNoOrg
+	}
 	var agents int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM agents WHERE account_id = ?`, orgID).Scan(&agents); err != nil {
 		return err
