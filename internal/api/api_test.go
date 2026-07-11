@@ -18,8 +18,12 @@ import (
 )
 
 type fakeDeployer struct {
-	gotApp  string
-	gotFile string
+	gotApp    string
+	gotFile   string
+	stopped   []string
+	deleted   []string
+	stopErr   error
+	deleteErr error
 }
 
 func (f *fakeDeployer) Deploy(_ context.Context, app, srcDir string) (store.Deployment, error) {
@@ -30,6 +34,22 @@ func (f *fakeDeployer) Deploy(_ context.Context, app, srcDir string) (store.Depl
 	}
 	f.gotFile = string(contents)
 	return store.Deployment{ID: "dep1", App: app, Status: "running", HostPort: 40001}, nil
+}
+
+func (f *fakeDeployer) Stop(_ context.Context, app string) error {
+	if f.stopErr != nil {
+		return f.stopErr
+	}
+	f.stopped = append(f.stopped, app)
+	return nil
+}
+
+func (f *fakeDeployer) Delete(_ context.Context, app string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleted = append(f.deleted, app)
+	return nil
 }
 
 func newTestStore(t *testing.T) *store.Store {
@@ -496,5 +516,49 @@ func TestDomainEndpointsWithoutRelay(t *testing.T) {
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("%s without relay = %d, want 409", m, rec.Code)
 		}
+	}
+}
+
+func TestStopEndpoint(t *testing.T) {
+	deployer := &fakeDeployer{}
+	h := New(newTestStore(t), deployer, "piper.localhost", "", nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/stop", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(deployer.stopped) != 1 || deployer.stopped[0] != "blog" {
+		t.Fatalf("stopped = %v, want [blog]", deployer.stopped)
+	}
+}
+
+func TestStopEndpointUnknownApp(t *testing.T) {
+	h := New(newTestStore(t), &fakeDeployer{stopErr: store.ErrNotFound}, "piper.localhost", "", nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/stop", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestDeleteAppEndpoint(t *testing.T) {
+	deployer := &fakeDeployer{}
+	h := New(newTestStore(t), deployer, "piper.localhost", "", nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(deployer.deleted) != 1 || deployer.deleted[0] != "blog" {
+		t.Fatalf("deleted = %v, want [blog]", deployer.deleted)
+	}
+}
+
+func TestDeleteAppEndpointUnknownApp(t *testing.T) {
+	h := New(newTestStore(t), &fakeDeployer{deleteErr: store.ErrNotFound}, "piper.localhost", "", nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/ghost", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }

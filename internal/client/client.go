@@ -135,6 +135,30 @@ func (c *Client) LinkApp(name, repo, branch string) error {
 	return nil
 }
 
+func (c *Client) StopApp(name string) error {
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/stop", "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("stop", resp)
+	}
+	return nil
+}
+
+func (c *Client) DeleteApp(name string) error {
+	resp, err := c.do(http.MethodDelete, "/v1/apps/"+name, "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("delete", resp)
+	}
+	return nil
+}
+
 func (c *Client) Manifest(redirectURL string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"redirect_url": redirectURL})
 	resp, err := c.do(http.MethodPost, "/v1/github/manifest", "application/json", bytes.NewReader(body))

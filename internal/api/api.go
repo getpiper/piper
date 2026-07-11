@@ -19,6 +19,8 @@ import (
 
 type Deployerer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
+	Stop(ctx context.Context, app string) error
+	Delete(ctx context.Context, app string) error
 }
 
 // App is the wire shape of an app in API responses: the stored app plus the
@@ -185,6 +187,26 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			return
 		}
 		if err := s.UpdateAppRepo(r.PathValue("name"), in.Repo, in.Branch); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /v1/apps/{name}/stop", func(w http.ResponseWriter, r *http.Request) {
+		if err := d.Stop(r.Context(), r.PathValue("name")); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /v1/apps/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := d.Delete(r.Context(), r.PathValue("name")); errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {

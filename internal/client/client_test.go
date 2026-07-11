@@ -248,3 +248,40 @@ func TestClientMethodsReportHTTPError(t *testing.T) {
 		})
 	}
 }
+
+func TestStopApp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/stop" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, "").StopApp("blog"); err != nil {
+		t.Fatalf("StopApp: %v", err)
+	}
+}
+
+func TestStopAppErrorIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unknown app", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "").StopApp("ghost")
+	if err == nil || !strings.Contains(err.Error(), "unknown app") {
+		t.Fatalf("err = %v, want body in message", err)
+	}
+}
+
+func TestDeleteApp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/apps/blog" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, "").DeleteApp("blog"); err != nil {
+		t.Fatalf("DeleteApp: %v", err)
+	}
+}

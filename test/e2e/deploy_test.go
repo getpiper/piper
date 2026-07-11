@@ -88,6 +88,40 @@ func TestEndToEndDeploy(t *testing.T) {
 		t.Fatal("no response through Caddy")
 	}
 	fmt.Printf("e2e response: %q\n", body)
+
+	// Stop: the hostname must stop serving the app; the app stays listed as
+	// "stopped" with its history intact.
+	if err := c.StopApp("blog"); err != nil {
+		t.Fatalf("StopApp: %v", err)
+	}
+	afterStop, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("fetch after stop: %v", err)
+	}
+	stopped, _ := io.ReadAll(afterStop.Body)
+	afterStop.Body.Close()
+	if string(stopped) == body {
+		t.Fatalf("hostname still serves the app after stop: %q", stopped)
+	}
+	apps, err := c.ListApps()
+	if err != nil {
+		t.Fatalf("ListApps after stop: %v", err)
+	}
+	if len(apps) != 1 || apps[0].Status != "stopped" {
+		t.Fatalf("apps after stop = %+v, want blog stopped", apps)
+	}
+
+	// Delete: app and state gone.
+	if err := c.DeleteApp("blog"); err != nil {
+		t.Fatalf("DeleteApp: %v", err)
+	}
+	apps, err = c.ListApps()
+	if err != nil {
+		t.Fatalf("ListApps after delete: %v", err)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("apps after delete = %+v, want none", apps)
+	}
 }
 
 func waitPort(t *testing.T, addr string, d time.Duration) {
