@@ -109,3 +109,107 @@ func (s *Store) OrgRole(slug, accountID string) (orgID, role string, err error) 
 	}
 	return orgID, role, nil
 }
+
+// Member is one row of an org's member list.
+type Member struct {
+	Username string
+	Role     string
+}
+
+// ErrNotMember is returned when the target username has no membership row.
+var ErrNotMember = errors.New("not a member")
+
+// ErrLastOwner is returned when a role change or removal would leave the org
+// with no owner.
+var ErrLastOwner = errors.New("an org must keep at least one owner")
+
+// Members lists an org's members, oldest first.
+func (s *Store) Members(orgID string) ([]Member, error) {
+	rows, err := s.db.Query(
+		`SELECT a.username, m.role
+		   FROM org_members m JOIN accounts a ON a.id = m.account_id
+		  WHERE m.org_id = ? ORDER BY m.rowid`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []Member
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.Username, &m.Role); err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+	return members, rows.Err()
+}
+
+// memberForUpdate resolves username's membership row inside tx and, when the
+// change would drop an owner, enforces the last-owner rule.
+func memberForUpdate(tx *sql.Tx, orgID, username string, dropsOwner func(cur string) bool) (targetID string, err error) {
+	var cur string
+	err = tx.QueryRow(
+		`SELECT a.id, m.role
+		   FROM org_members m JOIN accounts a ON a.id = m.account_id
+		  WHERE m.org_id = ? AND a.username = ?`, orgID, username).
+		Scan(&targetID, &cur)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotMember
+	}
+	if err != nil {
+		return "", err
+	}
+	if dropsOwner(cur) {
+		var owners int
+		if err := tx.QueryRow(
+			`SELECT COUNT(*) FROM org_members WHERE org_id = ? AND role = 'owner'`, orgID).
+			Scan(&owners); err != nil {
+			return "", err
+		}
+		if owners <= 1 {
+			return "", ErrLastOwner
+		}
+	}
+	return targetID, nil
+}
+
+// SetMemberRole changes username's role in the org. Demoting the last owner is
+// ErrLastOwner; an unknown target is ErrNotMember.
+func (s *Store) SetMemberRole(orgID, username, role string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	targetID, err := memberForUpdate(tx, orgID, username,
+		func(cur string) bool { return cur == "owner" && role != "owner" })
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE org_members SET role=? WHERE org_id=? AND account_id=?`, role, orgID, targetID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RemoveMember deletes username's membership. Removing the last owner is
+// ErrLastOwner; an unknown target is ErrNotMember. The member's personal
+// account and boxes are untouched.
+func (s *Store) RemoveMember(orgID, username string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	targetID, err := memberForUpdate(tx, orgID, username,
+		func(cur string) bool { return cur == "owner" })
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM org_members WHERE org_id=? AND account_id=?`, orgID, targetID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

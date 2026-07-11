@@ -107,3 +107,79 @@ func TestOrgAgentQuotaIsIndependent(t *testing.T) {
 		t.Fatalf("org base domain = %q, want suffix %q", en.BaseDomain, want)
 	}
 }
+
+// addMember inserts a membership row directly; org/membership tests must not
+// depend on the invite flow.
+func addMember(t *testing.T, st *Store, orgID, accountID, role string) {
+	t.Helper()
+	if _, err := st.db.Exec(
+		`INSERT INTO org_members(org_id, account_id, role, created_at)
+		 VALUES(?,?,?,'2026-01-01T00:00:00Z')`, orgID, accountID, role); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMembersListsUsernamesAndRoles(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "bob")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	addMember(t, st, org.ID, bob.ID, "member")
+
+	members, err := st.Members(org.ID)
+	if err != nil {
+		t.Fatalf("Members: %v", err)
+	}
+	if len(members) != 2 ||
+		members[0] != (Member{Username: "alice", Role: "owner"}) ||
+		members[1] != (Member{Username: "bob", Role: "member"}) {
+		t.Fatalf("members = %+v, want [alice/owner bob/member]", members)
+	}
+}
+
+func TestSetMemberRolePromotesAndGuardsLastOwner(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "bob")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	addMember(t, st, org.ID, bob.ID, "member")
+
+	// Sole owner cannot demote themselves.
+	if err := st.SetMemberRole(org.ID, "alice", "member"); !errors.Is(err, ErrLastOwner) {
+		t.Fatalf("demote sole owner err = %v, want ErrLastOwner", err)
+	}
+	// Promote bob, then alice may step down.
+	if err := st.SetMemberRole(org.ID, "bob", "owner"); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if err := st.SetMemberRole(org.ID, "alice", "member"); err != nil {
+		t.Fatalf("demote after promote: %v", err)
+	}
+	// Unknown target.
+	if err := st.SetMemberRole(org.ID, "nobody", "member"); !errors.Is(err, ErrNotMember) {
+		t.Fatalf("unknown member err = %v, want ErrNotMember", err)
+	}
+}
+
+func TestRemoveMemberGuardsLastOwner(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("gh-alice", "alice")
+	bob, _ := st.UpsertAccount("gh-bob", "bob")
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	addMember(t, st, org.ID, bob.ID, "member")
+
+	if err := st.RemoveMember(org.ID, "alice"); !errors.Is(err, ErrLastOwner) {
+		t.Fatalf("remove sole owner err = %v, want ErrLastOwner", err)
+	}
+	if err := st.RemoveMember(org.ID, "bob"); err != nil {
+		t.Fatalf("remove member: %v", err)
+	}
+	if err := st.RemoveMember(org.ID, "bob"); !errors.Is(err, ErrNotMember) {
+		t.Fatalf("re-remove err = %v, want ErrNotMember", err)
+	}
+	// Removal is real: bob no longer lists the org.
+	orgs, _ := st.OrgsForAccount(bob.ID)
+	if len(orgs) != 0 {
+		t.Fatalf("bob still in orgs: %+v", orgs)
+	}
+}
