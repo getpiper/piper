@@ -1,4 +1,4 @@
-.PHONY: build test cross fmt verify
+.PHONY: build test e2e cross fmt verify
 # -s -w strip the symbol table and DWARF debug info: no runtime effect, and it
 # claws back the bulk of embedded Caddy's size (piperd ~70M -> ~48M).
 LDFLAGS := -s -w
@@ -8,6 +8,10 @@ build:
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/piper-relay ./cmd/piper-relay
 test:
 	go test ./...
+# e2e runs the end-to-end suite against real Docker. Needs :80, :2019 and
+# :8088 free — a leftover caddy on those ports fails the suite (see #126).
+e2e:
+	RUN_E2E=1 go test ./test/e2e/... -count=1 -v
 cross:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /dev/null ./...
 # fmt rewrites every Go file in place. Run it if `verify` reports unformatted code.
