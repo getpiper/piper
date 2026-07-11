@@ -220,7 +220,30 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	en, err := a.st.EnrollForAccount(acc.ID)
+	// Optional body: {"org":"<slug>"} enrolls the box into an org the caller
+	// owns. No/empty body is personal enrollment, unchanged.
+	var req struct {
+		Org string `json:"org"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	targetID := acc.ID
+	if req.Org != "" {
+		orgID, role, err := a.st.OrgRole(req.Org, acc.ID)
+		if errors.Is(err, ErrNoOrg) {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, "org error", http.StatusInternalServerError)
+			return
+		}
+		if role != "owner" {
+			http.Error(w, "owner role required", http.StatusForbidden)
+			return
+		}
+		targetID = orgID
+	}
+	en, err := a.st.EnrollForAccount(targetID)
 	if errors.Is(err, ErrQuotaExceeded) {
 		http.Error(w, "agent quota exceeded", http.StatusTooManyRequests)
 		return

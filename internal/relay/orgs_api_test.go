@@ -274,3 +274,45 @@ func TestInviteDeclineAndRevokeEndpoints(t *testing.T) {
 		t.Fatalf("accept unknown org: %d, want 404", rr.Code)
 	}
 }
+
+func TestEnrollIntoOrg(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	orgWithMember(t, st, aliceCred, bobCred) // alice owner, bob member
+
+	// Owner enrolls into the org: base domain carries the org slug.
+	rr := apiReq(t, api, "POST", "/v1/enroll", aliceCred, `{"org":"acme"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("org enroll: %d (body %s)", rr.Code, rr.Body.String())
+	}
+	var en struct {
+		BaseDomain string `json:"base_domain"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&en); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(en.BaseDomain, "-acme.") {
+		t.Fatalf("base domain = %q, want the acme org slug", en.BaseDomain)
+	}
+
+	// A plain member may not enroll (owners manage the footprint).
+	if rr := apiReq(t, api, "POST", "/v1/enroll", bobCred, `{"org":"acme"}`); rr.Code != http.StatusForbidden {
+		t.Fatalf("member org enroll: %d, want 403", rr.Code)
+	}
+	// Unknown org and non-member are indistinguishable 404s.
+	if rr := apiReq(t, api, "POST", "/v1/enroll", aliceCred, `{"org":"ghost"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown org enroll: %d, want 404", rr.Code)
+	}
+
+	// No body: personal enrollment still works exactly as before.
+	rr = apiReq(t, api, "POST", "/v1/enroll", aliceCred, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("personal enroll: %d", rr.Code)
+	}
+	en.BaseDomain = ""
+	if err := json.NewDecoder(rr.Body).Decode(&en); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(en.BaseDomain, "-alice.") {
+		t.Fatalf("personal base domain = %q, want the alice slug", en.BaseDomain)
+	}
+}
