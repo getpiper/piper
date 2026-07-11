@@ -11,21 +11,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/store"
 )
 
 type Client struct {
-	base  string
-	token string
-	http  *http.Client
+	base         string
+	token        string
+	http         *http.Client
+	pollInterval time.Duration
 }
 
 func New(base, token string) *Client {
 	if base == "" {
 		base = "http://127.0.0.1:8088"
 	}
-	return &Client{base: base, token: token, http: &http.Client{}}
+	return &Client{base: base, token: token, http: &http.Client{}, pollInterval: time.Second}
 }
 
 // do builds a request to c.base+path, attaches the auth header (when set) and
@@ -101,24 +104,104 @@ func (c *Client) Liveness() (Liveness, error) {
 	return l, nil
 }
 
-func (c *Client) Deploy(name, srcDir string) (api.DeployResult, error) {
+func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 	var body bytes.Buffer
 	if err := TarDir(srcDir, &body); err != nil {
-		return api.DeployResult{}, err
+		return store.Deployment{}, err
 	}
 	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
 	if err != nil {
-		return api.DeployResult{}, err
+		return store.Deployment{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= http.StatusMultipleChoices {
-		return api.DeployResult{}, responseError("deploy", resp)
+		return store.Deployment{}, responseError("deploy", resp)
 	}
-	var res api.DeployResult
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return api.DeployResult{}, err
+	var dep store.Deployment
+	if err := json.NewDecoder(resp.Body).Decode(&dep); err != nil {
+		return store.Deployment{}, err
 	}
-	return res, nil
+	return dep, nil
+}
+
+func (c *Client) Deployments(name string) ([]store.Deployment, error) {
+	resp, err := c.do(http.MethodGet, "/v1/apps/"+name+"/deployments", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, responseError("deployments", resp)
+	}
+	var deps []store.Deployment
+	if err := json.NewDecoder(resp.Body).Decode(&deps); err != nil {
+		return nil, err
+	}
+	return deps, nil
+}
+
+func (c *Client) DeploymentLogs(name, id string) (string, error) {
+	resp, err := c.do(http.MethodGet, "/v1/apps/"+name+"/deployments/"+id+"/logs", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return "", responseError("deployment logs", resp)
+	}
+	b, err := io.ReadAll(resp.Body)
+	return string(b), err
+}
+
+func (c *Client) App(name string) (api.App, error) {
+	resp, err := c.do(http.MethodGet, "/v1/apps/"+name, "", nil)
+	if err != nil {
+		return api.App{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return api.App{}, responseError("app", resp)
+	}
+	var a api.App
+	if err := json.NewDecoder(resp.Body).Decode(&a); err != nil {
+		return api.App{}, err
+	}
+	return a, nil
+}
+
+// FollowDeploy polls until the deployment reaches a terminal status, writing
+// new log bytes to progress as the stored log grows. Returns the terminal
+// deployment.
+func (c *Client) FollowDeploy(name, id string, progress io.Writer) (store.Deployment, error) {
+	printed := 0
+	for {
+		logs, err := c.DeploymentLogs(name, id)
+		if err != nil {
+			return store.Deployment{}, err
+		}
+		if len(logs) >= printed {
+			_, _ = io.WriteString(progress, logs[printed:])
+		} else {
+			// Tail-cap dropped the front (log exceeded the cap): reprint whole.
+			_, _ = io.WriteString(progress, logs)
+		}
+		printed = len(logs)
+
+		deps, err := c.Deployments(name)
+		if err != nil {
+			return store.Deployment{}, err
+		}
+		for _, d := range deps {
+			if d.ID != id {
+				continue
+			}
+			switch d.Status {
+			case "running", "failed", "stopped":
+				return d, nil
+			}
+		}
+		time.Sleep(c.pollInterval)
+	}
 }
 
 func (c *Client) LinkApp(name, repo, branch string) error {

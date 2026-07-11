@@ -11,11 +11,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/store"
 )
+
+func writeJSONTest(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
 
 func TestTarDirWritesRelativeFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -145,10 +152,8 @@ func TestDeploy(t *testing.T) {
 		} else if hdr.Name != "Dockerfile" {
 			t.Errorf("tar entry = %q", hdr.Name)
 		}
-		_ = json.NewEncoder(w).Encode(api.DeployResult{
-			Deployment: store.Deployment{ID: "dep1", App: "blog", Status: "running"},
-			Hostname:   "blog.piper.localhost",
-		})
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
 	}))
 	defer srv.Close()
 
@@ -156,8 +161,47 @@ func TestDeploy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
-	if dep.ID != "dep1" || dep.Status != "running" || dep.Hostname != "blog.piper.localhost" {
+	if dep.ID != "dep1" || dep.Status != "building" {
 		t.Errorf("deployment = %+v", dep)
+	}
+}
+
+func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
+	var polls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/apps/web/deployments/dep1/logs":
+			n := atomic.AddInt32(&polls, 1)
+			w.Header().Set("Content-Type", "text/plain")
+			if n < 3 {
+				io.WriteString(w, "line1\n")
+			} else {
+				io.WriteString(w, "line1\nline2\n")
+			}
+		case r.URL.Path == "/v1/apps/web/deployments":
+			status := "building"
+			if atomic.LoadInt32(&polls) >= 3 {
+				status = "running"
+			}
+			writeJSONTest(w, []store.Deployment{{ID: "dep1", App: "web", Status: status}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	c.pollInterval = time.Millisecond
+	var progress bytes.Buffer
+	dep, err := c.FollowDeploy("web", "dep1", &progress)
+	if err != nil {
+		t.Fatalf("FollowDeploy: %v", err)
+	}
+	if dep.Status != "running" {
+		t.Fatalf("status = %q, want running", dep.Status)
+	}
+	if progress.String() != "line1\nline2\n" {
+		t.Fatalf("progress = %q, want the full log printed once (no dupes)", progress.String())
 	}
 }
 
