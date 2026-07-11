@@ -81,3 +81,4 @@ Descoped from the epic, tracked standalone:
 ## Always-green gates
 
 - `make test` (unit; Docker/e2e skip cleanly when absent) · `make cross` (no-cgo arm64 build)
+- `make e2e` (real Docker; runs in CI on code-touching PRs, non-required) — [#128](https://github.com/getpiper/piper/issues/128)

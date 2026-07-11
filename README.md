@@ -171,5 +171,6 @@ Trunk-based: `main` is the only long-lived branch. Branch off `main`, open a PR 
 
 - Changes land only via pull request (no direct pushes); squash-merge only, head branch auto-deleted.
 - The CI **`verify`** check (gofmt · `go vet` · `make test` · `make cross`) must pass, and the branch must be up to date, before merging.
+- The CI **`e2e`** check runs the end-to-end suite (`make e2e`) against real Docker on every code-touching PR. It's informational, not required to merge. To run it locally you need Docker and free ports `:80`, `:2019` (embedded Caddy's admin API), and `:8088`; the relay tests also use `:8443`/`:7000`.
 - Conversation resolution and linear history required; force-pushes and branch deletion blocked; rules apply to admins too.
 - Approving reviews are not yet required (single maintainer) — this bumps to 1 once there's a second reviewer.
