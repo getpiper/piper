@@ -9,6 +9,23 @@ import (
 	"github.com/getpiper/piper/internal/config"
 )
 
+// shellJoin quotes args so the sudo hint is safe to paste into a shell.
+func shellJoin(args []string) string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if a == "" {
+			out[i] = "''"
+			continue
+		}
+		if strings.ContainsAny(a, " \t\n'\"\\$`!#&*;|<>()[]{}?") {
+			out[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+			continue
+		}
+		out[i] = a
+	}
+	return strings.Join(out, " ")
+}
+
 // ownerOf returns the uid/gid owning path.
 func ownerOf(path string) (uid, gid int, err error) {
 	fi, err := os.Stat(path)
@@ -67,7 +84,7 @@ func resolveTokenDataDir(args []string) (string, error) {
 		return "", err
 	}
 	if os.Geteuid() != 0 {
-		return "", fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, strings.Join(args, " "))
+		return "", fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, shellJoin(args))
 	}
 	if err := dropToStateDirOwner(config.SystemStateDir); err != nil {
 		return "", err

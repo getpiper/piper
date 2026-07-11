@@ -136,6 +136,24 @@ func TestResolveTokenDataDirSystemManagedNonRoot(t *testing.T) {
 	if !strings.Contains(err.Error(), "sudo piperd token create --name laptop") {
 		t.Errorf("error %q does not name the sudo command to run", err)
 	}
+
+	_, err = resolveTokenDataDir([]string{"create", "--name", "my laptop"})
+	if err == nil {
+		t.Fatal("want error for non-root on a systemd-managed box")
+	}
+	if !strings.Contains(err.Error(), `sudo piperd token create --name 'my laptop'`) {
+		t.Errorf("error %q does not shell-quote spaced args", err)
+	}
+}
+
+func TestShellJoin(t *testing.T) {
+	got := shellJoin([]string{"create", "--name", "my laptop"})
+	if got != `create --name 'my laptop'` {
+		t.Errorf("shellJoin = %q", got)
+	}
+	if shellJoin([]string{"list"}) != "list" {
+		t.Errorf("plain args should stay unquoted")
+	}
 }
 
 func TestResolveTokenDataDirStateDirMissing(t *testing.T) {
