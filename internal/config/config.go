@@ -88,6 +88,12 @@ func DefaultDataDir() string { return defaultDataDir() }
 // login user can't touch. A var so tests can point it at a scratch directory.
 var SystemEnvDir = "/etc/piper"
 
+// SystemStateDir is piperd's DynamicUser StateDirectory under the shipped
+// systemd unit (Environment=PIPER_DATA_DIR= in piperd.service). `piperd token`
+// targets it on a systemd-managed box so tokens land in the DB the running
+// service reads. A var so tests can point it at a scratch directory.
+var SystemStateDir = "/var/lib/piper"
+
 // SystemEnvFile is piperd's EnvironmentFile within SystemEnvDir.
 func SystemEnvFile() string { return filepath.Join(SystemEnvDir, "piperd.env") }
 
