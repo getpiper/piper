@@ -470,8 +470,8 @@ func TestDeploySuccessPersistsBuildLog(t *testing.T) {
 		t.Fatalf("Deploy: %v", err)
 	}
 	logs := deploymentLog(t, s, "blog")
-	if logs != "build ok\n" {
-		t.Errorf("logs = %q, want build log only (no container output on success)", logs)
+	if !strings.Contains(logs, "build ok") || strings.Contains(logs, "container output") {
+		t.Errorf("logs = %q, want build log present, no container output on success", logs)
 	}
 }
 
@@ -576,6 +576,126 @@ func TestDeployCombinedLogIsTailCapped(t *testing.T) {
 	}
 	if !strings.HasSuffix(logs, "unhealthy\n") {
 		t.Error("error text must be the tail (recorded after container output)")
+	}
+}
+
+func TestBeginCreatesBuildingRow(t *testing.T) {
+	s, _ := newStore(t)
+	d := New(s, &runtime.FakeRuntime{}, newFakeCaddy(), "piper.localhost")
+	dep, err := d.Begin("blog")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if dep.Status != "building" {
+		t.Fatalf("status = %q, want building", dep.Status)
+	}
+	// LatestRunning must ignore a building row.
+	if _, err := s.LatestRunning("blog"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("LatestRunning on building row = %v, want ErrNotFound", err)
+	}
+}
+
+func TestFinishSucceedsAndPersistsLog(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img-1", Log: "built ok\n"},
+		BuildOutput:    "pulling...\nbuilt ok\n",
+		RunResultVal:   runtime.RunResult{ContainerID: "cid-1", HostPort: 40001},
+	}
+	caddy := newFakeCaddy()
+	d := New(s, rt, caddy, "piper.localhost")
+
+	dep, err := d.Begin("blog")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if err := d.Finish(context.Background(), dep, t.TempDir()); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	got, err := s.LatestDeployment("blog")
+	if err != nil {
+		t.Fatalf("LatestDeployment: %v", err)
+	}
+	if got.Status != "running" || got.ContainerID != "cid-1" || got.HostPort != 40001 {
+		t.Fatalf("finalized = %+v", got)
+	}
+	if caddy.upserts["blog.piper.localhost"] != 40001 {
+		t.Fatalf("route not set: %+v", caddy.upserts)
+	}
+	logs, _ := s.DeploymentLogs("blog", dep.ID)
+	if !strings.Contains(logs, "built ok") {
+		t.Fatalf("logs missing build output: %q", logs)
+	}
+}
+
+func TestFinishBuildFailureFinalizesSameRowFailed(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{Log: "boom\n"},
+		BuildErr:       errors.New("build blew up"),
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	dep, err := d.Begin("blog")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if err := d.Finish(context.Background(), dep, t.TempDir()); err == nil {
+		t.Fatal("Finish: expected error")
+	}
+	// Same row, now failed — no second row created.
+	all, _ := s.ListDeployments("blog")
+	if len(all) != 1 {
+		t.Fatalf("want 1 deployment row, got %d", len(all))
+	}
+	if all[0].ID != dep.ID || all[0].Status != "failed" {
+		t.Fatalf("row = %+v", all[0])
+	}
+	logs, _ := s.DeploymentLogs("blog", dep.ID)
+	if !strings.Contains(logs, "boom") {
+		t.Fatalf("failed log missing build output: %q", logs)
+	}
+}
+
+func TestDeployWrapperEqualsBeginFinish(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img-1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "cid-1", HostPort: 40002},
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+	dep, err := d.Deploy(context.Background(), "blog", t.TempDir())
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if dep.Status != "running" || dep.HostPort != 40002 {
+		t.Fatalf("deploy result = %+v", dep)
+	}
+}
+
+func TestLogSinkFlushesOnInterval(t *testing.T) {
+	s, _ := newStore(t)
+	dep, err := s.CreateDeployment("blog", "", "", 0, "building", "")
+	if err != nil {
+		t.Fatalf("CreateDeployment: %v", err)
+	}
+	sink := &logSink{store: s, id: dep.ID}
+	// First write: lastFlush is zero → flushes immediately.
+	_, _ = sink.Write([]byte("chunk-a\n"))
+	if logs, _ := s.DeploymentLogs("blog", dep.ID); logs != "chunk-a\n" {
+		t.Fatalf("after first write logs = %q", logs)
+	}
+	// Second write within the interval: buffered, not yet flushed.
+	sink.lastFlush = time.Now()
+	_, _ = sink.Write([]byte("chunk-b\n"))
+	if logs, _ := s.DeploymentLogs("blog", dep.ID); logs != "chunk-a\n" {
+		t.Fatalf("debounced logs = %q, want unchanged", logs)
+	}
+	// Interval elapsed: next write flushes the whole buffer.
+	sink.lastFlush = time.Now().Add(-2 * logFlushInterval)
+	_, _ = sink.Write([]byte("chunk-c\n"))
+	if logs, _ := s.DeploymentLogs("blog", dep.ID); logs != "chunk-a\nchunk-b\nchunk-c\n" {
+		t.Fatalf("after interval logs = %q", logs)
 	}
 }
 
