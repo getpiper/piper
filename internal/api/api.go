@@ -31,6 +31,14 @@ type App struct {
 	Status string
 }
 
+// DeployResult is the wire shape of a deploy response: the deployment plus the
+// public hostname the app is now served on (#93), so `piper deploy` can print
+// the URL that actually serves the app instead of a guessed one.
+type DeployResult struct {
+	store.Deployment
+	Hostname string
+}
+
 // latestStatus resolves the App.Status for one app; never-deployed is "".
 func latestStatus(s *store.Store, app string) (string, error) {
 	d, err := s.LatestDeployment(app)
@@ -175,7 +183,12 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, dep)
+		app, err := s.GetApp(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, DeployResult{Deployment: dep, Hostname: app.Hostname})
 	})
 	mux.HandleFunc("POST /v1/apps/{name}/link", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

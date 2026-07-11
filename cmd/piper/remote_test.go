@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/store"
 )
@@ -122,7 +123,7 @@ func TestRunRemoteRequiresRelayLogin(t *testing.T) {
 	}
 }
 
-func TestRunRemoteDeployPrintsNoLocalURL(t *testing.T) {
+func TestRunRemoteDeployPrintsAssignedURL(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
 	t.Setenv("PIPER_TOKEN", "")
@@ -134,7 +135,10 @@ func TestRunRemoteDeployPrintsNoLocalURL(t *testing.T) {
 		if r.URL.Path != "/agents/ab12-alice.public.getpiper.co/v1/apps/blog/deploy" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "running"})
+		_ = json.NewEncoder(w).Encode(api.DeployResult{
+			Deployment: store.Deployment{ID: "dep1", App: "blog", Status: "running"},
+			Hostname:   "ab12-alice.public.getpiper.co",
+		})
 	}))
 	defer srv.Close()
 	if err := config.SaveClient(config.ClientConfig{RelayAPI: srv.URL, AccountCredential: "cred-xyz"}); err != nil {
@@ -145,7 +149,8 @@ func TestRunRemoteDeployPrintsNoLocalURL(t *testing.T) {
 	if code := run([]string{"--remote", "ab12-alice.public.getpiper.co", "deploy", "blog", "--path", srcDir}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	if got := stdout.String(); got != "deployed blog (running)\n" {
-		t.Errorf("stdout = %q, want %q", got, "deployed blog (running)\n")
+	want := "deployed blog: https://ab12-alice.public.getpiper.co (running)\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }

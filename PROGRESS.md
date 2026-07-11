@@ -50,7 +50,7 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
   - ✅ account agent list — `GET /agents` on the relay control API returns the caller's enrolled agents with liveness — [#98](https://github.com/getpiper/piper/issues/98)
   - ✅ domain-config API — BYO base domain + DNS creds settable remotely, live cert issuance + relay splice, shared-domain coexistence — [#102](https://github.com/getpiper/piper/issues/102)
   - ✅ Organizations — org accounts, membership + invites, org-scoped control authz — [#104](https://github.com/getpiper/piper/issues/104)
-  - ⬜ surface the relay-assigned public host in `piper list` / deploy output (e2e reads it from the relay DB today)
+  - ✅ surface the routed public host — persisted on the app row at deploy; in the deploy response + `piper deploy` URL and the apps API + `piper list` — [#93](https://github.com/getpiper/piper/issues/93) [#100](https://github.com/getpiper/piper/issues/100)
   - ⬜ LAN `login` load-mutate-save so it doesn't clobber stored relay creds — [#84](https://github.com/getpiper/piper/issues/84)
   - ⬜ thread `context.Context` through `relayclient` requests — [#85](https://github.com/getpiper/piper/issues/85)
 - ⬜ **Epic [#49](https://github.com/getpiper/piper/issues/49) remains open** — the rest of the remote control-plane track is not built: hosted dashboard [#76](https://github.com/getpiper/piper/issues/76). The gate [#72](https://github.com/getpiper/piper/issues/72), the onboarding slice [#90](https://github.com/getpiper/piper/issues/90), control-stream routing [#73](https://github.com/getpiper/piper/issues/73), remote CLI target [#74](https://github.com/getpiper/piper/issues/74), and health/metrics [#75](https://github.com/getpiper/piper/issues/75) are done.

@@ -197,6 +197,79 @@ func TestDeployUploadExtractsAndCallsDeployer(t *testing.T) {
 	}
 }
 
+func TestAppsAPIIncludesHostname(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	if err := s.SetAppHostname("blog", "hash-blog-alice.public.getpiper.co"); err != nil {
+		t.Fatalf("SetAppHostname: %v", err)
+	}
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil, nil)
+
+	get := httptest.NewRecorder()
+	h.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/apps/blog", nil))
+	var one App
+	if err := json.NewDecoder(get.Body).Decode(&one); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if one.Hostname != "hash-blog-alice.public.getpiper.co" {
+		t.Errorf("GET app hostname = %q", one.Hostname)
+	}
+
+	list := httptest.NewRecorder()
+	h.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/apps", nil))
+	var many []App
+	if err := json.NewDecoder(list.Body).Decode(&many); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(many) != 1 || many[0].Hostname != "hash-blog-alice.public.getpiper.co" {
+		t.Errorf("list hostname = %+v", many)
+	}
+}
+
+func TestDeployResponseIncludesHostname(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	// Stand in for what Deploy persists on a real box.
+	if err := s.SetAppHostname("blog", "hash-blog-alice.public.getpiper.co"); err != nil {
+		t.Fatalf("SetAppHostname: %v", err)
+	}
+	h := New(s, &fakeDeployer{}, "piper.localhost", "", nil, nil)
+
+	var body bytes.Buffer
+	tw := tar.NewWriter(&body)
+	contents := []byte("FROM alpine\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "Dockerfile", Mode: 0o644, Size: int64(len(contents))}); err != nil {
+		t.Fatalf("WriteHeader: %v", err)
+	}
+	if _, err := tw.Write(contents); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Close tar: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/apps/blog/deploy", &body)
+	req.Header.Set("Content-Type", "application/x-tar")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var res DeployResult
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if res.Status != "running" {
+		t.Errorf("status = %q", res.Status)
+	}
+	if res.Hostname != "hash-blog-alice.public.getpiper.co" {
+		t.Errorf("deploy response hostname = %q", res.Hostname)
+	}
+}
+
 func TestReservedNameRejected(t *testing.T) {
 	h := New(newTestStore(t), &fakeDeployer{}, "piper.localhost", "", nil, nil)
 	body := strings.NewReader(`{"name":"hooks","port":8080}`)

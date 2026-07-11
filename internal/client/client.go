@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
 )
 
 type Client struct {
@@ -102,24 +101,24 @@ func (c *Client) Liveness() (Liveness, error) {
 	return l, nil
 }
 
-func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
+func (c *Client) Deploy(name, srcDir string) (api.DeployResult, error) {
 	var body bytes.Buffer
 	if err := TarDir(srcDir, &body); err != nil {
-		return store.Deployment{}, err
+		return api.DeployResult{}, err
 	}
 	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
 	if err != nil {
-		return store.Deployment{}, err
+		return api.DeployResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= http.StatusMultipleChoices {
-		return store.Deployment{}, responseError("deploy", resp)
+		return api.DeployResult{}, responseError("deploy", resp)
 	}
-	var dep store.Deployment
-	if err := json.NewDecoder(resp.Body).Decode(&dep); err != nil {
-		return store.Deployment{}, err
+	var res api.DeployResult
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return api.DeployResult{}, err
 	}
-	return dep, nil
+	return res, nil
 }
 
 func (c *Client) LinkApp(name, repo, branch string) error {

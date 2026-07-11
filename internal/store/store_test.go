@@ -83,6 +83,44 @@ func TestGitHubAppRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSetAppHostname(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	// Fresh apps carry no hostname until first deploy.
+	got, err := s.GetApp("blog")
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if got.Hostname != "" {
+		t.Fatalf("new app hostname = %q, want empty", got.Hostname)
+	}
+
+	if err := s.SetAppHostname("blog", "hash-blog-alice.public.getpiper.co"); err != nil {
+		t.Fatalf("SetAppHostname: %v", err)
+	}
+	got, err = s.GetApp("blog")
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if got.Hostname != "hash-blog-alice.public.getpiper.co" {
+		t.Fatalf("hostname = %q", got.Hostname)
+	}
+	// ListApps surfaces it too.
+	apps, err := s.ListApps()
+	if err != nil {
+		t.Fatalf("ListApps: %v", err)
+	}
+	if len(apps) != 1 || apps[0].Hostname != "hash-blog-alice.public.getpiper.co" {
+		t.Fatalf("ListApps hostname = %+v", apps)
+	}
+
+	if err := s.SetAppHostname("nope", "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetAppHostname unknown app err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestGetAppNotFound(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.GetApp("nope"); !errors.Is(err, ErrNotFound) {

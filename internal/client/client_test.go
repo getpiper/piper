@@ -145,7 +145,10 @@ func TestDeploy(t *testing.T) {
 		} else if hdr.Name != "Dockerfile" {
 			t.Errorf("tar entry = %q", hdr.Name)
 		}
-		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "running"})
+		_ = json.NewEncoder(w).Encode(api.DeployResult{
+			Deployment: store.Deployment{ID: "dep1", App: "blog", Status: "running"},
+			Hostname:   "blog.piper.localhost",
+		})
 	}))
 	defer srv.Close()
 
@@ -153,7 +156,7 @@ func TestDeploy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
-	if dep.ID != "dep1" || dep.Status != "running" {
+	if dep.ID != "dep1" || dep.Status != "running" || dep.Hostname != "blog.piper.localhost" {
 		t.Errorf("deployment = %+v", dep)
 	}
 }

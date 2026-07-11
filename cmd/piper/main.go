@@ -49,6 +49,20 @@ func dialClient(remote string, stderr io.Writer) (*client.Client, bool) {
 	return client.New(cc.Addr, cc.Token), true
 }
 
+// appURL renders the URL an app is served on from its stored hostname. A
+// relay-terminated box (remote target) serves over HTTPS; a local/BYO box
+// serves its base-domain host over HTTP. Empty hostname (never deployed)
+// yields "".
+func appURL(hostname string, remote bool) string {
+	if hostname == "" {
+		return ""
+	}
+	if remote {
+		return "https://" + hostname
+	}
+	return "http://" + hostname
+}
+
 // login verifies token against the target (GET /v1/apps) and, on success,
 // saves it to ~/.piper/piper/config.json.
 func login(addr, token string, stdout, stderr io.Writer) int {
@@ -190,13 +204,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
-		if *remote != "" {
-			// The app's public hostname is relay-assigned at deploy time and
-			// not in the response; print no URL rather than a wrong one.
-			fmt.Fprintf(stdout, "deployed %s (%s)\n", name, dep.Status)
-		} else {
-			fmt.Fprintf(stdout, "deployed %s: http://%s.piper.localhost (%s)\n", name, name, dep.Status)
-		}
+		fmt.Fprintf(stdout, "deployed %s: %s (%s)\n", name, appURL(dep.Hostname, *remote != ""), dep.Status)
 		return 0
 	case "list":
 		if len(args) != 1 {
@@ -213,7 +221,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		for _, app := range apps {
-			fmt.Fprintf(stdout, "%s\tport=%d\n", app.Name, app.Port)
+			if url := appURL(app.Hostname, *remote != ""); url != "" {
+				fmt.Fprintf(stdout, "%s\tport=%d\t%s\n", app.Name, app.Port, url)
+			} else {
+				fmt.Fprintf(stdout, "%s\tport=%d\n", app.Name, app.Port)
+			}
 		}
 		return 0
 	case "status":
