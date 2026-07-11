@@ -12,12 +12,13 @@ import (
 
 // NewControlProxy serves /agents and /agents/<base-domain>/v1/*: it
 // authenticates the caller's relay account credential, authorizes that the
-// account owns the agent, and reverse-proxies the request over the agent's
-// tunnel as a KindControlAPI stream — swapping the caller's credential for the
-// box's stored control bearer. The box still validates that bearer on every
-// request (#77); the relay hop grants nothing at the box. Unknown and unowned
-// agents are both 404 so existence is never leaked across tenants. Bare
-// /agents lists the caller's own enrolled agents with liveness (#98).
+// account owns the agent or is a member of the owning org (#104), and
+// reverse-proxies the request over the agent's tunnel as a KindControlAPI
+// stream — swapping the caller's credential for the box's stored control
+// bearer. The box still validates that bearer on every request (#77); the
+// relay hop grants nothing at the box. Unknown and unowned agents are both
+// 404 so existence is never leaked across tenants. Bare /agents lists the
+// caller's own enrolled agents with liveness (#98).
 func NewControlProxy(st *Store, router *Router) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cred, ok := bearerToken(r)
@@ -43,22 +44,27 @@ func NewControlProxy(st *Store, router *Router) http.Handler {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			bases, err := st.AgentsForAccount(acc.ID)
+			visible, err := st.AgentsVisibleTo(acc.ID)
 			if err != nil {
 				http.Error(w, "list failed", http.StatusInternalServerError)
 				return
 			}
-			agents := make([]map[string]any, 0, len(bases))
-			for _, b := range bases {
-				_, connected := router.Lookup(b)
-				agents = append(agents, map[string]any{"agent": b, "connected": connected})
+			agents := make([]map[string]any, 0, len(visible))
+			for _, a := range visible {
+				_, connected := router.Lookup(a.BaseDomain)
+				agents = append(agents, map[string]any{"agent": a.BaseDomain, "owner": a.Owner, "connected": connected})
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 			return
 		}
 
 		ownerID, _, err := st.AgentAccount(base)
-		if err != nil || ownerID != acc.ID {
+		if err != nil {
+			// Unknown agent and disabled owner both 404: no existence leak.
+			http.NotFound(w, r)
+			return
+		}
+		if ok, err := st.CanControl(acc.ID, ownerID); err != nil || !ok {
 			http.NotFound(w, r)
 			return
 		}

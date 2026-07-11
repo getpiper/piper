@@ -301,3 +301,121 @@ func TestControlProxyListAgents(t *testing.T) {
 		t.Errorf("POST list: %d, want 405", pr.Code)
 	}
 }
+
+// orgProxyFixture: alice owns org "acme" with an enrolled agent; bob is a
+// member, mallory a stranger.
+func orgProxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router, bobCred, malloryCred, base string) {
+	t.Helper()
+	st = openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	alice, err := st.UpsertAccount("sub-alice", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := st.UpsertAccount("sub-bob", "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobCred, _ = st.MintAccountCredential(bob.ID)
+	mallory, err := st.UpsertAccount("sub-mallory", "mallory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	malloryCred, _ = st.MintAccountCredential(mallory.ID)
+
+	org, err := st.CreateOrg(alice.ID, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addMember(t, st, org.ID, bob.ID, "member")
+	en, err := st.EnrollForAccount(org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base = en.BaseDomain
+	router = NewRouter()
+	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router, nil)
+	return
+}
+
+func TestControlProxyOrgMemberDrivesBox(t *testing.T) {
+	api, st, router, bobCred, malloryCred, base := orgProxyFixture(t)
+	relaySess, agentSess := pipeSession(t, base)
+	router.Register(relaySess)
+	go fakeBox(agentSess)
+	if err := st.SetControlToken(base, "boxtok"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A plain member drives the org's box end-to-end, Token B injected.
+	rr := proxyGet(t, api, "/agents/"+base+"/v1/apps", bobCred)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("member request: %d, body %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "auth=Bearer boxtok") {
+		t.Fatalf("Token B not injected for member: %q", rr.Body.String())
+	}
+
+	// A non-member gets 404 — indistinguishable from an unknown agent.
+	if rr := proxyGet(t, api, "/agents/"+base+"/v1/apps", malloryCred); rr.Code != http.StatusNotFound {
+		t.Fatalf("non-member: %d, want 404", rr.Code)
+	}
+	// Liveness is equally gated.
+	if rr := proxyGet(t, api, "/agents/"+base, malloryCred); rr.Code != http.StatusNotFound {
+		t.Fatalf("non-member liveness: %d, want 404", rr.Code)
+	}
+}
+
+func TestControlProxyDisabledOrgSeversMembers(t *testing.T) {
+	api, st, router, bobCred, _, base := orgProxyFixture(t)
+	relaySess, agentSess := pipeSession(t, base)
+	router.Register(relaySess)
+	go fakeBox(agentSess)
+
+	if err := st.DisableAccount("acme"); err != nil {
+		t.Fatal(err)
+	}
+	if rr := proxyGet(t, api, "/agents/"+base+"/v1/apps", bobCred); rr.Code != http.StatusNotFound {
+		t.Fatalf("disabled org: %d, want 404", rr.Code)
+	}
+}
+
+func TestControlProxyListIncludesOrgAgentsWithOwner(t *testing.T) {
+	api, st, router, bobCred, _, base := orgProxyFixture(t)
+	relaySess, _ := pipeSession(t, base)
+	router.Register(relaySess)
+
+	// Bob also has a personal box.
+	acc, err := st.AuthenticateAccount(bobCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	personal, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := proxyGet(t, api, "/agents", bobCred)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list: %d (body %s)", rr.Code, rr.Body.String())
+	}
+	var list struct {
+		Agents []struct {
+			Agent     string `json:"agent"`
+			Owner     string `json:"owner"`
+			Connected bool   `json:"connected"`
+		} `json:"agents"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(list.Agents) != 2 {
+		t.Fatalf("listed %d agents, want 2: %+v", len(list.Agents), list.Agents)
+	}
+	if list.Agents[0].Agent != base || list.Agents[0].Owner != "acme" || !list.Agents[0].Connected {
+		t.Errorf("agent[0] = %+v, want %s owner=acme connected", list.Agents[0], base)
+	}
+	if list.Agents[1].Agent != personal.BaseDomain || list.Agents[1].Owner != "bob" || list.Agents[1].Connected {
+		t.Errorf("agent[1] = %+v, want %s owner=bob offline", list.Agents[1], personal.BaseDomain)
+	}
+}

@@ -49,6 +49,7 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
   - ✅ GitHub identity — relay accounts on GitHub OAuth (device flow for `piper login`, relay-hosted authorization-code flow for the browser); Google flow removed — [#99](https://github.com/getpiper/piper/issues/99)
   - ✅ account agent list — `GET /agents` on the relay control API returns the caller's enrolled agents with liveness — [#98](https://github.com/getpiper/piper/issues/98)
   - ✅ domain-config API — BYO base domain + DNS creds settable remotely, live cert issuance + relay splice, shared-domain coexistence — [#102](https://github.com/getpiper/piper/issues/102)
+  - ✅ Organizations — org accounts, membership + invites, org-scoped control authz — [#104](https://github.com/getpiper/piper/issues/104)
   - ⬜ surface the relay-assigned public host in `piper list` / deploy output (e2e reads it from the relay DB today)
   - ⬜ LAN `login` load-mutate-save so it doesn't clobber stored relay creds — [#84](https://github.com/getpiper/piper/issues/84)
   - ⬜ thread `context.Context` through `relayclient` requests — [#85](https://github.com/getpiper/piper/issues/85)

@@ -159,39 +159,40 @@ func TestAuthenticateRejectsDisabledAccountAgent(t *testing.T) {
 	}
 }
 
-func TestAgentsForAccountListsOnlyOwnAgents(t *testing.T) {
+func TestUpsertAccountStoresAndRefreshesGithubLogin(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
-	alice, _ := st.UpsertAccount("sub-alice", "alice")
-	bob, _ := st.UpsertAccount("sub-bob", "bob")
 
-	var want []string
-	for i := 0; i < 2; i++ {
-		en, err := st.EnrollForAccount(alice.ID)
-		if err != nil {
-			t.Fatalf("enroll alice %d: %v", i, err)
-		}
-		want = append(want, en.BaseDomain)
-	}
-	if _, err := st.EnrollForAccount(bob.ID); err != nil {
-		t.Fatalf("enroll bob: %v", err)
-	}
-
-	got, err := st.AgentsForAccount(alice.ID)
+	a1, err := st.UpsertAccount("gh-1", "Alice-Smith")
 	if err != nil {
-		t.Fatalf("AgentsForAccount: %v", err)
+		t.Fatalf("UpsertAccount: %v", err)
 	}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("AgentsForAccount = %v, want %v (enrollment order)", got, want)
+	if a1.GithubLogin != "Alice-Smith" {
+		t.Fatalf("GithubLogin = %q, want Alice-Smith", a1.GithubLogin)
 	}
 
-	// An account with no agents lists empty, not an error.
-	carol, _ := st.UpsertAccount("sub-carol", "carol")
-	got, err = st.AgentsForAccount(carol.ID)
+	// GitHub login renamed: re-login refreshes the stored login.
+	a2, err := st.UpsertAccount("gh-1", "alice-renamed")
 	if err != nil {
-		t.Fatalf("AgentsForAccount(empty): %v", err)
+		t.Fatalf("re-login UpsertAccount: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("AgentsForAccount(empty) = %v, want none", got)
+	if a2.GithubLogin != "alice-renamed" {
+		t.Fatalf("refreshed GithubLogin = %q, want alice-renamed", a2.GithubLogin)
+	}
+	var stored string
+	if err := st.db.QueryRow(`SELECT github_login FROM accounts WHERE github_id='gh-1'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "alice-renamed" {
+		t.Fatalf("stored github_login = %q, want alice-renamed", stored)
+	}
+
+	// AuthenticateAccount surfaces the login too (needed for invite matching).
+	cred, _ := st.MintAccountCredential(a1.ID)
+	got, err := st.AuthenticateAccount(cred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GithubLogin != "alice-renamed" {
+		t.Fatalf("authenticated GithubLogin = %q, want alice-renamed", got.GithubLogin)
 	}
 }
