@@ -8,7 +8,10 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("PIPER_API_ADDR", "")
-	t.Setenv("PIPER_DATA_DIR", "")
+	// Isolate the data dir so Load() can't read the developer's real
+	// ~/.piper relay.json (an enrolled box's apex would shadow the default).
+	t.Setenv("PIPER_DATA_DIR", t.TempDir())
+	t.Setenv("PIPER_BASE_DOMAIN", "")
 	c := Load()
 	if c.APIAddr != "127.0.0.1:8088" {
 		t.Errorf("APIAddr = %q, want 127.0.0.1:8088", c.APIAddr)
@@ -22,6 +25,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadEnvOverride(t *testing.T) {
+	t.Setenv("PIPER_DATA_DIR", t.TempDir())
 	t.Setenv("PIPER_API_ADDR", "0.0.0.0:9000")
 	if got := Load().APIAddr; got != "0.0.0.0:9000" {
 		t.Errorf("APIAddr = %q, want 0.0.0.0:9000", got)
@@ -40,6 +44,7 @@ func TestClientAddr(t *testing.T) {
 }
 
 func TestLoadRelayFields(t *testing.T) {
+	t.Setenv("PIPER_DATA_DIR", t.TempDir())
 	t.Setenv("PIPER_RELAY_ADDR", "relay.example.com:7000")
 	t.Setenv("PIPER_RELAY_TOKEN", "tok-xyz")
 	t.Setenv("PIPER_ACME_EMAIL", "me@example.com")
