@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -333,11 +334,9 @@ func TestSetEnvManaged(t *testing.T) {
 
 func TestStatusDNSOK(t *testing.T) {
 	m, st, _, _, _ := newTestManager(t, &fakeIssuer{})
-	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
-		t.Fatal(err)
-	}
-	waitStatus(t, st, StatusActive)
-
+	// A controllable clock so dns_ok's cache (#114) can be expired deterministically.
+	clock := time.Now()
+	m.now = func() time.Time { return clock }
 	// Probe and relay host resolve to the same address → dns_ok.
 	m.resolve = func(_ context.Context, host string) ([]net.IP, error) {
 		switch host {
@@ -346,6 +345,11 @@ func TestStatusDNSOK(t *testing.T) {
 		}
 		return nil, errors.New("nxdomain")
 	}
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusActive)
+
 	s, err := m.Status()
 	if err != nil {
 		t.Fatal(err)
@@ -364,13 +368,14 @@ func TestStatusDNSOK(t *testing.T) {
 		t.Fatalf("dns_records = %+v", s.DNSRecords)
 	}
 
-	// Probe resolving elsewhere → not ok.
+	// Probe resolving elsewhere → not ok, once the cache TTL elapses.
 	m.resolve = func(_ context.Context, host string) ([]net.IP, error) {
 		if host == "piper-probe.example.com" {
 			return []net.IP{net.ParseIP("198.51.100.9")}, nil
 		}
 		return []net.IP{net.ParseIP("203.0.113.7")}, nil
 	}
+	clock = clock.Add(dnsOKTTL + time.Second)
 	s, _ = m.Status()
 	if s.DNSOK {
 		t.Fatal("want dns_ok=false on mismatch")
@@ -715,5 +720,124 @@ func TestRemoveFailsWhenRelayClearFails(t *testing.T) {
 	}
 	if got := relay.last(); got != "" {
 		t.Fatalf("relay last push = %q, want cleared", got)
+	}
+}
+
+// A same-domain re-PUT (or any generation bump) must supersede the running
+// issue loop so a second loop doesn't keep retrying alongside it. #112.
+func TestIssueLoopExitsWhenSuperseded(t *testing.T) {
+	iss := &fakeIssuer{failures: 1 << 30} // every Obtain fails → loop retries forever
+	m, st, _, _, _ := newTestManager(t, iss)
+	m.retryDelay = func(int) time.Duration { return time.Millisecond }
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusFailed) // the loop is actively retrying
+
+	// Bump the generation as a fresh Set/Resume would, but start no replacement
+	// loop: the running loop must observe the bump and stop.
+	m.nextGen()
+
+	time.Sleep(60 * time.Millisecond)
+	a := iss.obtainCalls()
+	time.Sleep(60 * time.Millisecond)
+	if b := iss.obtainCalls(); b != a {
+		t.Fatalf("superseded loop kept issuing: %d -> %d obtains", a, b)
+	}
+}
+
+// Repeated Status polls within the TTL must not re-run the live DNS lookups;
+// after the TTL they must. #114.
+func TestStatusDNSOKCachedWithinTTL(t *testing.T) {
+	m, st, _, _, _ := newTestManager(t, &fakeIssuer{})
+	clock := time.Now()
+	m.now = func() time.Time { return clock }
+	var resolves int64
+	m.resolve = func(_ context.Context, _ string) ([]net.IP, error) {
+		atomic.AddInt64(&resolves, 1)
+		return []net.IP{net.ParseIP("203.0.113.7")}, nil // probe == relay → ok
+	}
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusActive)
+
+	if _, err := m.Status(); err != nil {
+		t.Fatal(err)
+	}
+	base := atomic.LoadInt64(&resolves)
+	for i := 0; i < 5; i++ {
+		if _, err := m.Status(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := atomic.LoadInt64(&resolves); got != base {
+		t.Fatalf("cached dns_ok still hit the resolver: %d extra lookups", got-base)
+	}
+
+	clock = clock.Add(dnsOKTTL + time.Second)
+	if _, err := m.Status(); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt64(&resolves); got <= base {
+		t.Fatal("cache never expired: no re-lookup after TTL")
+	}
+}
+
+// Env-managed Status reflects the real issuance outcome (pending → active, or
+// failed) rather than a constant "active". #116.
+func TestRunEnvStatusReflectsState(t *testing.T) {
+	newEnvManager := func() (*Manager, *store.Store) {
+		st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { st.Close() })
+		m := New(Options{Store: st, Proxy: &fakeProxy{}, EnvDomain: "env.example.com",
+			Issuer: func(string, string) (Issuer, error) { return nil, errors.New("unused") }})
+		return m, st
+	}
+
+	// Before RunEnv completes: pending "issuing", no cert expiry.
+	m, _ := newEnvManager()
+	s, err := m.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Source != "env" || s.Status != StatusIssuing || s.CertNotAfter != nil {
+		t.Fatalf("pre-RunEnv status = %+v, want env/issuing/no-cert", s)
+	}
+
+	// Successful RunEnv → active with the cert's expiry surfaced.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.RunEnv(ctx, &fakeIssuer{notAfter: time.Now().Add(90 * 24 * time.Hour)}); err != nil {
+		t.Fatalf("RunEnv: %v", err)
+	}
+	if s, _ = m.Status(); s.Status != StatusActive || s.CertNotAfter == nil {
+		t.Fatalf("post-RunEnv status = %+v, want active + cert_not_after", s)
+	}
+
+	// A failing RunEnv → failed with the error surfaced.
+	m2, _ := newEnvManager()
+	if err := m2.RunEnv(ctx, &fakeIssuer{failures: 1}); err == nil {
+		t.Fatal("want RunEnv error from a failing issuer")
+	}
+	if s, _ = m2.Status(); s.Status != StatusFailed || s.Error == "" {
+		t.Fatalf("failed RunEnv status = %+v, want failed + error", s)
+	}
+}
+
+func TestDefaultRetryDelayShortFirstRetry(t *testing.T) {
+	cases := map[int]time.Duration{
+		0:   5 * time.Second, // short first retry so a resume flap clears fast (#113)
+		1:   time.Minute,
+		2:   2 * time.Minute,
+		100: 64 * time.Minute, // capped
+	}
+	for attempt, want := range cases {
+		if got := defaultRetryDelay(attempt); got != want {
+			t.Errorf("defaultRetryDelay(%d) = %v, want %v", attempt, got, want)
+		}
 	}
 }

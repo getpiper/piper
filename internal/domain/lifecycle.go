@@ -37,7 +37,18 @@ func (m *Manager) Resume() {
 		// Damaged or missing disk cert: degrade to re-issuance, not a crash.
 		_ = m.st.UpdateDomainStatus(dc.Domain, StatusIssuing, "", time.Time{})
 	}
-	go m.issueLoop(dc.Domain)
+	go m.issueLoop(dc.Domain, m.nextGen())
+}
+
+// setEnvStatus records the env-managed (PIPER_BASE_DOMAIN) path's real state so
+// GET /v1/domain reflects issued/failed + expiry instead of a constant "active"
+// (#116). No-op fields are zeroed by the caller (e.g. notAfter on failure).
+func (m *Manager) setEnvStatus(status, errMsg string, notAfter time.Time) {
+	m.envMu.Lock()
+	m.envStatus = status
+	m.envError = errMsg
+	m.envNotAfter = notAfter
+	m.envMu.Unlock()
 }
 
 // StartRenewals renews the API-managed cert: every renewInterval, when the
@@ -118,11 +129,15 @@ func (m *Manager) reissue(snap store.DomainConfig) error {
 func (m *Manager) RunEnv(ctx context.Context, iss Issuer) error {
 	certPEM, keyPEM, err := iss.Obtain([]string{"*." + m.envDomain, m.envDomain})
 	if err != nil {
+		m.setEnvStatus(StatusFailed, err.Error(), time.Time{})
 		return err
 	}
 	if err := m.proxy.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+		m.setEnvStatus(StatusFailed, err.Error(), time.Time{})
 		return err
 	}
+	notAfter, _ := certs.NotAfter(certPEM)
+	m.setEnvStatus(StatusActive, "", notAfter)
 	go func() {
 		t := time.NewTicker(renewInterval)
 		defer t.Stop()
@@ -151,6 +166,8 @@ func (m *Manager) runEnvRenew(ctx context.Context, iss Issuer, certPEM []byte, t
 				continue
 			}
 			certPEM = newCert
+			notAfter, _ := certs.NotAfter(certPEM)
+			m.setEnvStatus(StatusActive, "", notAfter)
 		}
 	}
 }

@@ -93,21 +93,65 @@ type Manager struct {
 
 	issueMu sync.Mutex // serializes issuance/renewal runs
 
+	loopMu  sync.Mutex // guards loopGen
+	loopGen int        // bumped per Set/Resume; a loop exits when superseded
+
+	dnsMu    sync.Mutex // guards dnsCache
+	dnsCache map[string]dnsCacheEntry
+
+	envMu       sync.Mutex // guards the env-managed status fields below
+	envStatus   string     // "" | issuing | active | failed (env mode only)
+	envError    string
+	envNotAfter time.Time
+
 	// test seams
 	retryDelay func(attempt int) time.Duration
 	resolve    func(ctx context.Context, host string) ([]net.IP, error)
+	now        func() time.Time
 }
 
+// dnsCacheEntry memoizes one domain's dnsOK result so a polling dashboard
+// doesn't issue live DNS lookups on every GET/PUT /v1/domain (#114).
+type dnsCacheEntry struct {
+	ok bool
+	at time.Time
+}
+
+// dnsOKTTL bounds how long a cached dnsOK result is served before a re-lookup.
+const dnsOKTTL = 5 * time.Second
+
 func New(o Options) *Manager {
+	envStatus := ""
+	if o.EnvDomain != "" {
+		envStatus = StatusIssuing // pending until RunEnv reports its outcome
+	}
 	return &Manager{
 		st: o.Store, newIssuer: o.Issuer, proxy: o.Proxy,
 		dataDir: o.DataDir, relayHost: o.RelayHost,
 		httpsListen: o.HTTPSListen, envDomain: o.EnvDomain,
+		dnsCache:   map[string]dnsCacheEntry{},
+		envStatus:  envStatus,
 		retryDelay: defaultRetryDelay,
 		resolve: func(ctx context.Context, host string) ([]net.IP, error) {
 			return net.DefaultResolver.LookupIP(ctx, "ip", host)
 		},
+		now: time.Now,
 	}
+}
+
+// nextGen bumps the loop generation and returns it; the goroutine started with
+// this value drives issuance until a later Set/Resume supersedes it.
+func (m *Manager) nextGen() int {
+	m.loopMu.Lock()
+	defer m.loopMu.Unlock()
+	m.loopGen++
+	return m.loopGen
+}
+
+func (m *Manager) currentGen() int {
+	m.loopMu.Lock()
+	defer m.loopMu.Unlock()
+	return m.loopGen
 }
 
 // SetRelay injects the tunnel client once relay mode is up (piperd creates the
@@ -159,15 +203,20 @@ func (m *Manager) Set(domainName, provider, token string) (Status, error) {
 		return Status{}, err
 	}
 	m.issueMu.Unlock()
-	go m.issueLoop(d)
+	go m.issueLoop(d, m.nextGen())
 	return m.Status()
 }
 
 // issueLoop drives one config to activation with capped-backoff retries. It
-// exits when the stored config no longer matches domain (replaced or deleted)
-// or activation succeeds.
-func (m *Manager) issueLoop(domain string) {
+// exits when the stored config no longer matches domain (replaced or deleted),
+// activation succeeds, or a newer Set/Resume supersedes this generation — the
+// last guard stops a same-domain re-PUT from leaving a second loop retrying
+// alongside this one (#112).
+func (m *Manager) issueLoop(domain string, gen int) {
 	for attempt := 0; ; attempt++ {
+		if m.currentGen() != gen {
+			return
+		}
 		dc, err := m.st.GetDomainConfig()
 		if err != nil || dc.Domain != domain || dc.Status == StatusActive {
 			return
@@ -183,12 +232,19 @@ func (m *Manager) issueLoop(domain string) {
 	}
 }
 
-// defaultRetryDelay backs off 1m, 2m, 4m, … capped at 1h.
+// defaultRetryDelay backs off 5s, then 1m, 2m, 4m, … capped at ~1h. The short
+// first retry keeps a restart-mid-issuance from flapping to "failed" for a full
+// minute: the common cause is the tunnel not being connected yet at Resume, and
+// the immediate re-attempt (cert already on disk) succeeds once it is (#113).
 func defaultRetryDelay(attempt int) time.Duration {
-	if attempt > 6 {
-		attempt = 6
+	if attempt <= 0 {
+		return 5 * time.Second
 	}
-	return time.Minute << uint(attempt)
+	shift := attempt - 1
+	if shift > 6 {
+		shift = 6
+	}
+	return time.Minute << uint(shift)
 }
 
 // issueOnce obtains (or reuses) the cert, arms Caddy, then tells the relay.
@@ -331,7 +387,18 @@ func certCovers(certPEM []byte, domain string, now time.Time) bool {
 // dnsOK (added in Task 7).
 func (m *Manager) Status() (Status, error) {
 	if m.envDomain != "" {
-		return Status{Domain: m.envDomain, Source: "env", Status: StatusActive, DNSRecords: m.dnsRecords(m.envDomain)}, nil
+		m.envMu.Lock()
+		st := Status{
+			Domain: m.envDomain, Source: "env",
+			Status: m.envStatus, Error: m.envError,
+			DNSRecords: m.dnsRecords(m.envDomain),
+		}
+		if !m.envNotAfter.IsZero() {
+			t := m.envNotAfter
+			st.CertNotAfter = &t
+		}
+		m.envMu.Unlock()
+		return st, nil
 	}
 	dc, err := m.st.GetDomainConfig()
 	if errors.Is(err, store.ErrNotFound) {
@@ -346,7 +413,7 @@ func (m *Manager) Status() (Status, error) {
 		Status: dc.Status, Error: dc.Error,
 		DNSRecords: m.dnsRecords(dc.Domain),
 	}
-	st.DNSOK = m.dnsOK(dc.Domain)
+	st.DNSOK = m.cachedDNSOK(dc.Domain)
 	if !dc.CertNotAfter.IsZero() {
 		t := dc.CertNotAfter
 		st.CertNotAfter = &t
@@ -380,6 +447,25 @@ func (m *Manager) dnsRecords(domain string) []DNSRecord {
 		{Type: "CNAME", Name: "*." + domain, Value: m.relayHost},
 		{Type: "CNAME", Name: domain, Value: m.relayHost},
 	}
+}
+
+// cachedDNSOK serves dnsOK from a short TTL cache so a dashboard polling
+// GET /v1/domain (and PUT, which returns Status) doesn't trigger a pair of
+// blocking DNS lookups every call. The lookup runs outside the lock (#114).
+func (m *Manager) cachedDNSOK(domain string) bool {
+	m.dnsMu.Lock()
+	if e, ok := m.dnsCache[domain]; ok && m.now().Sub(e.at) < dnsOKTTL {
+		m.dnsMu.Unlock()
+		return e.ok
+	}
+	m.dnsMu.Unlock()
+
+	ok := m.dnsOK(domain)
+
+	m.dnsMu.Lock()
+	m.dnsCache[domain] = dnsCacheEntry{ok: ok, at: m.now()}
+	m.dnsMu.Unlock()
+	return ok
 }
 
 // dnsOK reports whether a wildcard lookup under domain reaches the relay:
