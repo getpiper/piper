@@ -19,3 +19,6 @@ deploy/compose/piperd.env
 # os / editor
 .DS_Store
 *.log
+
+# superpowers brainstorming sessions
+.superpowers/
