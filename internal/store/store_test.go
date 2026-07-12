@@ -642,3 +642,45 @@ func TestDeleteAppUnknownIsNotFound(t *testing.T) {
 		t.Fatalf("DeleteApp(ghost) err = %v, want ErrNotFound", err)
 	}
 }
+
+// insertDeploymentAt writes a deployment row with an explicit created_at so
+// tie/ordering cases (identical or lexically-misordered timestamps) can be
+// forced deterministically.
+func insertDeploymentAt(t *testing.T, s *Store, app, id, containerID, status, createdAt string) {
+	t.Helper()
+	if _, err := s.db.Exec(
+		`INSERT INTO deployments(id, app, image_id, container_id, host_port, status, logs, created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		id, app, "", containerID, 0, status, "", createdAt); err != nil {
+		t.Fatalf("insert deployment: %v", err)
+	}
+}
+
+// created_at is RFC3339Nano text, whose lexical order is not chronological:
+// trailing zeros are dropped, so "12:00:00.1Z" (100ms) sorts lexically AFTER
+// "12:00:00.15Z" (150ms) even though it is earlier. Ordered queries must key on
+// rowid (insertion order) so the truly-newest row wins. See #109.
+func TestDeploymentOrderingTiebreaksOnRowid(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	// d1 earlier (100ms) but lexically greater; d2 later (150ms) but lexically
+	// smaller. created_at DESC would wrongly pick d1; rowid DESC picks d2.
+	insertDeploymentAt(t, s, "blog", "d1", "c1", "running", "2026-07-12T12:00:00.1Z")
+	insertDeploymentAt(t, s, "blog", "d2", "c2", "running", "2026-07-12T12:00:00.15Z")
+
+	if got, err := s.LatestDeployment("blog"); err != nil || got.ID != "d2" {
+		t.Fatalf("LatestDeployment = %q (err %v), want d2", got.ID, err)
+	}
+	if got, err := s.LatestRunning("blog"); err != nil || got.ID != "d2" {
+		t.Fatalf("LatestRunning = %q (err %v), want d2", got.ID, err)
+	}
+	deps, err := s.ListDeployments("blog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps) != 2 || deps[0].ID != "d2" || deps[1].ID != "d1" {
+		t.Fatalf("ListDeployments order = %+v, want [d2 d1]", deps)
+	}
+}
