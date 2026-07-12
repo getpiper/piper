@@ -96,3 +96,64 @@ func TestLoginTokenPathStillValidates(t *testing.T) {
 		t.Fatalf("code = %d, want 1", code)
 	}
 }
+
+// A LAN `piper login --token` must preserve previously stored relay creds
+// (RelayAPI/AccountCredential), not clobber them with a fresh ClientConfig. #84.
+func TestLANLoginPreservesRelayCreds(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	// Prior relay login state on disk.
+	if err := config.SaveClient(config.ClientConfig{
+		Addr: "http://127.0.0.1:8088", RelayAPI: "https://api.public.getpiper.dev",
+		AccountCredential: "cred-xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer good" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]store.App{})
+	}))
+	defer srv.Close()
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"login", "--addr", srv.URL, "--token", "good"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, err = %s", code, errb.String())
+	}
+	cc, err := config.LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.Token != "good" || cc.Addr != srv.URL {
+		t.Fatalf("LAN creds not saved: %+v", cc)
+	}
+	if cc.RelayAPI != "https://api.public.getpiper.dev" || cc.AccountCredential != "cred-xyz" {
+		t.Fatalf("relay creds clobbered: %+v", cc)
+	}
+}
+
+// The LAN login usage hint mentions sudo (systemd installs). #146.
+func TestLoginUsageMentionsSudo(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := login("", "", &out, &errb); code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if !strings.Contains(errb.String(), "sudo") {
+		t.Errorf("usage = %q, want a sudo hint", errb.String())
+	}
+}
+
+// `piper delete --yes blog` (flag before name) must fail with a clear hint, not
+// treat "--yes" as the app name. #124.
+func TestDeleteRejectsFlagBeforeName(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"delete", "--yes", "blog"}, &out, &errb); code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if !strings.Contains(errb.String(), "before flags") {
+		t.Errorf("stderr = %q, want a name-before-flags hint", errb.String())
+	}
+}
