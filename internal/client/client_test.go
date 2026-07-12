@@ -3,6 +3,7 @@ package client
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -193,7 +194,7 @@ func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
 	c := New(srv.URL, "")
 	c.pollInterval = time.Millisecond
 	var progress bytes.Buffer
-	dep, err := c.FollowDeploy("web", "dep1", &progress)
+	dep, err := c.FollowDeploy(context.Background(), "web", "dep1", &progress)
 	if err != nil {
 		t.Fatalf("FollowDeploy: %v", err)
 	}
@@ -202,6 +203,36 @@ func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
 	}
 	if progress.String() != "line1\nline2\n" {
 		t.Fatalf("progress = %q, want the full log printed once (no dupes)", progress.String())
+	}
+}
+
+// A row stuck "building" (piperd stranded it) must not poll forever: FollowDeploy
+// gives up when the context deadline passes, returning the last-seen row. #161.
+func TestFollowDeployHonorsContextDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/apps/web/deployments/dep1/logs":
+			w.Header().Set("Content-Type", "text/plain")
+			io.WriteString(w, "building...\n")
+		case "/v1/apps/web/deployments":
+			writeJSONTest(w, []store.Deployment{{ID: "dep1", App: "web", Status: "building"}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	c.pollInterval = time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	var progress bytes.Buffer
+	dep, err := c.FollowDeploy(ctx, "web", "dep1", &progress)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if dep.Status != "building" {
+		t.Fatalf("last status = %q, want building (the stranded row)", dep.Status)
 	}
 }
 
