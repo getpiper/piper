@@ -45,14 +45,19 @@ As root this installs `piper` to `/usr/local/bin`; unprivileged, to
 box and log the CLI in first (running `piperd token create` on the box is
 itself the proof you own it — no auth needed for that step; on a systemd
 install it needs `sudo` to reach the service's data dir and will say so if
-you forget). The control API binds to loopback by default — override
-`PIPER_API_ADDR` on the box to reach it from elsewhere on your LAN:
+you forget). The control API binds to loopback (`127.0.0.1:8088`) by default,
+so to reach it from another machine on the LAN set `PIPER_API_ADDR=0.0.0.0:8088`
+on the box — uncomment it in `/etc/piper/piperd.env` and `sudo systemctl
+restart piperd`:
 
 ```bash
 # on the box:
+echo 'PIPER_API_ADDR=0.0.0.0:8088' | sudo tee -a /etc/piper/piperd.env
+sudo systemctl restart piperd
 sudo piperd token create --name laptop         # prints a token once
-# on the client:
-piper login --token <token> --addr http://your-box:8088
+# on the client — address the box by its IP; mDNS *.local names often
+# don't resolve on home LANs (run `hostname -I` on the box to find it):
+piper login --token <token> --addr http://192.168.1.50:8088
 piper list                                     # now authenticated
 ```
 

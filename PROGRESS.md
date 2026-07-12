@@ -93,7 +93,7 @@ Goal: turn the first-run gauntlet (fresh box → live public URL) into a clean c
 
 Remaining polish, tracked standalone:
 - ⬜ `piper connect` discoverability / fail loudly off-box — [#173](https://github.com/getpiper/piper/issues/173)
-- ⬜ Onboarding docs: box IP over `*.local`, document `PIPER_API_ADDR` — [#174](https://github.com/getpiper/piper/issues/174)
+- ✅ Onboarding docs: box IP over `*.local`, document `PIPER_API_ADDR` — [#174](https://github.com/getpiper/piper/issues/174)
 - ⬜ Explore a `piper setup` onboarding wizard — [#175](https://github.com/getpiper/piper/issues/175)
 
 ## Always-green gates
