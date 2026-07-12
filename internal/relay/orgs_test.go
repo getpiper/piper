@@ -328,8 +328,8 @@ func TestAgentsVisibleToMergesPersonalAndOrg(t *testing.T) {
 		t.Fatalf("AgentsVisibleTo: %v", err)
 	}
 	want := []OwnedAgent{
-		{BaseDomain: personal.BaseDomain, Owner: "bob"},
-		{BaseDomain: orgEn.BaseDomain, Owner: "acme"},
+		{BaseDomain: personal.BaseDomain, Name: personal.BaseDomain, Owner: "bob"},
+		{BaseDomain: orgEn.BaseDomain, Name: orgEn.BaseDomain, Owner: "acme"},
 	}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("AgentsVisibleTo = %+v, want %+v", got, want)

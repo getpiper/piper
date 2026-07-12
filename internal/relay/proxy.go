@@ -52,7 +52,7 @@ func NewControlProxy(st *Store, router *Router) http.Handler {
 			agents := make([]map[string]any, 0, len(visible))
 			for _, a := range visible {
 				_, connected := router.Lookup(a.BaseDomain)
-				agents = append(agents, map[string]any{"agent": a.BaseDomain, "owner": a.Owner, "connected": connected})
+				agents = append(agents, map[string]any{"agent": a.BaseDomain, "name": a.Name, "owner": a.Owner, "connected": connected})
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 			return
