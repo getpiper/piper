@@ -454,3 +454,44 @@ func TestDeployTimesOutWithHint(t *testing.T) {
 		t.Errorf("stderr = %q, want a give-up hint naming `piper app web`", got)
 	}
 }
+
+func TestBareInvocationNonTTYPrintsUsage(t *testing.T) {
+	old := isTerminal
+	isTerminal = func() bool { return false }
+	defer func() { isTerminal = old }()
+
+	var out, errb bytes.Buffer
+	if code := run(nil, &out, &errb); code != 2 {
+		t.Fatalf("want exit 2, got %d", code)
+	}
+	if !strings.Contains(errb.String(), "usage:") {
+		t.Fatalf("want usage, got: %s", errb.String())
+	}
+}
+
+func TestBareInvocationTTYLaunchesTUI(t *testing.T) {
+	oldT, oldL := isTerminal, launchTUI
+	isTerminal = func() bool { return true }
+	var gotRemote string
+	called := false
+	launchTUI = func(remote string, stderr io.Writer) int {
+		called, gotRemote = true, remote
+		return 0
+	}
+	defer func() { isTerminal, launchTUI = oldT, oldL }()
+
+	var out, errb bytes.Buffer
+	if code := run(nil, &out, &errb); code != 0 {
+		t.Fatalf("want exit 0, got %d (stderr: %s)", code, errb.String())
+	}
+	if !called || gotRemote != "" {
+		t.Fatalf("want TUI launch with empty remote, called=%v remote=%q", called, gotRemote)
+	}
+
+	if code := run([]string{"--remote", "pi4.example.dev"}, &out, &errb); code != 0 {
+		t.Fatalf("want exit 0, got %d", code)
+	}
+	if gotRemote != "pi4.example.dev" {
+		t.Fatalf("remote not forwarded: %q", gotRemote)
+	}
+}
