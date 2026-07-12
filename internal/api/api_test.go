@@ -19,13 +19,14 @@ import (
 )
 
 type fakeDeployer struct {
-	store     *store.Store
-	gotApp    string
-	gotFile   string
-	stopped   []string
-	deleted   []string
-	stopErr   error
-	deleteErr error
+	store         *store.Store
+	gotApp        string
+	gotFile       string
+	stopped       []string
+	deleted       []string
+	stopErr       error
+	deleteErr     error
+	panicOnFinish bool
 }
 
 func (f *fakeDeployer) Begin(app string) (store.Deployment, error) {
@@ -34,6 +35,9 @@ func (f *fakeDeployer) Begin(app string) (store.Deployment, error) {
 }
 
 func (f *fakeDeployer) Finish(_ context.Context, dep store.Deployment, srcDir string) error {
+	if f.panicOnFinish {
+		panic("boom: simulated Finish panic")
+	}
 	contents, err := os.ReadFile(filepath.Join(srcDir, "Dockerfile"))
 	if err != nil {
 		_ = f.store.FinalizeDeployment(dep.ID, "", "", 0, "failed", err.Error())
@@ -197,6 +201,35 @@ func TestDeployIsAsyncAndDrivesRowToRunning(t *testing.T) {
 	if deployer.gotFile != "FROM scratch\n" {
 		t.Fatalf("Finish saw Dockerfile %q", deployer.gotFile)
 	}
+}
+
+func TestDeployPanicInFinishIsRecoveredAndFailsRow(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	deployer := &fakeDeployer{store: s, panicOnFinish: true}
+	h := New(s, deployer, "piper.localhost", "", nil, nil)
+
+	var tarball bytes.Buffer
+	tw := tar.NewWriter(&tarball)
+	body := []byte("FROM scratch\n")
+	_ = tw.WriteHeader(&tar.Header{Name: "Dockerfile", Mode: 0o644, Size: int64(len(body))})
+	_, _ = tw.Write(body)
+	_ = tw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/apps/web/deploy", &tarball)
+	req.Header.Set("Content-Type", "application/x-tar")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// If the panic isn't recovered, it propagates and crashes this test
+	// process's goroutine (test binary aborts) instead of reaching here.
+	waitForStatus(t, s, "web", "failed")
 }
 
 func TestDeployUnknownAppIs404(t *testing.T) {

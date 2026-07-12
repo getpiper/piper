@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -182,7 +184,15 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		// build outcome is observed by polling the deployment's status + logs.
 		go func() {
 			defer os.RemoveAll(dir)
-			_ = d.Finish(context.Background(), dep, dir)
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("deploy %s: panic: %v", name, r)
+					_ = s.FinalizeDeployment(dep.ID, "", "", 0, "failed", fmt.Sprintf("deploy panicked: %v", r))
+				}
+			}()
+			if err := d.Finish(context.Background(), dep, dir); err != nil {
+				log.Printf("deploy %s: %v", name, err)
+			}
 		}()
 		writeJSON(w, http.StatusAccepted, dep)
 	})
