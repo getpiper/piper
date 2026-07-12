@@ -2,7 +2,7 @@
 
 Coarse **map** of what's built vs. what's left — by design. Detail for any 🟡/⬜ item lives in its linked issue (`[#N]`), not here; entries stay to one line so they can't drift from the issue. Design lives in [`docs/superpowers/specs/`](docs/superpowers/specs/); plans in [`docs/superpowers/plans/`](docs/superpowers/plans/); how-to-work in [`CLAUDE.md`](CLAUDE.md).
 
-_Last updated: 2026-07-07 — epic #43 (install & run piperd as a service) closed; registry publish and macOS launchd ([#56](https://github.com/getpiper/piper/issues/56)) tracked as standalone follow-ups. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-12 — epic #141 (smooth the first-box onboarding flow) closed; all six child fixes landed, remaining polish tracked standalone ([#173](https://github.com/getpiper/piper/issues/173), [#174](https://github.com/getpiper/piper/issues/174), [#175](https://github.com/getpiper/piper/issues/175)). Earlier: epic #43 (install & run piperd as a service) closed; registry publish and macOS launchd ([#56](https://github.com/getpiper/piper/issues/56)) tracked as standalone follow-ups. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
 
 Legend: ✅ done · 🟡 partial / stubbed · ⬜ not started. Issue tag/label conventions: [CLAUDE.md § Issue tracking](CLAUDE.md#issue-tracking--progress).
 
@@ -79,6 +79,22 @@ Goal: piperd installable and self-sustaining on the box (Pi/VPS/laptop) — serv
 
 Descoped from the epic, tracked standalone:
 - ⬜ launchd plist (best-effort macOS) — [#56](https://github.com/getpiper/piper/issues/56)
+
+## First-box onboarding — epic [#141](https://github.com/getpiper/piper/issues/141) ✅ closed
+
+Goal: turn the first-run gauntlet (fresh box → live public URL) into a clean copy-paste experience; six sharp edges hit during a headless Pi run.
+
+- ✅ Default relay `.co` → live `.dev` — [#135](https://github.com/getpiper/piper/issues/135)
+- ✅ `piperd token create` targeted the wrong DB under the shipped systemd unit — [#134](https://github.com/getpiper/piper/issues/134)
+- ✅ `piper deploy` on a non-existent app: clearer error — [#139](https://github.com/getpiper/piper/issues/139)
+- ✅ `piper deploy` streams build progress (no silent hang) — [#140](https://github.com/getpiper/piper/issues/140)
+- ✅ Relay-mode deploy surfaces the app's public URL — [#136](https://github.com/getpiper/piper/issues/136)
+- ✅ `piper login` no longer mislabels connectivity failures as "token rejected" — [#138](https://github.com/getpiper/piper/issues/138)
+
+Remaining polish, tracked standalone:
+- ⬜ `piper connect` discoverability / fail loudly off-box — [#173](https://github.com/getpiper/piper/issues/173)
+- ⬜ Onboarding docs: box IP over `*.local`, document `PIPER_API_ADDR` — [#174](https://github.com/getpiper/piper/issues/174)
+- ⬜ Explore a `piper setup` onboarding wizard — [#175](https://github.com/getpiper/piper/issues/175)
 
 ## Always-green gates
 
