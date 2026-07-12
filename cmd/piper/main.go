@@ -68,15 +68,15 @@ func appURL(hostname string, remote bool) string {
 // saves it to ~/.piper/piper/config.json.
 func login(addr, token string, stdout, stderr io.Writer) int {
 	if token == "" {
-		fmt.Fprintln(stderr, "usage: piper login --token <token>  (create one with `piperd token create`)")
+		fmt.Fprintln(stderr, "usage: piper login --token <token>  (create one with `piperd token create`, prefixed with `sudo` on a systemd install)")
 		return 2
 	}
+	cc, err := config.LoadClient()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
 	if addr == "" {
-		cc, err := config.LoadClient()
-		if err != nil {
-			fmt.Fprintln(stderr, "error:", err)
-			return 1
-		}
 		addr = cc.Addr
 	}
 	if _, err := client.New(addr, token).ListApps(); err != nil {
@@ -91,7 +91,12 @@ func login(addr, token string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
-	if err := config.SaveClient(config.ClientConfig{Addr: addr, Token: token}); err != nil {
+	// Load-mutate-save (mirroring relayLogin): a fresh ClientConfig here would
+	// drop any stored relay creds, so a LAN login after a relay login wiped
+	// RelayAPI/AccountCredential and broke the next `piper connect` (#84).
+	cc.Addr = addr
+	cc.Token = token
+	if err := config.SaveClient(cc); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -318,6 +323,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		name := args[1]
+		if strings.HasPrefix(name, "-") {
+			// e.g. `piper delete --yes blog`: the flag was taken as the name.
+			fmt.Fprintln(stderr, "usage: piper delete <name> [--yes]  (the app name must come before flags)")
+			return 2
+		}
 		fs := flag.NewFlagSet("delete", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		yes := fs.Bool("yes", false, "skip the confirmation prompt")

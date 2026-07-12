@@ -391,6 +391,7 @@ func (s *Store) CanControl(callerID, ownerID string) (bool, error) {
 // OwnedAgent is one row of an account's visible-agents list.
 type OwnedAgent struct {
 	BaseDomain string
+	Name       string // operator-chosen box name (piperd token create --name)
 	Owner      string // owning account/org slug
 }
 
@@ -398,7 +399,7 @@ type OwnedAgent struct {
 // of every org it belongs to — in enrollment order, tagged with the owner slug.
 func (s *Store) AgentsVisibleTo(accountID string) ([]OwnedAgent, error) {
 	rows, err := s.db.Query(
-		`SELECT ag.base_domain, acc.username
+		`SELECT ag.base_domain, ag.name, acc.username
 		   FROM agents ag JOIN accounts acc ON acc.id = ag.account_id
 		  WHERE ag.account_id = ?
 		     OR ag.account_id IN (SELECT org_id FROM org_members WHERE account_id = ?)
@@ -410,7 +411,7 @@ func (s *Store) AgentsVisibleTo(accountID string) ([]OwnedAgent, error) {
 	var agents []OwnedAgent
 	for rows.Next() {
 		var a OwnedAgent
-		if err := rows.Scan(&a.BaseDomain, &a.Owner); err != nil {
+		if err := rows.Scan(&a.BaseDomain, &a.Name, &a.Owner); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)

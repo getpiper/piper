@@ -257,6 +257,7 @@ func TestControlProxyListAgents(t *testing.T) {
 	var list struct {
 		Agents []struct {
 			Agent     string `json:"agent"`
+			Name      string `json:"name"`
 			Connected bool   `json:"connected"`
 		} `json:"agents"`
 	}
@@ -268,6 +269,11 @@ func TestControlProxyListAgents(t *testing.T) {
 	}
 	if list.Agents[0].Agent != base || !list.Agents[0].Connected {
 		t.Errorf("agent[0] = %+v, want %s connected", list.Agents[0], base)
+	}
+	// The box name is surfaced so the dashboard can head each section with it
+	// instead of the base-domain hash (#143).
+	if list.Agents[0].Name != base {
+		t.Errorf("agent[0].name = %q, want %q", list.Agents[0].Name, base)
 	}
 	if list.Agents[1].Agent != en2.BaseDomain || list.Agents[1].Connected {
 		t.Errorf("agent[1] = %+v, want %s offline", list.Agents[1], en2.BaseDomain)
