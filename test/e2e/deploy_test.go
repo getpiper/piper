@@ -74,7 +74,9 @@ func TestEndToEndDeploy(t *testing.T) {
 	// to completion (the real exercise of the async polling contract) so the
 	// curl-retry window below only has to absorb route propagation, not the
 	// whole Docker build.
-	final, err := c.FollowDeploy("blog", dep.ID, io.Discard)
+	followCtx, cancelFollow := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancelFollow()
+	final, err := c.FollowDeploy(followCtx, "blog", dep.ID, io.Discard)
 	if err != nil {
 		t.Fatalf("FollowDeploy: %v", err)
 	}

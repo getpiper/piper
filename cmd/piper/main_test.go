@@ -423,3 +423,34 @@ func TestRunDeletePromptAborts(t *testing.T) {
 		t.Errorf("stdout = %q, want aborted", stdout.String())
 	}
 }
+
+// A deploy whose row never leaves "building" gives up at --timeout with a hint,
+// rather than following forever. #161.
+func TestDeployTimesOutWithHint(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/web/deploy":
+			_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "web", Status: "building"})
+		case r.URL.Path == "/v1/apps/web/deployments/dep1/logs":
+			io.WriteString(w, "building...\n")
+		case r.URL.Path == "/v1/apps/web/deployments":
+			_ = json.NewEncoder(w).Encode([]store.Deployment{{ID: "dep1", App: "web", Status: "building"}})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"deploy", "web", "--path", srcDir, "--timeout", "40ms"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code = %d, want 1 (stderr: %s)", code, stderr.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "gave up waiting") || !strings.Contains(got, "piper app web") {
+		t.Errorf("stderr = %q, want a give-up hint naming `piper app web`", got)
+	}
+}

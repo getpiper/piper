@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -181,18 +182,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "deploy":
 		if len(args) < 2 {
-			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR]")
+			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR] [--timeout DUR]")
 			return 2
 		}
 		name := args[1]
 		fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		path := fs.String("path", ".", "source directory containing a Dockerfile")
+		timeout := fs.Duration("timeout", 15*time.Minute, "give up following the deploy after this long (0 waits forever)")
 		if err := fs.Parse(args[2:]); err != nil {
 			return 2
 		}
 		if fs.NArg() != 0 {
-			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR]")
+			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR] [--timeout DUR]")
 			return 2
 		}
 		c, ok := dialClient(*remote, stderr)
@@ -209,8 +211,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
-		final, err := c.FollowDeploy(name, dep.ID, stderr)
+		ctx := context.Background()
+		if *timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, *timeout)
+			defer cancel()
+		}
+		final, err := c.FollowDeploy(ctx, name, dep.ID, stderr)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				fmt.Fprintf(stderr, "error: gave up waiting for %s to finish after %s; it may still be building — check `piper app %s`\n", name, *timeout, name)
+				return 1
+			}
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}

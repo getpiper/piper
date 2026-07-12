@@ -4,6 +4,7 @@ package client
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -171,9 +172,12 @@ func (c *Client) App(name string) (api.App, error) {
 
 // FollowDeploy polls until the deployment reaches a terminal status, writing
 // new log bytes to progress as the stored log grows. Returns the terminal
-// deployment.
-func (c *Client) FollowDeploy(name, id string, progress io.Writer) (store.Deployment, error) {
+// deployment. It stops when ctx is cancelled or times out — returning the
+// last-seen deployment and ctx.Err() so the caller can report a bounded
+// give-up instead of polling a stranded "building" row forever (#161).
+func (c *Client) FollowDeploy(ctx context.Context, name, id string, progress io.Writer) (store.Deployment, error) {
 	printed := 0
+	var last store.Deployment
 	for {
 		logs, err := c.DeploymentLogs(name, id)
 		if err != nil {
@@ -195,12 +199,18 @@ func (c *Client) FollowDeploy(name, id string, progress io.Writer) (store.Deploy
 			if d.ID != id {
 				continue
 			}
+			last = d
 			switch d.Status {
 			case "running", "failed", "stopped":
 				return d, nil
 			}
 		}
-		time.Sleep(c.pollInterval)
+
+		select {
+		case <-ctx.Done():
+			return last, ctx.Err()
+		case <-time.After(c.pollInterval):
+		}
 	}
 }
 

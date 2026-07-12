@@ -1155,3 +1155,58 @@ func TestDeployCustomDomainRouteFailureDoesNotAbort(t *testing.T) {
 		t.Errorf("primary route = %+v, want blog.piper.localhost -> 40001", routes.upserts)
 	}
 }
+
+// A routing failure must stop the just-started container, not orphan it while
+// finalizing the row "failed". #162.
+func TestDeployRouteFailureStopsContainerAndRecordsFailed(t *testing.T) {
+	s, path := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	routes.upsertErr = errors.New("caddy admin down")
+	d := New(s, rt, routes, "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("Deploy should fail on a routing error")
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "c1" {
+		t.Errorf("stopped = %v, want [c1] (route failure must not orphan the container)", rt.Stopped)
+	}
+	if got := deploymentCountWithStatus(t, path, "failed"); got != 1 {
+		t.Errorf("failed deployment count = %d, want 1", got)
+	}
+	if _, err := s.LatestRunning("blog"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("LatestRunning err = %v, want ErrNotFound", err)
+	}
+}
+
+// panickyCaddy panics on UpsertRoute, standing in for a bug in the routing path
+// after the container is up.
+type panickyCaddy struct{ *fakeCaddy }
+
+func (panickyCaddy) UpsertRoute(string, int) error { panic("caddy client boom") }
+
+// A panic in the routing/finalize section must be recovered, the container
+// stopped, and the row finalized "failed" — not left running with a leaked
+// container. #162.
+func TestDeployPanicStopsContainerAndRecordsFailed(t *testing.T) {
+	s, path := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	d := New(s, rt, panickyCaddy{newFakeCaddy()}, "piper.localhost")
+
+	_, err := d.Deploy(context.Background(), "blog", t.TempDir())
+	if err == nil {
+		t.Fatal("Deploy should return an error after recovering the panic")
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "c1" {
+		t.Errorf("stopped = %v, want [c1] (panic must not orphan the container)", rt.Stopped)
+	}
+	if got := deploymentCountWithStatus(t, path, "failed"); got != 1 {
+		t.Errorf("failed deployment count = %d, want 1", got)
+	}
+}
