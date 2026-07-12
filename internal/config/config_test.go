@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -323,5 +324,94 @@ func TestCurrentBoxFallsBackToFirst(t *testing.T) {
 	}
 	if _, ok := (ClientFile{}).CurrentBox(); ok {
 		t.Fatal("empty file must report no box")
+	}
+}
+
+func TestLoadClientReadsCurrentBox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+	if err := SaveClientFile(ClientFile{
+		Boxes: []Box{
+			{Name: "pi4", Addr: "http://192.168.1.6:8088", Token: "pt"},
+			{Name: "local", Addr: "http://127.0.0.1:8088", Token: "lt"},
+		},
+		Current: "pi4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cc, err := LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.Addr != "http://192.168.1.6:8088" || cc.Token != "pt" {
+		t.Fatalf("want current box pi4, got %+v", cc)
+	}
+}
+
+func TestLoadClientEnvOverridesStillApply(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "http://env.test:9000")
+	t.Setenv("PIPER_TOKEN", "envtok")
+	cc, err := LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.Addr != "http://env.test:9000" || cc.Token != "envtok" {
+		t.Fatalf("env overrides lost: %+v", cc)
+	}
+}
+
+func TestSaveClientUpdatesOnlyCurrentBox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveClientFile(ClientFile{
+		Boxes: []Box{
+			{Name: "pi4", Addr: "http://192.168.1.6:8088", Token: "old", RelayAPI: "https://api.relay", AccountCredential: "cred"},
+			{Name: "local", Addr: "http://127.0.0.1:8088", Token: "lt"},
+		},
+		Current: "pi4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveClient(ClientConfig{Addr: "http://192.168.1.6:8088", Token: "new", RelayAPI: "https://api.relay", AccountCredential: "cred"}); err != nil {
+		t.Fatal(err)
+	}
+	cf, err := LoadClientFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cf.Boxes) != 2 {
+		t.Fatalf("other boxes lost: %+v", cf)
+	}
+	b, _ := cf.CurrentBox()
+	if b.Token != "new" || b.RelayAPI != "https://api.relay" {
+		t.Fatalf("current box not updated: %+v", b)
+	}
+	if cf.Boxes[1].Token != "lt" {
+		t.Fatalf("sibling box mutated: %+v", cf.Boxes[1])
+	}
+}
+
+func TestSaveClientMigratesLegacyFlatFileToV2(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".piper", "piper")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"addr":"http://127.0.0.1:8088","token":"old"}`
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveClient(ClientConfig{Addr: "http://127.0.0.1:8088", Token: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"boxes"`) || !strings.Contains(string(data), `"default"`) {
+		t.Fatalf("file not rewritten in v2 form: %s", data)
 	}
 }

@@ -211,20 +211,17 @@ func clientConfigPath() (string, error) {
 	return filepath.Join(home, ".piper", "piper", "config.json"), nil
 }
 
-// LoadClient reads ~/.piper/piper/config.json, then applies PIPER_ADDR /
-// PIPER_TOKEN env overrides and the localhost default for Addr. A missing file
-// is not an error.
+// LoadClient reads the current box from ~/.piper/piper/config.json, then
+// applies PIPER_ADDR / PIPER_TOKEN env overrides and the localhost default
+// for Addr. A missing file is not an error.
 func LoadClient() (ClientConfig, error) {
 	var cc ClientConfig
-	path, err := clientConfigPath()
+	cf, err := LoadClientFile()
 	if err != nil {
 		return cc, err
 	}
-	data, err := os.ReadFile(path)
-	if err == nil {
-		_ = json.Unmarshal(data, &cc)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return cc, err
+	if b, ok := cf.CurrentBox(); ok {
+		cc = ClientConfig{Addr: b.Addr, Token: b.Token, RelayAPI: b.RelayAPI, AccountCredential: b.AccountCredential}
 	}
 	if v := os.Getenv("PIPER_ADDR"); v != "" {
 		cc.Addr = v
@@ -238,21 +235,34 @@ func LoadClient() (ClientConfig, error) {
 	return cc, nil
 }
 
-// SaveClient writes cc to ~/.piper/piper/config.json with 0600 perms, creating
-// the directory if needed.
+// SaveClient writes cc into the current box of ~/.piper/piper/config.json
+// (creating a "default" box if none exists), preserving all other boxes and
+// rewriting a legacy flat file in v2 form.
 func SaveClient(cc ClientConfig) error {
-	path, err := clientConfigPath()
+	cf, err := LoadClientFile()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	name := cf.Current
+	if name == "" {
+		name = "default"
 	}
-	data, err := json.MarshalIndent(cc, "", "  ")
-	if err != nil {
-		return err
+	updated := false
+	for i := range cf.Boxes {
+		if cf.Boxes[i].Name == name {
+			cf.Boxes[i].Addr = cc.Addr
+			cf.Boxes[i].Token = cc.Token
+			cf.Boxes[i].RelayAPI = cc.RelayAPI
+			cf.Boxes[i].AccountCredential = cc.AccountCredential
+			updated = true
+			break
+		}
 	}
-	return os.WriteFile(path, data, 0o600)
+	if !updated {
+		cf.Boxes = append(cf.Boxes, Box{Name: name, Addr: cc.Addr, Token: cc.Token, RelayAPI: cc.RelayAPI, AccountCredential: cc.AccountCredential})
+	}
+	cf.Current = name
+	return SaveClientFile(cf)
 }
 
 // RelayFile is the persisted relay enrollment written by `piper connect` and
