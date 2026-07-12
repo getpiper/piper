@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -681,5 +682,30 @@ func TestDeleteAppEndpointUnknownApp(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/ghost", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// A 500 must not echo the raw internal error (container IDs, Caddy admin URLs,
+// file paths) to the caller — the control API is reachable remotely through the
+// relay proxy. #122.
+func TestServerErrorDoesNotLeakInternalDetail(t *testing.T) {
+	s := newTestStore(t)
+	leak := errors.New("unroute: caddy admin http://127.0.0.1:2019 failed stopping container abc123def /var/lib/piper/state")
+	h := New(s, &fakeDeployer{store: s, stopErr: leak}, "piper.localhost", "", nil, nil)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/stop", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"caddy", "2019", "abc123def", "/var/lib/piper", "unroute"} {
+		if strings.Contains(body, secret) {
+			t.Errorf("500 body leaked %q: %s", secret, body)
+		}
+	}
+	if !strings.Contains(body, "internal server error") {
+		t.Errorf("body = %q, want a generic message", strings.TrimSpace(body))
 	}
 }

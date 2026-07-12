@@ -82,12 +82,12 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "app exists", http.StatusConflict)
 			return
 		} else if !errors.Is(err, store.ErrNotFound) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		app, err := s.CreateApp(in.Name, in.Port)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, App{App: app})
@@ -95,14 +95,14 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 	mux.HandleFunc("GET /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		apps, err := s.ListApps()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		out := make([]App, 0, len(apps))
 		for _, a := range apps {
 			status, err := latestStatus(s, a.Name)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				serverError(w, r, err)
 				return
 			}
 			out = append(out, App{App: a, Status: status})
@@ -116,12 +116,12 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		status, err := latestStatus(s, app.Name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, App{App: app, Status: status})
@@ -132,12 +132,12 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		deps, err := s.ListDeployments(name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		if deps == nil {
@@ -152,7 +152,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -164,12 +164,12 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		dir, err := os.MkdirTemp("", "piper-src-*")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		if err := untar(r.Body, dir); err != nil {
@@ -180,7 +180,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		dep, err := d.Begin(name)
 		if err != nil {
 			os.RemoveAll(dir)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		// Deploy runs past this request: own the temp dir and use a background
@@ -213,7 +213,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -223,7 +223,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -233,7 +233,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -248,7 +248,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		}
 		manifest, err := github.BuildManifest("piper-"+baseDomain, "https://hooks."+baseDomain, in.RedirectURL)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"manifest": string(manifest)})
@@ -263,13 +263,14 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		}
 		creds, err := github.ExchangeCode(r.Context(), githubAPIBase, in.Code)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			log.Printf("api: %s %s: github exchange: %v", r.Method, r.URL.Path, err)
+			http.Error(w, "github code exchange failed", http.StatusBadGateway)
 			return
 		}
 		if err := s.SaveGitHubApp(store.GitHubApp{
 			AppID: creds.AppID, PrivateKey: creds.PrivateKeyPEM, WebhookSecret: creds.WebhookSecret,
 		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		if onGitHubApp != nil {
@@ -291,7 +292,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		}
 		st, err := dom.Status()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, st)
@@ -320,7 +321,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, st)
@@ -333,7 +334,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -363,6 +364,15 @@ func validAppName(name string) bool {
 		}
 	}
 	return true
+}
+
+// serverError logs the detailed error server-side and returns a generic 500 to
+// the caller. Handler errors can carry container IDs, Caddy admin URLs, and file
+// paths, and the control API is reachable remotely through the relay proxy, so
+// the raw text must not reach the response body (#122).
+func serverError(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("api: %s %s: %v", r.Method, r.URL.Path, err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
