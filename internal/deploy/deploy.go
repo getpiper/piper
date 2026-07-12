@@ -16,6 +16,13 @@ import (
 
 const deploymentCleanupTimeout = 5 * time.Second
 
+// imageRetentionPerApp bounds how many of an app's most-recent built images the
+// deployer keeps after a successful deploy; older piper/<app>:<ts> tags are
+// GC'd so a Pi-class box's disk doesn't grow unbounded (#125). Generous enough
+// to cover the live production image plus a couple of active PR previews (which
+// share the app's image repo) with headroom.
+const imageRetentionPerApp = 5
+
 // logFlushInterval bounds how often a running build's growing log is persisted
 // to its deployment row, so a slow build's output reaches pollers (the CLI and
 // dashboard) without a store write per line.
@@ -263,6 +270,11 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 		_ = d.runtime.Stop(ctx, previous.ContainerID)
 		_ = d.store.UpdateDeploymentStatus(previous.ID, "stopped")
 	}
+	// GC superseded images so per-deploy tags don't fill a Pi-class box's disk;
+	// best-effort, and the newest (this deploy's, in use) is always kept (#125).
+	if err := d.runtime.PruneAppImages(ctx, dep.App, imageRetentionPerApp); err != nil {
+		log.Printf("deploy %s: prune images: %v", dep.App, err)
+	}
 	return nil
 }
 
@@ -428,5 +440,12 @@ func (d *Deployer) Delete(ctx context.Context, appName string) error {
 	if err := d.removeCustomDomainRoute(appName); err != nil {
 		return err
 	}
-	return d.store.DeleteApp(appName)
+	if err := d.store.DeleteApp(appName); err != nil {
+		return err
+	}
+	// The app is gone: drop all its built images (keep none).
+	if err := d.runtime.PruneAppImages(ctx, appName, 0); err != nil {
+		log.Printf("delete %s: prune images: %v", appName, err)
+	}
+	return nil
 }

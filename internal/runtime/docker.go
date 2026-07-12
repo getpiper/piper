@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	docker "github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -120,6 +123,48 @@ func (d *DockerRuntime) Stop(ctx context.Context, containerID string) error {
 	timeout := 10
 	_ = d.cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
 	return d.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+}
+
+// imageRef is a built image's tag and creation time, for GC ordering.
+type imageRef struct {
+	ref     string
+	created int64
+}
+
+// imagesToPrune returns the refs to remove, keeping the newest keep by creation
+// time (keep<=0 keeps none). Input order is irrelevant; it sorts newest-first.
+func imagesToPrune(refs []imageRef, keep int) []string {
+	sort.Slice(refs, func(i, j int) bool { return refs[i].created > refs[j].created })
+	var out []string
+	for i, r := range refs {
+		if keep > 0 && i < keep {
+			continue
+		}
+		out = append(out, r.ref)
+	}
+	return out
+}
+
+func (d *DockerRuntime) PruneAppImages(ctx context.Context, app string, keep int) error {
+	imgs, err := d.cli.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return err
+	}
+	prefix := "piper/" + app + ":"
+	var refs []imageRef
+	for _, im := range imgs {
+		for _, tag := range im.RepoTags {
+			if strings.HasPrefix(tag, prefix) {
+				refs = append(refs, imageRef{ref: tag, created: im.Created})
+			}
+		}
+	}
+	for _, ref := range imagesToPrune(refs, keep) {
+		// Best-effort, untag-then-remove: an image still in use by a running
+		// container can't be removed without force, and we want to keep those.
+		_, _ = d.cli.ImageRemove(ctx, ref, image.RemoveOptions{PruneChildren: true})
+	}
+	return nil
 }
 
 func (d *DockerRuntime) Logs(ctx context.Context, containerID string) (io.ReadCloser, error) {
