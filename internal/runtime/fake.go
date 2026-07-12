@@ -9,6 +9,7 @@ import (
 // FakeRuntime is an in-memory Runtime for unit tests.
 type FakeRuntime struct {
 	BuildResultVal  BuildResult
+	BuildOutput     string // written to progress on Build, simulating live output
 	BuildErr        error
 	RunResultVal    RunResult
 	RunErr          error
@@ -19,7 +20,10 @@ type FakeRuntime struct {
 	StopContextErrs []error
 }
 
-func (f *FakeRuntime) Build(context.Context, string, string) (BuildResult, error) {
+func (f *FakeRuntime) Build(_ context.Context, _, _ string, progress io.Writer) (BuildResult, error) {
+	if progress != nil && f.BuildOutput != "" {
+		_, _ = io.WriteString(progress, f.BuildOutput)
+	}
 	return f.BuildResultVal, f.BuildErr
 }
 

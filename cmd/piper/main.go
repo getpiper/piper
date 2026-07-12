@@ -204,7 +204,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "deployed %s: %s (%s)\n", name, appURL(dep.Hostname, *remote != ""), dep.Status)
+		final, err := c.FollowDeploy(name, dep.ID, stderr)
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		if final.Status != "running" {
+			fmt.Fprintf(stderr, "deploy failed: %s (%s)\n", name, final.Status)
+			return 1
+		}
+		app, err := c.App(name)
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "deployed %s: %s (%s)\n", name, appURL(app.Hostname, *remote != ""), final.Status)
 		return 0
 	case "list":
 		if len(args) != 1 {

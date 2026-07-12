@@ -14,6 +14,32 @@ import (
 
 const deploymentCleanupTimeout = 5 * time.Second
 
+// logFlushInterval bounds how often a running build's growing log is persisted
+// to its deployment row, so a slow build's output reaches pollers (the CLI and
+// dashboard) without a store write per line.
+const logFlushInterval = time.Second
+
+// logSink is the progress io.Writer handed to the build: it accumulates output
+// in a tail-capped buffer and flushes the whole buffer to the deployment's log
+// column at most once per logFlushInterval. Written from a single goroutine
+// (the deploy), so it needs no locking. The authoritative final log is written
+// separately by FinalizeDeployment.
+type logSink struct {
+	buf       runtime.TailBuffer
+	store     *store.Store
+	id        string
+	lastFlush time.Time
+}
+
+func (ls *logSink) Write(p []byte) (int, error) {
+	n, err := ls.buf.Write(p)
+	if time.Since(ls.lastFlush) >= logFlushInterval {
+		_ = ls.store.UpdateDeploymentLogs(ls.id, ls.buf.String())
+		ls.lastFlush = time.Now()
+	}
+	return n, err
+}
+
 type RouteSetter interface {
 	UpsertRoute(host string, upstreamHostPort int) error
 	UpsertRouteTLS(host string, upstreamHostPort int) error
@@ -65,19 +91,28 @@ func (d *Deployer) stopPartial(ctx context.Context, containerID string) {
 
 // buildRunHealthy builds, runs, and health-checks app, capturing one
 // tail-capped log blob (build output, plus container output when the run or
-// health check fails). On failure it invokes recordFailed with whatever ids
-// and log are known so the caller persists a "failed" record for the right
-// (app, pr) row, then returns a wrapped error.
-func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir string, recordFailed func(imageID, containerID string, hostPort int, logs string)) (runtime.BuildResult, runtime.RunResult, string, error) {
+// health check fails). When progress is non-nil (the production Finish path),
+// stage-transition banners ("→ building image", etc.) and the build's live
+// output are written to it as they happen, in addition to the returned log;
+// previews pass nil and see no live output. On failure it invokes recordFailed
+// with whatever ids and log are known so the caller persists a "failed" record
+// for the right (app, pr) row, then returns a wrapped error.
+func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir string, progress io.Writer, recordFailed func(imageID, containerID string, hostPort int, logs string)) (runtime.BuildResult, runtime.RunResult, string, error) {
 	tag := fmt.Sprintf("piper/%s:%d", app.Name, time.Now().Unix())
 	var log runtime.TailBuffer
-	build, err := d.runtime.Build(ctx, srcDir, tag)
+	out := io.Writer(&log)
+	if progress != nil {
+		out = io.MultiWriter(&log, progress)
+	}
+	_, _ = io.WriteString(out, "→ building image\n")
+	build, err := d.runtime.Build(ctx, srcDir, tag, progress)
 	_, _ = io.WriteString(&log, build.Log)
 	if err != nil {
 		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
 		recordFailed(build.ImageID, "", 0, log.String())
 		return build, runtime.RunResult{}, log.String(), fmt.Errorf("build: %w", err)
 	}
+	_, _ = io.WriteString(out, "→ starting container\n")
 	run, err := d.runtime.Run(ctx, tag, app.Port, map[string]string{"PORT": fmt.Sprint(app.Port)})
 	if err != nil {
 		d.appendContainerOutput(ctx, &log, run.ContainerID)
@@ -86,6 +121,7 @@ func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir st
 		recordFailed(build.ImageID, run.ContainerID, run.HostPort, log.String())
 		return build, run, log.String(), fmt.Errorf("run: %w", err)
 	}
+	_, _ = io.WriteString(out, "→ health-checking\n")
 	if err := d.runtime.WaitHealthy(ctx, run.HostPort); err != nil {
 		d.appendContainerOutput(ctx, &log, run.ContainerID)
 		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")
@@ -115,54 +151,93 @@ func (d *Deployer) appendContainerOutput(ctx context.Context, log io.Writer, con
 	_, _ = io.Copy(log, rc)
 }
 
-func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.Deployment, error) {
-	app, err := d.store.GetApp(appName)
-	if err != nil {
+// Begin opens a building deployment row for appName and returns it; its id is
+// what an async caller (the deploy API) hands back before the build finishes.
+func (d *Deployer) Begin(appName string) (store.Deployment, error) {
+	if _, err := d.store.GetApp(appName); err != nil {
 		return store.Deployment{}, err
 	}
-	previous, err := d.store.LatestRunning(appName)
+	return d.store.CreateDeployment(appName, "", "", 0, "building", "")
+}
+
+// Finish builds, runs, health-checks, and routes dep's app from srcDir,
+// streaming the build's output into dep's log and finalizing the row
+// running/failed. On build/run/health failure it finalizes the same row failed.
+func (d *Deployer) Finish(ctx context.Context, dep store.Deployment, srcDir string) error {
+	app, err := d.store.GetApp(dep.App)
+	if err != nil {
+		return err
+	}
+	previous, err := d.store.LatestRunning(dep.App)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return store.Deployment{}, err
+		return err
 	}
 
-	build, run, logs, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int, logs string) {
-		_, _ = d.store.CreateDeployment(appName, img, cid, hp, "failed", logs)
+	sink := &logSink{store: d.store, id: dep.ID}
+	build, run, logs, err := d.buildRunHealthy(ctx, app, srcDir, sink, func(img, cid string, hp int, logs string) {
+		_ = d.store.FinalizeDeployment(dep.ID, img, cid, hp, "failed", logs)
 	})
 	if err != nil {
-		return store.Deployment{}, err
+		return err
 	}
 
-	dep, err := d.store.CreateDeployment(appName, build.ImageID, run.ContainerID, run.HostPort, "running", logs)
-	if err != nil {
-		return store.Deployment{}, err
-	}
-	host := d.hostFor(appName)
+	// Route BEFORE marking the row "running": if routing fails, the app isn't
+	// reachable yet, so the row must finalize "failed" rather than report a
+	// success the CLI/dashboard would trust.
+	host := d.hostFor(dep.App)
 	if d.registrar != nil {
-		host, err = d.registrar.Register(appName)
+		host, err = d.registrar.Register(dep.App)
 		if err != nil {
-			return store.Deployment{}, fmt.Errorf("register hostname: %w", err)
+			return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("register hostname: %w", err))
 		}
 	}
 	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
-		return store.Deployment{}, fmt.Errorf("route: %w", err)
+		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route: %w", err))
 	}
 	// Record the host the app is now served on so the apps API (#100) and deploy
 	// response (#93) can report the real URL, not a guessed one.
-	if err := d.store.SetAppHostname(appName, host); err != nil {
-		return store.Deployment{}, fmt.Errorf("record hostname: %w", err)
+	if err := d.store.SetAppHostname(dep.App, host); err != nil {
+		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("record hostname: %w", err))
 	}
 	// An active BYO custom domain (#102) serves the app at <app>.<custom> over
 	// the box-terminated :443 alongside the primary host.
 	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {
-		if err := d.routes.UpsertRouteTLS(appName+"."+dc.Domain, run.HostPort); err != nil {
-			return store.Deployment{}, fmt.Errorf("route custom domain: %w", err)
+		if err := d.routes.UpsertRouteTLS(dep.App+"."+dc.Domain, run.HostPort); err != nil {
+			return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route custom domain: %w", err))
 		}
+	}
+
+	if err := d.store.FinalizeDeployment(dep.ID, build.ImageID, run.ContainerID, run.HostPort, "running", logs); err != nil {
+		return err
 	}
 	if previous.ContainerID != "" && previous.ContainerID != run.ContainerID {
 		_ = d.runtime.Stop(ctx, previous.ContainerID)
 		_ = d.store.UpdateDeploymentStatus(previous.ID, "stopped")
 	}
-	return dep, nil
+	return nil
+}
+
+// failFinish finalizes dep's row "failed" after a routing error, appending the
+// error to logs, and returns the wrapped error unchanged. It does not stop the
+// just-started container: matching prior semantics, a route failure leaves the
+// container running (the row is what's marked unreachable).
+func (d *Deployer) failFinish(id, imageID, containerID string, hostPort int, logs string, wrapped error) error {
+	logs += "\nerror: " + wrapped.Error() + "\n"
+	_ = d.store.FinalizeDeployment(id, imageID, containerID, hostPort, "failed", logs)
+	return wrapped
+}
+
+// Deploy is the synchronous Begin+Finish used by the webhook path; it returns
+// the finalized deployment.
+func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.Deployment, error) {
+	dep, err := d.Begin(appName)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	if err := d.Finish(ctx, dep, srcDir); err != nil {
+		return store.Deployment{}, err
+	}
+	return d.store.LatestDeployment(appName)
 }
 
 func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, srcDir string) (store.Deployment, error) {
@@ -175,7 +250,7 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 		return store.Deployment{}, err
 	}
 
-	build, run, logs, err := d.buildRunHealthy(ctx, app, srcDir, func(img, cid string, hp int, logs string) {
+	build, run, logs, err := d.buildRunHealthy(ctx, app, srcDir, nil, func(img, cid string, hp int, logs string) {
 		_, _ = d.store.CreatePreviewDeployment(appName, pr, img, cid, hp, "failed", logs)
 	})
 	if err != nil {

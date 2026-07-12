@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,7 +20,8 @@ import (
 )
 
 type Deployerer interface {
-	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
+	Begin(app string) (store.Deployment, error)
+	Finish(ctx context.Context, dep store.Deployment, srcDir string) error
 	Stop(ctx context.Context, app string) error
 	Delete(ctx context.Context, app string) error
 }
@@ -29,14 +32,6 @@ type Deployerer interface {
 type App struct {
 	store.App
 	Status string
-}
-
-// DeployResult is the wire shape of a deploy response: the deployment plus the
-// public hostname the app is now served on (#93), so `piper deploy` can print
-// the URL that actually serves the app instead of a guessed one.
-type DeployResult struct {
-	store.Deployment
-	Hostname string
 }
 
 // latestStatus resolves the App.Status for one app; never-deployed is "".
@@ -173,22 +168,33 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer os.RemoveAll(dir)
 		if err := untar(r.Body, dir); err != nil {
+			os.RemoveAll(dir)
 			http.Error(w, "bad tar: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		dep, err := d.Deploy(r.Context(), name, dir)
+		dep, err := d.Begin(name)
 		if err != nil {
+			os.RemoveAll(dir)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		app, err := s.GetApp(name)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, DeployResult{Deployment: dep, Hostname: app.Hostname})
+		// Deploy runs past this request: own the temp dir and use a background
+		// context, since r.Context() is cancelled once the 202 is written. The
+		// build outcome is observed by polling the deployment's status + logs.
+		go func() {
+			defer os.RemoveAll(dir)
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("deploy %s: panic: %v", name, r)
+					_ = s.FinalizeDeployment(dep.ID, "", "", 0, "failed", fmt.Sprintf("deploy panicked: %v", r))
+				}
+			}()
+			if err := d.Finish(context.Background(), dep, dir); err != nil {
+				log.Printf("deploy %s: %v", name, err)
+			}
+		}()
+		writeJSON(w, http.StatusAccepted, dep)
 	})
 	mux.HandleFunc("POST /v1/apps/{name}/link", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

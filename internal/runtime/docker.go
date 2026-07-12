@@ -27,7 +27,7 @@ func NewDockerRuntime() (*DockerRuntime, error) {
 	return &DockerRuntime{cli: cli}, nil
 }
 
-func (d *DockerRuntime) Build(ctx context.Context, srcDir, imageTag string) (BuildResult, error) {
+func (d *DockerRuntime) Build(ctx context.Context, srcDir, imageTag string, progress io.Writer) (BuildResult, error) {
 	tarball, err := archive.TarWithOptions(srcDir, &archive.TarOptions{})
 	if err != nil {
 		return BuildResult{}, err
@@ -46,7 +46,11 @@ func (d *DockerRuntime) Build(ctx context.Context, srcDir, imageTag string) (Bui
 	// log. A failing build step arrives on the stream and surfaces as err
 	// here, log in hand.
 	var log TailBuffer
-	if err := jsonmessage.DisplayJSONMessagesStream(resp.Body, &log, 0, false, nil); err != nil {
+	out := io.Writer(&log)
+	if progress != nil {
+		out = io.MultiWriter(&log, progress)
+	}
+	if err := jsonmessage.DisplayJSONMessagesStream(resp.Body, out, 0, false, nil); err != nil {
 		return BuildResult{Log: log.String()}, err
 	}
 	insp, err := d.cli.ImageInspect(ctx, imageTag)

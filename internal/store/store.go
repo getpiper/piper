@@ -210,6 +210,22 @@ func (s *Store) UpdateDeploymentStatus(id, status string) error {
 	return err
 }
 
+// UpdateDeploymentLogs overwrites one deployment's captured log. Used to grow
+// a building row's log as the build streams.
+func (s *Store) UpdateDeploymentLogs(id, logs string) error {
+	_, err := s.db.Exec(`UPDATE deployments SET logs=? WHERE id=?`, logs, id)
+	return err
+}
+
+// FinalizeDeployment fills in a building row's real image/container/port and
+// flips its status to running/failed, writing the complete log in one update.
+func (s *Store) FinalizeDeployment(id, imageID, containerID string, hostPort int, status, logs string) error {
+	_, err := s.db.Exec(
+		`UPDATE deployments SET image_id=?, container_id=?, host_port=?, status=?, logs=? WHERE id=?`,
+		imageID, containerID, hostPort, status, logs, id)
+	return err
+}
+
 type GitHubApp struct {
 	AppID         int64
 	PrivateKey    string

@@ -66,8 +66,20 @@ func TestEndToEndDeploy(t *testing.T) {
 	if err := c.CreateApp("blog", 8080); err != nil {
 		t.Fatalf("CreateApp: %v", err)
 	}
-	if _, err := c.Deploy("blog", filepath.Join(repoRoot, "test/e2e/sampleapp")); err != nil {
+	dep, err := c.Deploy("blog", filepath.Join(repoRoot, "test/e2e/sampleapp"))
+	if err != nil {
 		t.Fatalf("Deploy: %v", err)
+	}
+	// Deploy now returns at 202, before the build runs: follow the deployment
+	// to completion (the real exercise of the async polling contract) so the
+	// curl-retry window below only has to absorb route propagation, not the
+	// whole Docker build.
+	final, err := c.FollowDeploy("blog", dep.ID, io.Discard)
+	if err != nil {
+		t.Fatalf("FollowDeploy: %v", err)
+	}
+	if final.Status != "running" {
+		t.Fatalf("deploy status = %q, want running", final.Status)
 	}
 
 	// Fetch through Caddy on :80 with Host: blog.piper.localhost. Retry until

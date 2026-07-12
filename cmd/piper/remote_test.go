@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -131,14 +132,20 @@ func TestRunRemoteDeployPrintsAssignedURL(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	const prefix = "/agents/ab12-alice.public.getpiper.co"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/agents/ab12-alice.public.getpiper.co/v1/apps/blog/deploy" {
-			t.Errorf("path = %s", r.URL.Path)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == prefix+"/v1/apps/blog/deploy":
+			_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
+		case r.URL.Path == prefix+"/v1/apps/blog/deployments/dep1/logs":
+			io.WriteString(w, "")
+		case r.URL.Path == prefix+"/v1/apps/blog/deployments":
+			_ = json.NewEncoder(w).Encode([]store.Deployment{{ID: "dep1", App: "blog", Status: "running"}})
+		case r.URL.Path == prefix+"/v1/apps/blog":
+			_ = json.NewEncoder(w).Encode(api.App{App: store.App{Name: "blog", Hostname: "ab12-alice.public.getpiper.co"}, Status: "running"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(api.DeployResult{
-			Deployment: store.Deployment{ID: "dep1", App: "blog", Status: "running"},
-			Hostname:   "ab12-alice.public.getpiper.co",
-		})
 	}))
 	defer srv.Close()
 	if err := config.SaveClient(config.ClientConfig{RelayAPI: srv.URL, AccountCredential: "cred-xyz"}); err != nil {
