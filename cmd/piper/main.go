@@ -114,8 +114,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	gfs := flag.NewFlagSet("piper", flag.ContinueOnError)
 	gfs.SetOutput(stderr)
 	remote := gfs.String("remote", os.Getenv("PIPER_REMOTE"), "base domain of a relay-connected box to drive through the relay")
+	showVersion := gfs.Bool("version", false, "print the build version and exit")
 	if err := gfs.Parse(args); err != nil {
 		return 2
+	}
+	if *showVersion {
+		fmt.Fprintln(stdout, version.String())
+		return 0
 	}
 	args = gfs.Args()
 	if len(args) == 0 {

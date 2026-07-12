@@ -39,6 +39,16 @@ func TestRunVersionIgnoresPiperRemoteEnv(t *testing.T) {
 	}
 }
 
+func TestRunVersionFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got == "" {
+		t.Fatal("version output is empty")
+	}
+}
+
 func TestRunRemoteListRoutesThroughRelay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
