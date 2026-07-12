@@ -138,6 +138,10 @@ Add a new prefix only when a genuinely new surface appears; otherwise reuse one.
 
 ### Labels
 
+**Always label a new issue when you open it** — don't leave it bare. At minimum give it a **type** (`bug`/`enhancement`/`documentation`), a **priority** (`P1`/`P2`/`P3`), and a **size** (`size/*`); add the **binary** label(s) it lands in, and any of the standard open-source labels that fit.
+
 - **`agent`** / **`relay`** / **`cli`** — which binary the work lands in.
+- **`P1`** / **`P2`** / **`P3`** — priority: golden-path user pain → real bugs/hardening/roadmap gaps → cleanups, test gaps, docs, polish.
+- **`size/XS`** / **`size/S`** / **`size/M`** / **`size/L`** / **`size/XL`** — scope/effort (how *much* work, not how hard): a few lines/minutes → up to ~half a day → ~a day → several days → epic-scale (split it). Orthogonal to priority — a task can be small but P1, or large but P3.
 - **`epic`** — a large multi-part tracker (e.g. a whole Plan); sub-tasks are checkboxes linking child issues.
 - Standard open-source labels stay useful: `good first issue`, `help wanted`, `bug`, `enhancement`, `documentation`.
