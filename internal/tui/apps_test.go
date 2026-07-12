@@ -57,3 +57,19 @@ func TestAppsViewErrorBannerKeepsLastRows(t *testing.T) {
 		t.Fatalf("banner must clear on next successful poll:\n%s", out)
 	}
 }
+
+func TestAppsViewCursorAndEnterPushesDetail(t *testing.T) {
+	m, _ := newAppsView(false).Update(appsLoadedMsg{apps: fixtureApps()})
+	m, _ = m.Update(keyRunes('j')) // cursor to "shop"
+	_, cmd := m.Update(keyEnter())
+	if cmd == nil {
+		t.Fatal("enter should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "shop" {
+		t.Fatalf("want detail for shop, got title %q", pm.view.title())
+	}
+}

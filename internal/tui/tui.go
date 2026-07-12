@@ -6,12 +6,16 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/store"
 )
 
 // API is the slice of the piperd control API the TUI consumes.
 // *client.Client satisfies it; tests inject fakes.
 type API interface {
 	ListApps() ([]api.App, error)
+	App(name string) (api.App, error)
+	Deployments(name string) ([]store.Deployment, error)
+	DeploymentLogs(name, id string) (string, error)
 }
 
 // view is a stack entry: a Bubble Tea model that refreshes its own data off the
@@ -26,15 +30,20 @@ type view interface {
 // Messages flowing into Update. All API calls run as tea.Cmd goroutines and
 // land as exactly one of these; the UI thread never blocks.
 type (
-	appsLoadedMsg struct{ apps []api.App }
-	errMsg        struct{ err error }
-	tickMsg       struct{}
-	pushMsg       struct{ view view }
+	appsLoadedMsg      struct{ apps []api.App }
+	errMsg             struct{ err error }
+	tickMsg            struct{}
+	pushMsg            struct{ view view }
+	appDetailLoadedMsg struct {
+		app  api.App
+		deps []store.Deployment
+	}
 )
 
 // pollResult is implemented by every message that is the outcome of a view's
 // poll, so the root updates reachability without knowing the view type.
 type pollResult interface{ reachable() bool }
 
-func (appsLoadedMsg) reachable() bool { return true }
-func (errMsg) reachable() bool        { return false }
+func (appsLoadedMsg) reachable() bool      { return true }
+func (errMsg) reachable() bool             { return false }
+func (appDetailLoadedMsg) reachable() bool { return true }
