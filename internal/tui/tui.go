@@ -38,6 +38,10 @@ type (
 		app  api.App
 		deps []store.Deployment
 	}
+	logsLoadedMsg struct {
+		logs   string
+		status string
+	}
 )
 
 // pollResult is implemented by every message that is the outcome of a view's
@@ -47,3 +51,4 @@ type pollResult interface{ reachable() bool }
 func (appsLoadedMsg) reachable() bool      { return true }
 func (errMsg) reachable() bool             { return false }
 func (appDetailLoadedMsg) reachable() bool { return true }
+func (logsLoadedMsg) reachable() bool      { return true }

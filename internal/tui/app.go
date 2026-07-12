@@ -20,9 +20,10 @@ type Model struct {
 	remote bool
 	client API
 
-	stack  []view
-	loaded bool // at least one successful poll
-	down   bool // last poll failed
+	stack         []view
+	loaded        bool // at least one successful poll
+	down          bool // last poll failed
+	width, height int
 }
 
 func NewModel(box, addr string, remote bool, c API) Model {
@@ -72,7 +73,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.refresh(), tick())
 	case pushMsg:
 		m.stack = append(m.stack, msg.view)
+		if m.width > 0 {
+			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.stack[len(m.stack)-1] = seeded.(view)
+		}
 		return m, m.refresh()
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		// no return: fall through to forward the size to the top view
 	}
 	if pr, ok := msg.(pollResult); ok {
 		if pr.reachable() {

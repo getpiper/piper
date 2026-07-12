@@ -107,14 +107,3 @@ func (v appDetailView) View() string {
 	}
 	return b.String()
 }
-
-// TEMP stub replaced by logs.go in the next task.
-func newLogsView(app, id, status string) logsView { return logsView{app: app, id: id, status: status} }
-
-type logsView struct{ app, id, status string }
-
-func (logsView) Init() tea.Cmd                         { return nil }
-func (v logsView) Update(tea.Msg) (tea.Model, tea.Cmd) { return v, nil }
-func (v logsView) View() string                        { return "" }
-func (logsView) title() string                         { return "logs" }
-func (v logsView) refresh(API) tea.Cmd                 { return nil }
