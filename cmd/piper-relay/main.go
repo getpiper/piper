@@ -13,7 +13,15 @@ import (
 	"strings"
 
 	"github.com/getpiper/piper/internal/relay"
+	"github.com/getpiper/piper/internal/version"
 )
+
+// versionRequested reports whether args ask for the build version. Kept
+// separate so it can be unit-tested; it also gives piper-relay a symbol that
+// imports internal/version so the release ldflags stamp actually lands.
+func versionRequested(args []string) bool {
+	return len(args) > 0 && (args[0] == "version" || args[0] == "--version")
+}
 
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -93,6 +101,10 @@ func runAdmin(st adminStore, args []string) error {
 }
 
 func main() {
+	if versionRequested(os.Args[1:]) {
+		fmt.Println(version.String())
+		return
+	}
 	dataDir := env("PIPER_RELAY_DATA_DIR", "./relay-data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatalf("data dir: %v", err)

@@ -34,6 +34,7 @@ import (
 	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
 	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/getpiper/piper/internal/version"
 	"github.com/getpiper/piper/internal/webhook"
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
@@ -149,7 +150,18 @@ func runTokenCmd(st tokenStore, args []string, out io.Writer) error {
 	}
 }
 
+// versionRequested reports whether args ask for the build version. Kept
+// separate so it can be unit-tested; it also gives piperd/piper-relay a symbol
+// that imports internal/version so the release ldflags stamp actually lands.
+func versionRequested(args []string) bool {
+	return len(args) > 0 && (args[0] == "version" || args[0] == "--version")
+}
+
 func main() {
+	if versionRequested(os.Args[1:]) {
+		fmt.Println(version.String())
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "token" {
 		dataDir, err := resolveTokenDataDir(os.Args[2:])
 		if err != nil {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/store"
+	"github.com/getpiper/piper/internal/version"
 )
 
 type recorder struct {
@@ -204,5 +205,23 @@ func TestProvisionRelayControlPushFailureUnwinds(t *testing.T) {
 	// The mint must be unwound so the marker doesn't block the next attempt.
 	if len(f.deleted) != 1 || f.deleted[0] != "relay:base.example.com" {
 		t.Fatalf("deleted = %v, want the just-minted label", f.deleted)
+	}
+}
+
+// piperd/piper-relay must have a version surface so the release ldflags stamp
+// lands and the binary can report its build. #61.
+func TestVersionRequested(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		if !versionRequested(args) {
+			t.Errorf("versionRequested(%v) = false, want true", args)
+		}
+	}
+	for _, args := range [][]string{nil, {"token"}, {"serve"}} {
+		if versionRequested(args) {
+			t.Errorf("versionRequested(%v) = true, want false", args)
+		}
+	}
+	if version.String() == "" {
+		t.Error("version.String() is empty")
 	}
 }

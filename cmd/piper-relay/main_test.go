@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/getpiper/piper/internal/relay"
+	"github.com/getpiper/piper/internal/version"
 )
 
 func TestRunAdminDisable(t *testing.T) {
@@ -82,5 +83,23 @@ func TestApiAddrIsLoopback(t *testing.T) {
 		if got := apiAddrIsLoopback(c.addr); got != c.want {
 			t.Errorf("apiAddrIsLoopback(%q) = %v, want %v", c.addr, got, c.want)
 		}
+	}
+}
+
+// piper-relay must have a version surface so the release ldflags stamp lands
+// and the binary can report its build. #61.
+func TestVersionRequested(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		if !versionRequested(args) {
+			t.Errorf("versionRequested(%v) = false, want true", args)
+		}
+	}
+	for _, args := range [][]string{nil, {"admin"}, {"enroll"}} {
+		if versionRequested(args) {
+			t.Errorf("versionRequested(%v) = true, want false", args)
+		}
+	}
+	if version.String() == "" {
+		t.Error("version.String() is empty")
 	}
 }
