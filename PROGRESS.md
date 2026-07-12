@@ -96,6 +96,12 @@ Remaining polish, tracked standalone:
 - ✅ Onboarding docs: box IP over `*.local`, document `PIPER_API_ADDR` — [#174](https://github.com/getpiper/piper/issues/174)
 - ⬜ Explore a `piper setup` onboarding wizard — [#175](https://github.com/getpiper/piper/issues/175)
 
+## Interactive TUI — epic [#183](https://github.com/getpiper/piper/issues/183) ([spec](docs/superpowers/specs/2026-07-12-piper-tui-design.md), [plan](docs/superpowers/plans/2026-07-13-tui-config-and-skeleton.md))
+
+Goal: bare `piper` in a TTY opens a full-screen control surface; every existing subcommand stays scriptable and unchanged.
+
+- ✅ Multi-box client config (schema v2, silent migration) — [#184](https://github.com/getpiper/piper/issues/184)
+
 ## Always-green gates
 
 - `make test` (unit; Docker/e2e skip cleanly when absent) · `make cross` (no-cgo arm64 build)

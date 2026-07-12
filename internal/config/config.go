@@ -116,6 +116,93 @@ type ClientConfig struct {
 	AccountCredential string `json:"account_credential,omitempty"`
 }
 
+// Box is one named piperd target in the piper CLI's config file. Addr/Token
+// are the LAN path; RelayAPI/AccountCredential the relay path (wizard-managed).
+type Box struct {
+	Name              string `json:"name"`
+	Addr              string `json:"addr"`
+	Token             string `json:"token"`
+	RelayAPI          string `json:"relay_api,omitempty"`
+	AccountCredential string `json:"account_credential,omitempty"`
+}
+
+// ClientFile is the on-disk shape of ~/.piper/piper/config.json (schema v2):
+// named boxes plus the current selection. A legacy flat ClientConfig file
+// loads as a single box named "default"; the file itself is only rewritten
+// in v2 form by the next save.
+type ClientFile struct {
+	Boxes   []Box  `json:"boxes"`
+	Current string `json:"current"`
+}
+
+// CurrentBox returns the box named by Current, falling back to the first box.
+func (cf ClientFile) CurrentBox() (Box, bool) {
+	for _, b := range cf.Boxes {
+		if b.Name == cf.Current {
+			return b, true
+		}
+	}
+	if len(cf.Boxes) > 0 {
+		return cf.Boxes[0], true
+	}
+	return Box{}, false
+}
+
+// LoadClientFile reads ~/.piper/piper/config.json in v2 form, migrating a
+// legacy flat file in-memory. A missing file is not an error.
+func LoadClientFile() (ClientFile, error) {
+	var cf ClientFile
+	path, err := clientConfigPath()
+	if err != nil {
+		return cf, err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return cf, nil
+	}
+	if err != nil {
+		return cf, err
+	}
+	_ = json.Unmarshal(data, &cf)
+	if len(cf.Boxes) > 0 {
+		if cf.Current == "" {
+			cf.Current = cf.Boxes[0].Name
+		}
+		return cf, nil
+	}
+	var legacy ClientConfig
+	_ = json.Unmarshal(data, &legacy)
+	if legacy == (ClientConfig{}) {
+		return cf, nil
+	}
+	cf.Boxes = []Box{{
+		Name:              "default",
+		Addr:              legacy.Addr,
+		Token:             legacy.Token,
+		RelayAPI:          legacy.RelayAPI,
+		AccountCredential: legacy.AccountCredential,
+	}}
+	cf.Current = "default"
+	return cf, nil
+}
+
+// SaveClientFile writes cf to ~/.piper/piper/config.json with 0600 perms,
+// creating the directory if needed.
+func SaveClientFile(cf ClientFile) error {
+	path, err := clientConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
 func clientConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -124,20 +211,17 @@ func clientConfigPath() (string, error) {
 	return filepath.Join(home, ".piper", "piper", "config.json"), nil
 }
 
-// LoadClient reads ~/.piper/piper/config.json, then applies PIPER_ADDR /
-// PIPER_TOKEN env overrides and the localhost default for Addr. A missing file
-// is not an error.
+// LoadClient reads the current box from ~/.piper/piper/config.json, then
+// applies PIPER_ADDR / PIPER_TOKEN env overrides and the localhost default
+// for Addr. A missing file is not an error.
 func LoadClient() (ClientConfig, error) {
 	var cc ClientConfig
-	path, err := clientConfigPath()
+	cf, err := LoadClientFile()
 	if err != nil {
 		return cc, err
 	}
-	data, err := os.ReadFile(path)
-	if err == nil {
-		_ = json.Unmarshal(data, &cc)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return cc, err
+	if b, ok := cf.CurrentBox(); ok {
+		cc = ClientConfig{Addr: b.Addr, Token: b.Token, RelayAPI: b.RelayAPI, AccountCredential: b.AccountCredential}
 	}
 	if v := os.Getenv("PIPER_ADDR"); v != "" {
 		cc.Addr = v
@@ -151,21 +235,34 @@ func LoadClient() (ClientConfig, error) {
 	return cc, nil
 }
 
-// SaveClient writes cc to ~/.piper/piper/config.json with 0600 perms, creating
-// the directory if needed.
+// SaveClient writes cc into the current box of ~/.piper/piper/config.json
+// (creating a "default" box if none exists), preserving all other boxes and
+// rewriting a legacy flat file in v2 form.
 func SaveClient(cc ClientConfig) error {
-	path, err := clientConfigPath()
+	cf, err := LoadClientFile()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	name := cf.Current
+	if name == "" {
+		name = "default"
 	}
-	data, err := json.MarshalIndent(cc, "", "  ")
-	if err != nil {
-		return err
+	updated := false
+	for i := range cf.Boxes {
+		if cf.Boxes[i].Name == name {
+			cf.Boxes[i].Addr = cc.Addr
+			cf.Boxes[i].Token = cc.Token
+			cf.Boxes[i].RelayAPI = cc.RelayAPI
+			cf.Boxes[i].AccountCredential = cc.AccountCredential
+			updated = true
+			break
+		}
 	}
-	return os.WriteFile(path, data, 0o600)
+	if !updated {
+		cf.Boxes = append(cf.Boxes, Box{Name: name, Addr: cc.Addr, Token: cc.Token, RelayAPI: cc.RelayAPI, AccountCredential: cc.AccountCredential})
+	}
+	cf.Current = name
+	return SaveClientFile(cf)
 }
 
 // RelayFile is the persisted relay enrollment written by `piper connect` and

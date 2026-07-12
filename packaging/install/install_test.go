@@ -289,19 +289,28 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestInstallDocumentation(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join(repoRoot(t), "README.md"))
-	if err != nil {
-		t.Fatal(err)
+	// The README is the lean quick-start entry point; install flags and env
+	// overrides live in docs/getting-started.md (see #181).
+	docs := map[string][]string{
+		"README.md": {
+			"raw.githubusercontent.com/getpiper/piper/main/install.sh",
+		},
+		filepath.Join("docs", "getting-started.md"): {
+			"--cli-only",
+			"--rc",
+			"PIPER_ADDR",
+		},
 	}
-	readme := string(b)
-	for _, want := range []string{
-		"raw.githubusercontent.com/getpiper/piper/main/install.sh",
-		"--cli-only",
-		"--rc",
-		"PIPER_ADDR",
-	} {
-		if !strings.Contains(readme, want) {
-			t.Errorf("README missing %q", want)
+	for name, wants := range docs {
+		b, err := os.ReadFile(filepath.Join(repoRoot(t), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(b)
+		for _, want := range wants {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s missing %q", name, want)
+			}
 		}
 	}
 }
