@@ -67,9 +67,17 @@ func appURL(hostname string, remote bool) string {
 	return "http://" + hostname
 }
 
-// isTerminal reports whether stdout is an interactive terminal; a func var so
-// run() tests can force either mode.
-var isTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+// isTerminal reports whether both stdout and stdin are interactive terminals;
+// a func var so run() tests can force either mode. Requiring stdin too keeps
+// a piped-but-drained stdin (e.g. `echo x | piper`) from launching the
+// full-screen UI.
+var isTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// tuiRequestTimeout bounds each poll the TUI makes against piperd, so a
+// blackholed box surfaces as unreachable instead of hanging the 2s poll loop.
+const tuiRequestTimeout = 5 * time.Second
 
 // launchTUI opens the interactive TUI against the current box (or the given
 // relay-remote base domain); a func var so run() tests can stub it.
@@ -78,6 +86,7 @@ var launchTUI = func(remote string, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
+	c = c.WithTimeout(tuiRequestTimeout)
 	box, addr := "default", ""
 	if cf, err := config.LoadClientFile(); err == nil {
 		if b, ok := cf.CurrentBox(); ok {
