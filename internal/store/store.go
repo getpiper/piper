@@ -226,6 +226,21 @@ func (s *Store) FinalizeDeployment(id, imageID, containerID string, hostPort int
 	return err
 }
 
+// FailBuildingDeployments flips every deployment still in "building" to
+// "failed", appending an abort note to each row's captured log. Called on
+// graceful shutdown: an in-flight build's goroutine cannot outlive the process,
+// so its row would otherwise survive as a permanent "building" (#158). Returns
+// the number of rows changed.
+func (s *Store) FailBuildingDeployments() (int64, error) {
+	res, err := s.db.Exec(
+		`UPDATE deployments SET status='failed', logs = logs || ? WHERE status='building'`,
+		"\n[deploy aborted: piperd shut down]\n")
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 type GitHubApp struct {
 	AppID         int64
 	PrivateKey    string

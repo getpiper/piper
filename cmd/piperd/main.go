@@ -58,7 +58,10 @@ type webhookLifecycle interface {
 }
 
 type listenerStopper interface{ Stop() }
-type storeCloser interface{ Close() error }
+type storeCloser interface {
+	FailBuildingDeployments() (int64, error)
+	Close() error
+}
 
 type tokenStore interface {
 	CreateToken(label, scope string) (string, error)
@@ -397,6 +400,16 @@ func shutdownWithTimeouts(api apiShutdowner, wh webhookLifecycle, mgr listenerSt
 		mgr.Stop()
 	}
 	if st != nil {
+		// A deploy started over the API runs in a goroutine this drain does not
+		// track, and a Docker build routinely outlasts the drain window, so its
+		// row can still be "building" here. Finalize it "failed" while the store
+		// is open — otherwise the row survives shutdown as a permanent "building"
+		// (#158). Any deploy that finished during the drain is no longer building.
+		if n, err := st.FailBuildingDeployments(); err != nil {
+			log.Printf("shutdown: fail building deployments: %v", err)
+		} else if n > 0 {
+			log.Printf("shutdown: marked %d in-flight deploy(s) failed", n)
+		}
 		_ = st.Close()
 	}
 }

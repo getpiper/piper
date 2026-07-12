@@ -51,6 +51,10 @@ func (m *recManager) Stop() { m.rec.add("caddy") }
 
 type recStore struct{ rec *recorder }
 
+func (s *recStore) FailBuildingDeployments() (int64, error) {
+	s.rec.add("store-fail-building")
+	return 0, nil
+}
 func (s *recStore) Close() error { s.rec.add("store"); return nil }
 
 func TestShutdownDrainsBeforeInfrastructureTeardown(t *testing.T) {
@@ -60,14 +64,14 @@ func TestShutdownDrainsBeforeInfrastructureTeardown(t *testing.T) {
 		&recManager{rec}, &recStore{rec}, time.Second, 2*time.Second,
 	)
 	got := rec.snapshot()
-	if len(got) != 6 {
-		t.Fatalf("events = %v, want 6 events", got)
+	if len(got) != 7 {
+		t.Fatalf("events = %v, want 7 events", got)
 	}
 	first := map[string]bool{got[0]: true, got[1]: true}
 	if !first["api-shutdown"] || !first["webhook-stop"] {
 		t.Fatalf("first events = %v, want API and webhook stop", got[:2])
 	}
-	wantTail := []string{"webhook-wait", "webhook-cancel", "caddy", "store"}
+	wantTail := []string{"webhook-wait", "webhook-cancel", "caddy", "store-fail-building", "store"}
 	if !reflect.DeepEqual(got[2:], wantTail) {
 		t.Fatalf("tail = %v, want %v", got[2:], wantTail)
 	}
@@ -118,7 +122,19 @@ func TestShutdownSkipsAbsentDependencies(t *testing.T) {
 	rec := &recorder{}
 	shutdownWithTimeouts(&recServer{rec}, nil, nil, &recStore{rec}, time.Second, 2*time.Second)
 	got := rec.snapshot()
-	want := []string{"api-shutdown", "store"}
+	want := []string{"api-shutdown", "store-fail-building", "store"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+}
+
+func TestShutdownFailsBuildingRowsBeforeStoreClose(t *testing.T) {
+	rec := &recorder{}
+	shutdownWithTimeouts(&recServer{rec}, nil, nil, &recStore{rec}, time.Second, 2*time.Second)
+	got := rec.snapshot()
+	// In-flight "building" rows must be finalized while the store is still open,
+	// so a graceful shutdown never strands a permanent "building" row (#158).
+	want := []string{"api-shutdown", "store-fail-building", "store"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)
 	}
