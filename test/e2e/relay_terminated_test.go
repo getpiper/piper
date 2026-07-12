@@ -224,16 +224,32 @@ func accountCredential(t *testing.T, home string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cc struct {
-		AccountCredential string `json:"account_credential"`
+	var cf struct {
+		Boxes []struct {
+			Name              string `json:"name"`
+			AccountCredential string `json:"account_credential"`
+		} `json:"boxes"`
+		Current string `json:"current"`
 	}
-	if err := json.Unmarshal(b, &cc); err != nil {
+	if err := json.Unmarshal(b, &cf); err != nil {
 		t.Fatal(err)
 	}
-	if cc.AccountCredential == "" {
+
+	// Find the current box, or use the first one.
+	var cred string
+	for _, box := range cf.Boxes {
+		if box.Name == cf.Current {
+			cred = box.AccountCredential
+			break
+		}
+	}
+	if cred == "" && len(cf.Boxes) > 0 {
+		cred = cf.Boxes[0].AccountCredential
+	}
+	if cred == "" {
 		t.Fatal("no account_credential in CLI config")
 	}
-	return cc.AccountCredential
+	return cred
 }
 
 // insertSecondAccount plants a second tenant directly in the relay store (the
