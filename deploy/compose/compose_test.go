@@ -72,8 +72,10 @@ func TestDockerDocumentation(t *testing.T) {
 		}
 	}
 
-	readme := repositoryFile(t, "README.md")
-	if !strings.Contains(readme, "run piperd in Docker via Compose") {
-		t.Errorf("README missing pointer phrase %q", "run piperd in Docker via Compose")
+	// The Compose pointer moved from the README into the getting-started
+	// guide when the README was slimmed to a quick start (see #181).
+	guide := repositoryFile(t, "docs", "getting-started.md")
+	if !strings.Contains(guide, "run piperd in Docker via Compose") {
+		t.Errorf("docs/getting-started.md missing pointer phrase %q", "run piperd in Docker via Compose")
 	}
 }
