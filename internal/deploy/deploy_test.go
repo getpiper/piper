@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1034,5 +1035,89 @@ func TestDeleteRouteRemovalFailureLeavesStateIntact(t *testing.T) {
 	}
 	if _, err := s.GetApp("blog"); err != nil {
 		t.Errorf("GetApp = %v, want app still present (delete stays retryable)", err)
+	}
+}
+
+// gateRuntime blocks in Build until released, so a test can hold the per-app
+// deploy lock open and observe whether a second operation proceeds.
+type gateRuntime struct {
+	started chan struct{}
+	release chan struct{}
+	run     runtime.RunResult
+}
+
+func (g *gateRuntime) Build(context.Context, string, string, io.Writer) (runtime.BuildResult, error) {
+	g.started <- struct{}{}
+	<-g.release
+	return runtime.BuildResult{ImageID: "img"}, nil
+}
+func (g *gateRuntime) Run(context.Context, string, int, map[string]string) (runtime.RunResult, error) {
+	return g.run, nil
+}
+func (g *gateRuntime) WaitHealthy(context.Context, int) error { return nil }
+func (g *gateRuntime) Stop(context.Context, string) error     { return nil }
+func (g *gateRuntime) Logs(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func newGate() *gateRuntime {
+	return &gateRuntime{
+		started: make(chan struct{}, 2),
+		release: make(chan struct{}),
+		run:     runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+}
+
+// Two concurrent deploys of one app must not build at the same time: the second
+// waits on the per-app lock until the first finishes. #159.
+func TestDeploySerializesPerApp(t *testing.T) {
+	s, _ := newStore(t)
+	g := newGate()
+	d := New(s, g, newFakeCaddy(), "piper.localhost")
+
+	done := make(chan error, 2)
+	go func() { _, err := d.Deploy(context.Background(), "blog", t.TempDir()); done <- err }()
+	go func() { _, err := d.Deploy(context.Background(), "blog", t.TempDir()); done <- err }()
+
+	<-g.started // first deploy is inside Build, holding the lock
+	select {
+	case <-g.started:
+		t.Fatal("second deploy built concurrently — per-app deploy lock missing")
+	case <-time.After(200 * time.Millisecond):
+	}
+	g.release <- struct{}{} // first finishes, releasing the lock
+	<-g.started             // second now proceeds
+	g.release <- struct{}{}
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("deploy: %v", err)
+		}
+	}
+}
+
+// A delete racing an in-flight deploy must wait for it, not tear down state
+// mid-deploy (orphan container + resurrected route). #121.
+func TestDeleteSerializesAgainstDeploy(t *testing.T) {
+	s, _ := newStore(t)
+	g := newGate()
+	d := New(s, g, newFakeCaddy(), "piper.localhost")
+
+	deployErr := make(chan error, 1)
+	go func() { _, err := d.Deploy(context.Background(), "blog", t.TempDir()); deployErr <- err }()
+	<-g.started // deploy holds the lock inside Build
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- d.Delete(context.Background(), "blog") }()
+	select {
+	case <-deleteDone:
+		t.Fatal("delete proceeded while a deploy held the per-app lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+	g.release <- struct{}{} // deploy finishes, releasing the lock
+	if err := <-deployErr; err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if err := <-deleteDone; err != nil {
+		t.Fatalf("delete: %v", err)
 	}
 }
