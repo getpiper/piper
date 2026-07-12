@@ -178,36 +178,50 @@ func (d *Deployer) Finish(ctx context.Context, dep store.Deployment, srcDir stri
 		return err
 	}
 
-	if err := d.store.FinalizeDeployment(dep.ID, build.ImageID, run.ContainerID, run.HostPort, "running", logs); err != nil {
-		return err
-	}
+	// Route BEFORE marking the row "running": if routing fails, the app isn't
+	// reachable yet, so the row must finalize "failed" rather than report a
+	// success the CLI/dashboard would trust.
 	host := d.hostFor(dep.App)
 	if d.registrar != nil {
 		host, err = d.registrar.Register(dep.App)
 		if err != nil {
-			return fmt.Errorf("register hostname: %w", err)
+			return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("register hostname: %w", err))
 		}
 	}
 	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
-		return fmt.Errorf("route: %w", err)
+		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route: %w", err))
 	}
 	// Record the host the app is now served on so the apps API (#100) and deploy
 	// response (#93) can report the real URL, not a guessed one.
 	if err := d.store.SetAppHostname(dep.App, host); err != nil {
-		return fmt.Errorf("record hostname: %w", err)
+		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("record hostname: %w", err))
 	}
 	// An active BYO custom domain (#102) serves the app at <app>.<custom> over
 	// the box-terminated :443 alongside the primary host.
 	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {
 		if err := d.routes.UpsertRouteTLS(dep.App+"."+dc.Domain, run.HostPort); err != nil {
-			return fmt.Errorf("route custom domain: %w", err)
+			return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route custom domain: %w", err))
 		}
+	}
+
+	if err := d.store.FinalizeDeployment(dep.ID, build.ImageID, run.ContainerID, run.HostPort, "running", logs); err != nil {
+		return err
 	}
 	if previous.ContainerID != "" && previous.ContainerID != run.ContainerID {
 		_ = d.runtime.Stop(ctx, previous.ContainerID)
 		_ = d.store.UpdateDeploymentStatus(previous.ID, "stopped")
 	}
 	return nil
+}
+
+// failFinish finalizes dep's row "failed" after a routing error, appending the
+// error to logs, and returns the wrapped error unchanged. It does not stop the
+// just-started container: matching prior semantics, a route failure leaves the
+// container running (the row is what's marked unreachable).
+func (d *Deployer) failFinish(id, imageID, containerID string, hostPort int, logs string, wrapped error) error {
+	logs += "\nerror: " + wrapped.Error() + "\n"
+	_ = d.store.FinalizeDeployment(id, imageID, containerID, hostPort, "failed", logs)
+	return wrapped
 }
 
 // Deploy is the synchronous Begin+Finish used by the webhook path; it returns

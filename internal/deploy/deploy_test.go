@@ -19,6 +19,7 @@ type fakeCaddy struct {
 	removes   []string
 	tlsRoutes []string
 	removeErr error
+	upsertErr error
 }
 
 func newFakeCaddy() *fakeCaddy {
@@ -26,6 +27,9 @@ func newFakeCaddy() *fakeCaddy {
 }
 
 func (f *fakeCaddy) UpsertRoute(host string, port int) error {
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
 	f.upserts[host] = port
 	return nil
 }
@@ -625,6 +629,38 @@ func TestFinishSucceedsAndPersistsLog(t *testing.T) {
 	logs, _ := s.DeploymentLogs("blog", dep.ID)
 	if !strings.Contains(logs, "built ok") {
 		t.Fatalf("logs missing build output: %q", logs)
+	}
+}
+
+func TestFinishRouteFailureFinalizesFailed(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img-1", Log: "built ok\n"},
+		RunResultVal:   runtime.RunResult{ContainerID: "cid-1", HostPort: 40001},
+	}
+	caddy := newFakeCaddy()
+	caddy.upsertErr = errors.New("caddy admin API unreachable")
+	d := New(s, rt, caddy, "piper.localhost")
+
+	dep, err := d.Begin("blog")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if err := d.Finish(context.Background(), dep, t.TempDir()); err == nil {
+		t.Fatal("Finish: expected route error")
+	}
+	// Same row, finalized failed — not left "running" despite the build/run/health
+	// succeeding, since the app is unreachable without a route.
+	got, err := s.LatestDeployment("blog")
+	if err != nil {
+		t.Fatalf("LatestDeployment: %v", err)
+	}
+	if got.ID != dep.ID || got.Status != "failed" {
+		t.Fatalf("row = %+v, want %s failed", got, dep.ID)
+	}
+	logs, _ := s.DeploymentLogs("blog", dep.ID)
+	if !strings.Contains(logs, "caddy admin API unreachable") {
+		t.Fatalf("failed log missing route error: %q", logs)
 	}
 }
 
