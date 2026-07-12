@@ -425,6 +425,47 @@ func TestDeploymentLogs(t *testing.T) {
 	}
 }
 
+// TestWithTimeoutAbortsHungRequest proves WithTimeout cancels a request that
+// outlives it, rather than waiting for the server to respond — a blackholed
+// box must surface as unreachable instead of hanging the TUI's poll forever.
+func TestWithTimeoutAbortsHungRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode([]api.App{})
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	_, err := New(srv.URL, "").WithTimeout(20 * time.Millisecond).ListApps()
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("ListApps: want error from timeout, got nil (elapsed %s)", elapsed)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("ListApps took %s, want well under the handler's 200ms sleep (timeout should have cancelled it)", elapsed)
+	}
+}
+
+// TestWithTimeoutAllowsFastResponse proves the failure above is caused by the
+// timeout, not the endpoint: a generous timeout against the same kind of
+// fast-responding server still succeeds.
+func TestWithTimeoutAllowsFastResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]api.App{
+			{App: store.App{Name: "blog", Port: 8080}, Status: "running"},
+		})
+	}))
+	defer srv.Close()
+
+	apps, err := New(srv.URL, "").WithTimeout(time.Second).ListApps()
+	if err != nil {
+		t.Fatalf("ListApps: %v", err)
+	}
+	if len(apps) != 1 || apps[0].Name != "blog" {
+		t.Errorf("apps = %+v", apps)
+	}
+}
+
 func TestResponseErrorsCarryHTTPStatusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "no", http.StatusUnauthorized)

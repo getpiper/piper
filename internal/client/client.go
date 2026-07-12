@@ -32,6 +32,15 @@ func New(base, token string) *Client {
 	return &Client{base: base, token: token, http: &http.Client{}, pollInterval: time.Second}
 }
 
+// WithTimeout sets an overall per-request timeout on the client's HTTP
+// transport and returns the client for chaining. The interactive TUI uses
+// it so a blackholed box surfaces as unreachable instead of hanging the
+// poll. Not for streaming calls (it would abort a long response).
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	c.http.Timeout = d
+	return c
+}
+
 // do builds a request to c.base+path, attaches the auth header (when set) and
 // the content type (when non-empty), and sends it.
 func (c *Client) do(method, path, contentType string, body io.Reader) (*http.Response, error) {

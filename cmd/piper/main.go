@@ -17,8 +17,11 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/getpiper/piper/internal/client"
 	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/tui"
 	"github.com/getpiper/piper/internal/version"
 )
 
@@ -62,6 +65,45 @@ func appURL(hostname string, remote bool) string {
 		return "https://" + hostname
 	}
 	return "http://" + hostname
+}
+
+// isTerminal reports whether both stdout and stdin are interactive terminals;
+// a func var so run() tests can force either mode. Requiring stdin too keeps
+// a piped-but-drained stdin (e.g. `echo x | piper`) from launching the
+// full-screen UI.
+var isTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// tuiRequestTimeout bounds each poll the TUI makes against piperd, so a
+// blackholed box surfaces as unreachable instead of hanging the 2s poll loop.
+const tuiRequestTimeout = 5 * time.Second
+
+// launchTUI opens the interactive TUI against the current box (or the given
+// relay-remote base domain); a func var so run() tests can stub it.
+var launchTUI = func(remote string, stderr io.Writer) int {
+	c, ok := dialClient(remote, stderr)
+	if !ok {
+		return 1
+	}
+	c = c.WithTimeout(tuiRequestTimeout)
+	box, addr := "default", ""
+	if cf, err := config.LoadClientFile(); err == nil {
+		if b, ok := cf.CurrentBox(); ok {
+			box = b.Name
+		}
+	}
+	if cc, err := config.LoadClient(); err == nil {
+		addr = cc.Addr // env overrides + localhost default applied
+	}
+	if remote != "" {
+		box, addr = remote, "via relay"
+	}
+	if err := tui.Run(box, addr, c); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	return 0
 }
 
 // login verifies token against the target (GET /v1/apps) and, on success,
@@ -124,6 +166,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	args = gfs.Args()
 	if len(args) == 0 {
+		if isTerminal() {
+			return launchTUI(*remote, stderr)
+		}
 		return usage(stderr)
 	}
 	remoteFlagSet := false
@@ -526,5 +571,6 @@ func confirmDelete(stdout io.Writer, name string) bool {
 
 func usage(w io.Writer) int {
 	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|delete|app|github> [args]")
+	fmt.Fprintln(w, "       piper                # no subcommand in a terminal: interactive TUI")
 	return 2
 }
