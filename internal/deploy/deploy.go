@@ -194,7 +194,7 @@ func (d *Deployer) Finish(ctx context.Context, dep store.Deployment, srcDir stri
 
 // finish is Finish without the per-app lock, for callers that already hold it
 // (Deploy). Never call it directly from an unlocked path.
-func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir string) error {
+func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir string) (retErr error) {
 	app, err := d.store.GetApp(dep.App)
 	if err != nil {
 		return err
@@ -212,6 +212,20 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 		return err
 	}
 
+	// A container is now running. From here a panic in routing/finalize (a nil
+	// registrar, a Caddy client bug) would orphan it, so recover, stop it, and
+	// finalize the row "failed" rather than leaking it (#162). The deploy layer
+	// owns this cleanup because only it knows the container id — the api
+	// goroutine's recover can't.
+	defer func() {
+		if r := recover(); r != nil {
+			d.stopPartial(ctx, run.ContainerID)
+			logs += fmt.Sprintf("\ndeploy panicked: %v\n", r)
+			_ = d.store.FinalizeDeployment(dep.ID, build.ImageID, run.ContainerID, run.HostPort, "failed", logs)
+			retErr = fmt.Errorf("deploy panicked: %v", r)
+		}
+	}()
+
 	// Route BEFORE marking the row "running": if routing fails, the app isn't
 	// reachable yet, so the row must finalize "failed" rather than report a
 	// success the CLI/dashboard would trust.
@@ -219,16 +233,16 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 	if d.registrar != nil {
 		host, err = d.registrar.Register(dep.App)
 		if err != nil {
-			return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("register hostname: %w", err))
+			return d.failFinish(ctx, dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("register hostname: %w", err))
 		}
 	}
 	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
-		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route: %w", err))
+		return d.failFinish(ctx, dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route: %w", err))
 	}
 	// Record the host the app is now served on so the apps API (#100) and deploy
 	// response (#93) can report the real URL, not a guessed one.
 	if err := d.store.SetAppHostname(dep.App, host); err != nil {
-		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("record hostname: %w", err))
+		return d.failFinish(ctx, dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("record hostname: %w", err))
 	}
 	// An active BYO custom domain (#102) serves the app at <app>.<custom> over
 	// the box-terminated :443 alongside the primary host. This is a secondary
@@ -253,10 +267,11 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 }
 
 // failFinish finalizes dep's row "failed" after a routing error, appending the
-// error to logs, and returns the wrapped error unchanged. It does not stop the
-// just-started container: matching prior semantics, a route failure leaves the
-// container running (the row is what's marked unreachable).
-func (d *Deployer) failFinish(id, imageID, containerID string, hostPort int, logs string, wrapped error) error {
+// error to logs, and returns the wrapped error unchanged. It best-effort stops
+// the just-started container: the row is unreachable, so leaving the container
+// running would orphan it (#162).
+func (d *Deployer) failFinish(ctx context.Context, id, imageID, containerID string, hostPort int, logs string, wrapped error) error {
+	d.stopPartial(ctx, containerID)
 	logs += "\nerror: " + wrapped.Error() + "\n"
 	_ = d.store.FinalizeDeployment(id, imageID, containerID, hostPort, "failed", logs)
 	return wrapped
