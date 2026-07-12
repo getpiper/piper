@@ -71,6 +71,10 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "name reserved", http.StatusBadRequest)
 			return
 		}
+		if !validAppName(in.Name) {
+			http.Error(w, "invalid app name: use a DNS label (lowercase letters, digits, and hyphens; 1-63 chars; no leading/trailing hyphen)", http.StatusBadRequest)
+			return
+		}
 		if in.Port == 0 {
 			in.Port = 8080
 		}
@@ -335,6 +339,30 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
+}
+
+// validAppName reports whether name is a single DNS label: 1-63 chars of
+// lowercase letters, digits, or hyphens, not starting or ending with a hyphen.
+// App names are interpolated unescaped into URL paths and hostnames
+// (<app>.<baseDom>, pr-N-<app>.…), so constraining them at create closes the
+// interpolation/hostname-shape gap for every downstream endpoint at once (#120).
+func validAppName(name string) bool {
+	if len(name) == 0 || len(name) > 63 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-':
+			if i == 0 || i == len(name)-1 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
