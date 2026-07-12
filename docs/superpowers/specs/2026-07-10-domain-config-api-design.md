@@ -27,7 +27,7 @@ Bearer-authenticated on the piperd control API, so it works locally and through 
 {"domain": "example.com", "dns_provider": "cloudflare", "dns_token": "…"}
 ```
 
-Validates domain shape and provider, persists, kicks the issuance state machine, returns current status (the `GET` body). Errors: `400` bad domain/provider; `409` if domain config is env-managed or the box has no relay session ("connect this box to a relay first"). A `PUT` while `failed` retries immediately; a `PUT` with a new domain replaces the old one (tear down, then issue).
+Validates domain shape and provider, persists, kicks the issuance state machine, returns current status (the `GET` body). Errors: `400` bad domain/provider; `409` if domain config is env-managed or the box has no relay *configured* ("connect this box to a relay first"). Note the `409` gates on relay *configured*, not on a live tunnel *session*: a `PUT` with a relay configured but the tunnel down still proceeds with issuance — the relay push failure surfaces via `status: "failed"` with bounded, disk-cert-reusing auto-retry. A `PUT` while `failed` retries immediately; a `PUT` with a new domain replaces the old one (tear down, then issue).
 
 ### `GET /v1/domain`
 
@@ -102,7 +102,7 @@ One new control message on the existing authenticated `KindControl` stream (same
 
 ## Error handling
 
-Bad domain/provider → `400`; env-managed → `409`; no relay session → `409`. Issuance failures (bad token, ACME errors, relay uniqueness rejection) land in `status`/`error` for the dashboard, with capped-backoff auto-retry.
+Bad domain/provider → `400`; env-managed → `409`; no relay *configured* → `409` (a configured relay with the tunnel down does **not** `409` — issuance proceeds and any relay failure surfaces via `status`/`error`). Issuance failures (bad token, ACME errors, relay uniqueness rejection) land in `status`/`error` for the dashboard, with capped-backoff auto-retry.
 
 ## Testing (test-first, per layer)
 
