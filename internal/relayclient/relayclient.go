@@ -5,6 +5,7 @@ package relayclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,14 +59,14 @@ func New(base string) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 30 * time.Second}}
 }
 
-func (c *Client) post(path string, body any, auth string) (*http.Response, error) {
+func (c *Client) post(ctx context.Context, path string, body any, auth string) (*http.Response, error) {
 	var buf bytes.Buffer
 	if body != nil {
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {
 			return nil, err
 		}
 	}
-	req, err := http.NewRequest(http.MethodPost, c.base+path, &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, &buf)
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +78,8 @@ func (c *Client) post(path string, body any, auth string) (*http.Response, error
 }
 
 // LoginDevice starts a device-flow login and returns the user code + URL to show.
-func (c *Client) LoginDevice() (DeviceAuth, error) {
-	resp, err := c.post("/v1/login/device", nil, "")
+func (c *Client) LoginDevice(ctx context.Context) (DeviceAuth, error) {
+	resp, err := c.post(ctx, "/v1/login/device", nil, "")
 	if err != nil {
 		return DeviceAuth{}, err
 	}
@@ -95,8 +96,8 @@ func (c *Client) LoginDevice() (DeviceAuth, error) {
 
 // LoginPoll polls once for completion of the device flow. It returns
 // ErrAuthPending while the user has not finished, or the Account on success.
-func (c *Client) LoginPoll(deviceCode string) (Account, error) {
-	resp, err := c.post("/v1/login/poll", map[string]string{"device_code": deviceCode}, "")
+func (c *Client) LoginPoll(ctx context.Context, deviceCode string) (Account, error) {
+	resp, err := c.post(ctx, "/v1/login/poll", map[string]string{"device_code": deviceCode}, "")
 	if err != nil {
 		return Account{}, err
 	}
@@ -117,8 +118,8 @@ func (c *Client) LoginPoll(deviceCode string) (Account, error) {
 
 // Enroll claims a box for the account behind accountCredential, returning the
 // enrollment token, assigned base domain, and tunnel endpoint.
-func (c *Client) Enroll(accountCredential string) (Enrollment, error) {
-	resp, err := c.post("/v1/enroll", nil, accountCredential)
+func (c *Client) Enroll(ctx context.Context, accountCredential string) (Enrollment, error) {
+	resp, err := c.post(ctx, "/v1/enroll", nil, accountCredential)
 	if err != nil {
 		return Enrollment{}, err
 	}

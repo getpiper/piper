@@ -298,6 +298,28 @@ func TestReservedNameRejected(t *testing.T) {
 	}
 }
 
+// App names flow unescaped into URL paths and hostnames (<app>.<baseDom>,
+// pr-N-<app>.…), so create rejects anything that isn't a DNS label. #120.
+func TestInvalidAppNameRejected(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil)
+	for _, name := range []string{"Blog", "my_app", "a/b", "-lead", "trail-", "app.dot", "app name", strings.Repeat("x", 64)} {
+		rec := httptest.NewRecorder()
+		body := strings.NewReader(`{"name":"` + name + `","port":8080}`)
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps", body))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("name %q: code = %d, want 400", name, rec.Code)
+		}
+	}
+	// A valid DNS-label name still succeeds.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps",
+		strings.NewReader(`{"name":"my-app-1","port":8080}`)))
+	if rec.Code != http.StatusCreated {
+		t.Errorf("valid name: code = %d, want 201", rec.Code)
+	}
+}
+
 func TestLinkApp(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)

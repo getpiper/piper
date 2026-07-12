@@ -84,6 +84,32 @@ func TestRunDeploySupportsNameFirstFlags(t *testing.T) {
 	}
 }
 
+// Deploying an app that doesn't exist yet must point the user at the exact
+// `piper create` command rather than a bare "404 unknown app". #139.
+func TestDeployMissingAppSuggestsCreate(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/apps/ghost/deploy" {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"deploy", "ghost", "--path", srcDir}, &stdout, &stderr); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if got := stderr.String(); !strings.Contains(got, `piper create ghost`) {
+		t.Errorf("stderr = %q, want a 'piper create ghost' hint", got)
+	}
+}
+
 func TestDeployStreamsProgressAndReportsURL(t *testing.T) {
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {

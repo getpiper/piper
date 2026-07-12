@@ -201,6 +201,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		dep, err := c.Deploy(name, *path)
 		if err != nil {
+			var se *client.StatusError
+			if errors.As(err, &se) && se.Code == http.StatusNotFound {
+				fmt.Fprintf(stderr, "error: app %q does not exist — run 'piper create %s' first\n", name, name)
+				return 1
+			}
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/getpiper/piper/internal/runtime"
@@ -61,10 +62,31 @@ type Deployer struct {
 	routes    RouteSetter
 	baseDom   string
 	registrar HostnameRegistrar
+
+	mu    sync.Mutex             // guards locks
+	locks map[string]*sync.Mutex // per-app serialization of mutating ops
 }
 
 func New(s *store.Store, rt runtime.Runtime, routes RouteSetter, baseDomain string) *Deployer {
-	return &Deployer{store: s, runtime: rt, routes: routes, baseDom: baseDomain}
+	return &Deployer{store: s, runtime: rt, routes: routes, baseDom: baseDomain, locks: map[string]*sync.Mutex{}}
+}
+
+// lockApp serializes every mutating operation for one app (deploy, preview,
+// stop, delete) so they can't interleave: two concurrent deploys racing on
+// routing/finalize, a deploy racing a delete into an orphan container + a
+// resurrected route, or two same-second builds colliding on the image tag.
+// The webhook path has its own appLock; this closes the API + delete paths.
+// Returns the unlock func so callers can `defer d.lockApp(name)()`. #159, #121.
+func (d *Deployer) lockApp(name string) func() {
+	d.mu.Lock()
+	m := d.locks[name]
+	if m == nil {
+		m = &sync.Mutex{}
+		d.locks[name] = m
+	}
+	d.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 // SetHostnameRegistrar puts the Deployer into relay-terminated mode: Deploy asks
@@ -163,7 +185,15 @@ func (d *Deployer) Begin(appName string) (store.Deployment, error) {
 // Finish builds, runs, health-checks, and routes dep's app from srcDir,
 // streaming the build's output into dep's log and finalizing the row
 // running/failed. On build/run/health failure it finalizes the same row failed.
+// It serializes per app against other deploys/deletes (see lockApp).
 func (d *Deployer) Finish(ctx context.Context, dep store.Deployment, srcDir string) error {
+	defer d.lockApp(dep.App)()
+	return d.finish(ctx, dep, srcDir)
+}
+
+// finish is Finish without the per-app lock, for callers that already hold it
+// (Deploy). Never call it directly from an unlocked path.
+func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir string) error {
 	app, err := d.store.GetApp(dep.App)
 	if err != nil {
 		return err
@@ -230,17 +260,19 @@ func (d *Deployer) failFinish(id, imageID, containerID string, hostPort int, log
 // Deploy is the synchronous Begin+Finish used by the webhook path; it returns
 // the finalized deployment.
 func (d *Deployer) Deploy(ctx context.Context, appName, srcDir string) (store.Deployment, error) {
+	defer d.lockApp(appName)()
 	dep, err := d.Begin(appName)
 	if err != nil {
 		return store.Deployment{}, err
 	}
-	if err := d.Finish(ctx, dep, srcDir); err != nil {
+	if err := d.finish(ctx, dep, srcDir); err != nil {
 		return store.Deployment{}, err
 	}
 	return d.store.LatestDeployment(appName)
 }
 
 func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, srcDir string) (store.Deployment, error) {
+	defer d.lockApp(appName)()
 	app, err := d.store.GetApp(appName)
 	if err != nil {
 		return store.Deployment{}, err
@@ -272,6 +304,7 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 }
 
 func (d *Deployer) TeardownPreview(ctx context.Context, appName string, pr int) error {
+	defer d.lockApp(appName)()
 	dep, err := d.store.PreviewRunning(appName, pr)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
@@ -316,6 +349,7 @@ func (d *Deployer) removeCustomDomainRoute(appName string) error {
 // Nothing running is a no-op; previews are untouched. The relay keeps the
 // app's hostname registration (Deregister is delete-only).
 func (d *Deployer) Stop(ctx context.Context, appName string) error {
+	defer d.lockApp(appName)()
 	if _, err := d.store.GetApp(appName); err != nil {
 		return err
 	}
@@ -344,6 +378,7 @@ func (d *Deployer) Stop(ctx context.Context, appName string) error {
 // steps are best-effort; state is deleted last so a failed teardown leaves
 // delete retryable.
 func (d *Deployer) Delete(ctx context.Context, appName string) error {
+	defer d.lockApp(appName)()
 	if _, err := d.store.GetApp(appName); err != nil {
 		return err
 	}

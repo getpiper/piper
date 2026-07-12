@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/getpiper/piper/internal/config"
@@ -21,8 +24,12 @@ var pollSleep = time.Sleep
 // verification URL + user code, polling to completion, and storing the returned
 // account credential (and relay API base) in the CLI config.
 func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
+	// Interrupt-aware: Ctrl-C during the poll loop cancels the in-flight
+	// request instead of waiting out the 30s client timeout.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	rc := relayclient.New(relayAPI)
-	da, err := rc.LoginDevice()
+	da, err := rc.LoginDevice(ctx)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
@@ -45,7 +52,7 @@ func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		pollSleep(time.Duration(interval) * time.Second)
-		acc, err := rc.LoginPoll(da.DeviceCode)
+		acc, err := rc.LoginPoll(ctx, da.DeviceCode)
 		if errors.Is(err, relayclient.ErrAuthPending) {
 			continue
 		}
@@ -95,7 +102,9 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: not logged in to a relay; run `piper login` first")
 		return 1
 	}
-	en, err := relayclient.New(cc.RelayAPI).Enroll(cc.AccountCredential)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	en, err := relayclient.New(cc.RelayAPI).Enroll(ctx, cc.AccountCredential)
 	switch {
 	case errors.Is(err, relayclient.ErrBadCredential):
 		fmt.Fprintln(stderr, "error: relay rejected your account credential; run `piper login` again")

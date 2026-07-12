@@ -251,13 +251,16 @@ func (s *Store) GetGitHubApp() (GitHubApp, error) {
 	return a, err
 }
 
+// Ordered deployment queries key on rowid (monotonic insertion order), not the
+// created_at text: RFC3339Nano drops trailing zeros, so its lexical order is
+// not chronological and equal timestamps have no tiebreaker (#109).
 func (s *Store) LatestRunning(app string) (Deployment, error) {
 	var d Deployment
 	var ts string
 	err := s.db.QueryRow(
 		`SELECT id, app, image_id, container_id, host_port, status, created_at
 		 FROM deployments WHERE app=? AND status='running' AND pr=0
-		 ORDER BY created_at DESC LIMIT 1`, app).
+		 ORDER BY rowid DESC LIMIT 1`, app).
 		Scan(&d.ID, &d.App, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
@@ -278,7 +281,7 @@ func (s *Store) LatestDeployment(app string) (Deployment, error) {
 	err := s.db.QueryRow(
 		`SELECT id, app, image_id, container_id, host_port, status, created_at
 		 FROM deployments WHERE app=? AND pr=0
-		 ORDER BY created_at DESC LIMIT 1`, app).
+		 ORDER BY rowid DESC LIMIT 1`, app).
 		Scan(&d.ID, &d.App, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
@@ -313,7 +316,7 @@ func (s *Store) PreviewRunning(app string, pr int) (Deployment, error) {
 	err := s.db.QueryRow(
 		`SELECT id, app, image_id, container_id, host_port, status, created_at, pr
 		 FROM deployments WHERE app=? AND pr=? AND status='running'
-		 ORDER BY created_at DESC LIMIT 1`, app, pr).
+		 ORDER BY rowid DESC LIMIT 1`, app, pr).
 		Scan(&d.ID, &d.App, &d.ImageID, &d.ContainerID, &d.HostPort, &d.Status, &ts, &d.PR)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
@@ -328,7 +331,7 @@ func (s *Store) PreviewRunning(app string, pr int) (Deployment, error) {
 func (s *Store) pruneDeploymentLogs(app string) error {
 	_, err := s.db.Exec(
 		`UPDATE deployments SET logs='' WHERE app=? AND logs != '' AND id NOT IN (
-		   SELECT id FROM deployments WHERE app=? ORDER BY created_at DESC LIMIT ?)`,
+		   SELECT id FROM deployments WHERE app=? ORDER BY rowid DESC LIMIT ?)`,
 		app, app, logRetentionPerApp)
 	return err
 }
@@ -338,7 +341,7 @@ func (s *Store) pruneDeploymentLogs(app string) error {
 func (s *Store) ListDeployments(app string) ([]Deployment, error) {
 	rows, err := s.db.Query(
 		`SELECT id, app, pr, image_id, container_id, host_port, status, created_at
-		 FROM deployments WHERE app=? ORDER BY created_at DESC`, app)
+		 FROM deployments WHERE app=? ORDER BY rowid DESC`, app)
 	if err != nil {
 		return nil, err
 	}

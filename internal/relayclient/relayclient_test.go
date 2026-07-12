@@ -1,7 +1,9 @@
 package relayclient
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +21,7 @@ func TestLoginDevice(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	da, err := New(srv.URL).LoginDevice()
+	da, err := New(srv.URL).LoginDevice(context.Background())
 	if err != nil {
 		t.Fatalf("LoginDevice: %v", err)
 	}
@@ -52,10 +54,10 @@ func TestLoginPollPendingThenSuccess(t *testing.T) {
 	defer srv.Close()
 	c := New(srv.URL)
 
-	if _, err := c.LoginPoll("dev-1"); err != ErrAuthPending {
+	if _, err := c.LoginPoll(context.Background(), "dev-1"); err != ErrAuthPending {
 		t.Fatalf("first poll err = %v, want ErrAuthPending", err)
 	}
-	acc, err := c.LoginPoll("dev-1")
+	acc, err := c.LoginPoll(context.Background(), "dev-1")
 	if err != nil {
 		t.Fatalf("second poll: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestEnroll(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	en, err := New(srv.URL).Enroll("cred-xyz")
+	en, err := New(srv.URL).Enroll(context.Background(), "cred-xyz")
 	if err != nil {
 		t.Fatalf("Enroll: %v", err)
 	}
@@ -95,10 +97,27 @@ func TestEnrollErrorMapping(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(tc.code)
 		}))
-		_, err := New(srv.URL).Enroll("whatever")
+		_, err := New(srv.URL).Enroll(context.Background(), "whatever")
 		srv.Close()
 		if err != tc.want {
 			t.Fatalf("code %d err = %v, want %v", tc.code, err, tc.want)
 		}
+	}
+}
+
+// A cancelled context aborts an in-flight request promptly instead of waiting
+// out the 30s client timeout — the cancellation seam #85/#95 asked for.
+func TestRequestRespectsContextCancellation(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-block // never respond until the test unblocks teardown
+	}))
+	defer srv.Close()
+	defer close(block)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New(srv.URL).LoginDevice(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("LoginDevice err = %v, want context.Canceled", err)
 	}
 }
