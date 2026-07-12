@@ -1,6 +1,6 @@
 # Manual setup (building from source)
 
-The one-line installer in the [README](../README.md#install) already does everything
+The one-line installer in [getting started](getting-started.md#install) already does everything
 below for you. Use this instead if you're building `piperd`/`piper-relay` from source,
 or wiring your own automation.
 

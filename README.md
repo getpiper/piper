@@ -1,182 +1,104 @@
 # Piper
 
-**An open-source, developer-first PaaS that gives you `git push → live HTTPS URL` on
-hardware you own — including a Raspberry Pi at home behind CGNAT.**
+[![Release](https://img.shields.io/github/v/release/getpiper/piper)](https://github.com/getpiper/piper/releases/latest)
+[![CI](https://github.com/getpiper/piper/actions/workflows/ci.yml/badge.svg)](https://github.com/getpiper/piper/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/getpiper/piper)](LICENSE)
 
-Piper (Pi + *pipes traffic home*) runs on a single box you control and, via an optional
-self-hostable **cloud relay**, tunnels public HTTPS traffic to it without exposing your
-network — solving the NAT / CGNAT / dynamic-IP problem that kills most homelab hosting.
+**An open-source, developer-first PaaS: `git push → live HTTPS URL` on hardware
+you own — including a Raspberry Pi at home behind CGNAT.**
 
-- **Zero-trust relay** — the relay only ever sees ciphertext (L4 SNI passthrough); TLS
-  terminates on your box. Route through a relay you don't own, safely.
-- **Lean** — built to run on a Raspberry Pi. SQLite state, embedded Caddy for TLS.
+Piper (Pi + *pipes traffic home*) runs on a single box you control and, via an
+optional self-hostable **cloud relay**, tunnels public HTTPS traffic to it
+without exposing your network — solving the NAT / CGNAT / dynamic-IP problem
+that kills most homelab hosting.
+
+## Why Piper
+
+- **Zero-trust relay** — the relay only ever sees ciphertext (L4 SNI
+  passthrough); TLS terminates on your box. Route through a relay you don't
+  own, safely.
+- **Lean** — built to run on a Raspberry Pi. SQLite state, embedded Caddy for
+  TLS.
 - **Developer-first** — CLI-driven, Dockerfile-based builds.
 
-> Status: pre-implementation. Design: [`docs/superpowers/specs/2026-07-04-piper-design.md`](docs/superpowers/specs/2026-07-04-piper-design.md).
+## 60-second quick start
 
-## Components
-
-- `piperd` — the agent that runs on your box (control-plane, deployer, tunnel-client).
-- `piper-relay` — the optional cloud relay (SNI passthrough + tunnel server). Always self-deployable; a hosted instance is offered purely for convenience and runs this same code.
-- `piper` — the CLI.
-
-## Install
-
-One line gets a Linux box to a running `piperd` service:
+On a Linux box (a Pi counts):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
-```
-
-It detects your OS/arch, downloads the matching release binaries, verifies their
-`checksums.txt`, installs `piperd` + `piper` to `/usr/local/bin`, drops the
-systemd unit and an `/etc/piper/piperd.env` skeleton (never overwriting an edited
-one), and runs `systemctl enable --now piperd`. Re-run any time to upgrade.
-
-Install just the CLI (Linux or macOS) — for driving `piperd` from another
-machine on the same network (e.g. your laptop and a Pi on the same LAN):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --cli-only
-```
-
-As root this installs `piper` to `/usr/local/bin`; unprivileged, to
-`~/.local/bin`. The control API requires a bearer token, so mint one on the
-box and log the CLI in first (running `piperd token create` on the box is
-itself the proof you own it — no auth needed for that step; on a systemd
-install it needs `sudo` to reach the service's data dir and will say so if
-you forget). The control API binds to loopback (`127.0.0.1:8088`) by default,
-so to reach it from another machine on the LAN set `PIPER_API_ADDR=0.0.0.0:8088`
-on the box — uncomment it in `/etc/piper/piperd.env` and `sudo systemctl
-restart piperd`:
-
-```bash
-# on the box:
-echo 'PIPER_API_ADDR=0.0.0.0:8088' | sudo tee -a /etc/piper/piperd.env
-sudo systemctl restart piperd
-sudo piperd token create --name laptop         # prints a token once
-# on the client — address the box by its IP; mDNS *.local names often
-# don't resolve on home LANs (run `hostname -I` on the box to find it):
-piper login --token <token> --addr http://192.168.1.50:8088
-piper list                                     # now authenticated
-```
-
-`piper login` verifies the token against the box and saves it (with the
-address) to `~/.piper/piper/config.json`, mode `0600`; `PIPER_TOKEN` /
-`PIPER_ADDR` override the saved values per command. Manage tokens on the box
-with `sudo piperd token list` and `sudo piperd token revoke <name>`.
-
-### Join the public relay (self-service)
-
-On a box running `piperd`, log in and claim the box as your normal user:
-
-```bash
-piper login          # opens a GitHub device-flow login; stores your account credential
-piper connect        # enrolls this box on the relay
-```
-
-`piper connect` enrolls this box. Where it installs the enrollment depends on
-the install:
-
-- **Manual / dev** (piperd reads `~/.piper/piperd`): `connect` writes
-  `relay.json` there directly, then just `sudo systemctl restart piperd`.
-- **Shipped systemd unit** (piperd runs as a `DynamicUser`, state under
-  `/var/lib/piper`): that directory isn't writable by your login user, so
-  `connect` instead prints a ready `sudo sh -c … /etc/piper/piperd.env` command
-  that stores the enrollment in piperd's root-owned EnvironmentFile (systemd
-  injects it into the service at start, so its `DynamicUser` never needs to read
-  it). Run it, then `sudo systemctl restart piperd`.
-
-Either way piperd picks up the enrollment at startup and dials the tunnel.
-
-`piper login --relay <url>` targets a self-hosted relay instead of the default
-`https://api.public.getpiper.dev`. Environment variables (`PIPER_RELAY_ADDR`,
-`PIPER_RELAY_TOKEN`, `PIPER_BASE_DOMAIN`) still override `relay.json`.
-
-`piper connect` claims the box in **terminated** mode: piperd holds no cert and
-serves apps on `:80`; the relay assigns each app a single-label hostname
-`<app-hash>-<username>.public.getpiper.dev`, terminates its HTTPS with its
-wildcard cert, and forwards plaintext HTTP over the tunnel.
-
-```bash
 piper login                  # GitHub device-flow; stores your account credential
-piper connect                # claims this box (terminated) and writes relay.json
+piper connect                # enrolls this box on the public relay
+                             # (systemd installs: run the sudo command it prints)
 sudo systemctl restart piperd
 piper deploy blog --path .   # → https://<hash>-<you>.public.getpiper.dev
 ```
 
-Bring-your-own-domain apps stay **end-to-end** (the box terminates TLS; the relay
-only splices SNI) — set `PIPER_BASE_DOMAIN` + cert/DNS config instead of using
-`piper connect`. Self-hosters run the relay passthrough-only by leaving
-`PIPER_RELAY_TLS_CERT`/`KEY` unset.
+That's a Dockerfile built, health-checked, and served on a public HTTPS URL —
+no port forwarding, no domain required. LAN-only use, driving a box from your
+laptop, and self-hosted relays are all covered in the full walkthrough:
+[`docs/getting-started.md`](docs/getting-started.md).
 
-### Drive a box remotely
+## How it works
 
-Any control command (`create`, `deploy`, `list`, `status`, `app link`, `github setup`)
-can target one of your relay-connected boxes from anywhere, by the base
-domain `piper connect` printed:
-
-```bash
-piper --remote ab12-alice.public.getpiper.dev list
-piper --remote ab12-alice.public.getpiper.dev status  # box up? what's deployed?
-export PIPER_REMOTE=ab12-alice.public.getpiper.dev   # or set it once
-piper deploy blog --path .
+```mermaid
+flowchart TB
+    dev["visitors & CLI<br/>https://app.you.example.com"]
+    relay["piper-relay (cloud)<br/>SNI passthrough — sees only ciphertext"]
+    box["your box — piperd<br/>Docker · Caddy · SQLite<br/>TLS terminates here"]
+    dev -->|HTTPS| relay
+    box -.->|outbound tunnel<br/>works behind CGNAT| relay
+    relay -->|spliced stream| box
 ```
 
-Requests travel relay → tunnel → box: the CLI authenticates to the relay with
-the account credential `piper login` saved in `~/.piper/piper/config.json`
-(mode `0600`), and the relay swaps it for the box's own token — your relay
-credential never reaches the box, and the box still enforces its own auth.
-The `--remote` flag overrides `PIPER_REMOTE`; `login` and `connect` are
-inherently local and reject `--remote`.
+One Go module, three binaries:
 
-Only pre-release builds exist for now, so add `--rc` to install the latest
-release candidate:
+| Binary | Runs | Does |
+| --- | --- | --- |
+| `piperd` | on your box | control plane, Docker build/run, health checks, Caddy routing, tunnel client |
+| `piper-relay` | in the cloud (optional) | SNI passthrough + tunnel server — always self-hostable; the hosted instance runs this same code |
+| `piper` | anywhere | the CLI — drives `piperd` locally, over the LAN, or through the relay |
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --rc
-```
-
-The full service install is Linux + systemd; on macOS use `--cli-only` (a
-launchd unit is tracked in [#56](https://github.com/getpiper/piper/issues/56)).
-Shell completions and a Homebrew tap are planned follow-ups.
-
-Prefer to build from source, run piperd in Docker via Compose, run the relay as a
-service, or wire your own automation? See [`docs/manual-setup.md`](docs/manual-setup.md).
+Apps on your own domain stay **end-to-end encrypted**: the box holds the cert
+and the relay just splices bytes by SNI. On the shared
+`public.getpiper.dev` domain the relay terminates TLS with its wildcard cert
+instead. See [`docs/custom-domains.md`](docs/custom-domains.md).
 
 ## Git deploys
 
-Once your box runs in relay mode, a `git push` can build and publish an app. Piper
-uses a **per-user GitHub App** you create yourself — the private key and webhook
+Once your box is relay-connected, a `git push` builds and publishes. Piper uses
+a **per-user GitHub App** you create yourself — the private key and webhook
 secret never leave your box.
 
-```
-piper create myapp --port 8080                       # register the app (needed before it can be linked)
-piper github setup [--org name]                      # create the GitHub App (one-time; use --org for org-owned apps)
+```bash
+piper create myapp --port 8080                       # register the app
+piper github setup                                   # create your GitHub App (one-time)
 # install the App on your repo in GitHub, then:
-piper app link myapp --repo owner/name --branch main # bind the repo to an app
+piper app link myapp --repo owner/name --branch main
 ```
 
-After that, every push to the tracked branch builds the Dockerfile at the repo root,
-health-checks the container, and serves it at `https://myapp.<your-domain>`. The live
-URL shows up on GitHub as a Deployment status. Webhooks ride the same tunnel as your
-traffic (delivered to `hooks.<your-domain>`); nothing else on the box is exposed.
+Every push to the tracked branch builds the Dockerfile at the repo root,
+health-checks the container, and serves it at `https://myapp.<your-domain>` —
+the live URL appears on GitHub as a Deployment status. Webhooks ride the same
+tunnel as your traffic; nothing else on the box is exposed.
 
-Standing this up against a real relay, domain, and GitHub App end-to-end:
-[`docs/runbooks/git-deploy-e2e.md`](docs/runbooks/git-deploy-e2e.md).
+## Docs
+
+| Doc | Covers |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | install → LAN control → public relay → remote control → git deploys |
+| [Manual setup](docs/manual-setup.md) | build from source, piperd in Docker, run the relay as a service |
+| [Custom domains](docs/custom-domains.md) | BYO domain with end-to-end TLS |
+| [E2E runbook](docs/runbooks/git-deploy-e2e.md) | stand up relay + domain + GitHub App from scratch |
+| [PROGRESS.md](PROGRESS.md) | built vs. stubbed map, linked to issues |
+| [Design](docs/superpowers/specs/2026-07-04-piper-design.md) | the full design rationale |
 
 ## Contributing
 
-- **What's built vs. left:** [`PROGRESS.md`](PROGRESS.md) — a coarse map linking each gap to its issue.
-- **Tracked work:** [GitHub issues](https://github.com/getpiper/piper/issues). Titles carry an `[area]` prefix (e.g. `[agent]`, `[cli]`, `[relay]`); `epic` issues track whole plans. New here? Look for [`good first issue`](https://github.com/getpiper/piper/labels/good%20first%20issue).
-- **How to work in this repo:** [`CLAUDE.md`](CLAUDE.md) — coding principles, branch workflow, and issue conventions.
-
-Trunk-based: `main` is the only long-lived branch. Branch off `main`, open a PR back into it, and squash-merge.
-
-`main` is protected:
-
-- Changes land only via pull request (no direct pushes); squash-merge only, head branch auto-deleted.
-- The CI **`verify`** check (gofmt · `go vet` · `make test` · `make cross`) must pass, and the branch must be up to date, before merging.
-- The CI **`e2e`** check runs the end-to-end suite (`make e2e`) against real Docker on every code-touching PR. It's informational, not required to merge. To run it locally you need Docker and free ports `:80`, `:2019` (embedded Caddy's admin API), and `:8088`; the relay tests also use `:8443`/`:7000`.
-- Conversation resolution and linear history required; force-pushes and branch deletion blocked; rules apply to admins too.
-- Approving reviews are not yet required (single maintainer) — this bumps to 1 once there's a second reviewer.
+[Issues](https://github.com/getpiper/piper/issues) carry an `[area]` title
+prefix (`[agent]`, `[cli]`, `[relay]`, …); new here? Look for
+[`good first issue`](https://github.com/getpiper/piper/labels/good%20first%20issue).
+How to work in this repo — coding principles, branch workflow, issue
+conventions — lives in [`CLAUDE.md`](CLAUDE.md). Trunk-based: branch off
+`main`, open a PR back into it, squash-merge; CI's `verify` gate (gofmt ·
+`go vet` · tests · arm64 cross-compile) must pass.
