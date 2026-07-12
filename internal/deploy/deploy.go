@@ -91,9 +91,12 @@ func (d *Deployer) stopPartial(ctx context.Context, containerID string) {
 
 // buildRunHealthy builds, runs, and health-checks app, capturing one
 // tail-capped log blob (build output, plus container output when the run or
-// health check fails). On failure it invokes recordFailed with whatever ids
-// and log are known so the caller persists a "failed" record for the right
-// (app, pr) row, then returns a wrapped error.
+// health check fails). When progress is non-nil (the production Finish path),
+// stage-transition banners ("→ building image", etc.) and the build's live
+// output are written to it as they happen, in addition to the returned log;
+// previews pass nil and see no live output. On failure it invokes recordFailed
+// with whatever ids and log are known so the caller persists a "failed" record
+// for the right (app, pr) row, then returns a wrapped error.
 func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir string, progress io.Writer, recordFailed func(imageID, containerID string, hostPort int, logs string)) (runtime.BuildResult, runtime.RunResult, string, error) {
 	tag := fmt.Sprintf("piper/%s:%d", app.Name, time.Now().Unix())
 	var log runtime.TailBuffer
