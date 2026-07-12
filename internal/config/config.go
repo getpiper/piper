@@ -116,6 +116,93 @@ type ClientConfig struct {
 	AccountCredential string `json:"account_credential,omitempty"`
 }
 
+// Box is one named piperd target in the piper CLI's config file. Addr/Token
+// are the LAN path; RelayAPI/AccountCredential the relay path (wizard-managed).
+type Box struct {
+	Name              string `json:"name"`
+	Addr              string `json:"addr"`
+	Token             string `json:"token"`
+	RelayAPI          string `json:"relay_api,omitempty"`
+	AccountCredential string `json:"account_credential,omitempty"`
+}
+
+// ClientFile is the on-disk shape of ~/.piper/piper/config.json (schema v2):
+// named boxes plus the current selection. A legacy flat ClientConfig file
+// loads as a single box named "default"; the file itself is only rewritten
+// in v2 form by the next save.
+type ClientFile struct {
+	Boxes   []Box  `json:"boxes"`
+	Current string `json:"current"`
+}
+
+// CurrentBox returns the box named by Current, falling back to the first box.
+func (cf ClientFile) CurrentBox() (Box, bool) {
+	for _, b := range cf.Boxes {
+		if b.Name == cf.Current {
+			return b, true
+		}
+	}
+	if len(cf.Boxes) > 0 {
+		return cf.Boxes[0], true
+	}
+	return Box{}, false
+}
+
+// LoadClientFile reads ~/.piper/piper/config.json in v2 form, migrating a
+// legacy flat file in-memory. A missing file is not an error.
+func LoadClientFile() (ClientFile, error) {
+	var cf ClientFile
+	path, err := clientConfigPath()
+	if err != nil {
+		return cf, err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return cf, nil
+	}
+	if err != nil {
+		return cf, err
+	}
+	_ = json.Unmarshal(data, &cf)
+	if len(cf.Boxes) > 0 {
+		if cf.Current == "" {
+			cf.Current = cf.Boxes[0].Name
+		}
+		return cf, nil
+	}
+	var legacy ClientConfig
+	_ = json.Unmarshal(data, &legacy)
+	if legacy == (ClientConfig{}) {
+		return cf, nil
+	}
+	cf.Boxes = []Box{{
+		Name:              "default",
+		Addr:              legacy.Addr,
+		Token:             legacy.Token,
+		RelayAPI:          legacy.RelayAPI,
+		AccountCredential: legacy.AccountCredential,
+	}}
+	cf.Current = "default"
+	return cf, nil
+}
+
+// SaveClientFile writes cf to ~/.piper/piper/config.json with 0600 perms,
+// creating the directory if needed.
+func SaveClientFile(cf ClientFile) error {
+	path, err := clientConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
 func clientConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

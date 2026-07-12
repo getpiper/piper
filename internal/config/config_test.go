@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -253,5 +254,74 @@ func TestRelayFileTerminatedRoundTripAndLoad(t *testing.T) {
 	// file decides. Document via this assertion:
 	if cfg := Load(); !cfg.Terminated {
 		t.Fatal("non-1 env must not override a terminated relay.json")
+	}
+}
+
+func TestLoadClientFileMigratesLegacyFlat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".piper", "piper")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"addr":"http://192.168.1.6:8088","token":"tok","relay_api":"https://api.relay","account_credential":"cred"}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cf, err := LoadClientFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cf.Boxes) != 1 || cf.Current != "default" {
+		t.Fatalf("want 1 box current=default, got %+v", cf)
+	}
+	b := cf.Boxes[0]
+	if b.Name != "default" || b.Addr != "http://192.168.1.6:8088" || b.Token != "tok" ||
+		b.RelayAPI != "https://api.relay" || b.AccountCredential != "cred" {
+		t.Fatalf("migrated box wrong: %+v", b)
+	}
+}
+
+func TestLoadClientFileMissingIsEmptyNotError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cf, err := LoadClientFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cf.Boxes) != 0 {
+		t.Fatalf("want no boxes, got %+v", cf)
+	}
+}
+
+func TestSaveClientFileRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	in := ClientFile{
+		Boxes: []Box{
+			{Name: "pi4", Addr: "http://192.168.1.6:8088", Token: "a"},
+			{Name: "local", Addr: "http://127.0.0.1:8088", Token: "b", RelayAPI: "https://api.relay", AccountCredential: "cred"},
+		},
+		Current: "pi4",
+	}
+	if err := SaveClientFile(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := LoadClientFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(in, out) {
+		t.Fatalf("round trip mismatch:\n in: %+v\nout: %+v", in, out)
+	}
+}
+
+func TestCurrentBoxFallsBackToFirst(t *testing.T) {
+	cf := ClientFile{Boxes: []Box{{Name: "a"}, {Name: "b"}}, Current: "missing"}
+	b, ok := cf.CurrentBox()
+	if !ok || b.Name != "a" {
+		t.Fatalf("want first box fallback, got %+v ok=%v", b, ok)
+	}
+	if _, ok := (ClientFile{}).CurrentBox(); ok {
+		t.Fatal("empty file must report no box")
 	}
 }
