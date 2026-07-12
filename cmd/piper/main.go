@@ -525,6 +525,6 @@ func confirmDelete(stdout io.Writer, name string) bool {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] <version|login|connect|create|deploy|list|status|stop|delete|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|delete|app|github> [args]")
 	return 2
 }
