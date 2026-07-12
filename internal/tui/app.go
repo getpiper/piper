@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,27 +12,27 @@ import (
 const pollInterval = 2 * time.Second
 
 // Model is the root of the TUI: it owns the view stack, the poll tick, the
-// active box's client, and the status bar. Child views handle their own
-// messages; the root intercepts global keys and connectivity state.
+// active box's client, and the status bar. The top view handles its own
+// messages; the root intercepts global keys, navigation, and connectivity.
 type Model struct {
 	box    string
 	addr   string
+	remote bool
 	client API
 
-	stack    []tea.Model
-	loaded   bool // at least one successful poll
-	down     bool // last poll failed
-	appCount int
+	stack  []view
+	loaded bool // at least one successful poll
+	down   bool // last poll failed
 }
 
-func NewModel(box, addr string, c API) Model {
-	return Model{box: box, addr: addr, client: c, stack: []tea.Model{newAppsView()}}
+func NewModel(box, addr string, remote bool, c API) Model {
+	return Model{box: box, addr: addr, remote: remote, client: c, stack: []view{newAppsView(remote)}}
 }
 
 // Run starts the interactive TUI against c, identified as box/addr in the
-// status bar. It blocks until the user quits.
-func Run(box, addr string, c API) error {
-	_, err := tea.NewProgram(NewModel(box, addr, c), tea.WithAltScreen()).Run()
+// status bar. remote marks a relay-backed box (HTTPS URLs). It blocks until quit.
+func Run(box, addr string, remote bool, c API) error {
+	_, err := tea.NewProgram(NewModel(box, addr, remote, c), tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -41,17 +42,10 @@ func tick() tea.Cmd {
 	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-// refresh polls the current view's data off the UI thread.
-func (m Model) refresh() tea.Cmd {
-	c := m.client
-	return func() tea.Msg {
-		apps, err := c.ListApps()
-		if err != nil {
-			return errMsg{err}
-		}
-		return appsLoadedMsg{apps}
-	}
-}
+func (m Model) top() view { return m.stack[len(m.stack)-1] }
+
+// refresh polls the top view's data off the UI thread.
+func (m Model) refresh() tea.Cmd { return m.top().refresh(m.client) }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -64,10 +58,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.stack = m.stack[:len(m.stack)-1]
-			return m, nil
+			return m, m.refresh()
 		case "esc":
 			if len(m.stack) > 1 {
 				m.stack = m.stack[:len(m.stack)-1]
+				return m, m.refresh()
 			}
 			return m, nil
 		case "r":
@@ -75,28 +70,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		return m, tea.Batch(m.refresh(), tick())
-	case appsLoadedMsg:
-		m.loaded, m.down, m.appCount = true, false, len(msg.apps)
-	case errMsg:
-		m.down = true
+	case pushMsg:
+		m.stack = append(m.stack, msg.view)
+		return m, m.refresh()
 	}
-	top, cmd := m.stack[len(m.stack)-1].Update(msg)
-	m.stack[len(m.stack)-1] = top
+	if pr, ok := msg.(pollResult); ok {
+		if pr.reachable() {
+			m.loaded = true
+		}
+		m.down = !pr.reachable()
+	}
+	next, cmd := m.top().Update(msg)
+	m.stack[len(m.stack)-1] = next.(view)
 	return m, cmd
 }
 
 func (m Model) View() string {
-	header := lipgloss.NewStyle().Bold(true).Render(" piper ") + "· apps"
-	return header + "\n\n" + m.stack[len(m.stack)-1].View() + "\n\n" + m.statusBar()
+	crumbs := make([]string, len(m.stack))
+	for i, v := range m.stack {
+		crumbs[i] = v.title()
+	}
+	header := lipgloss.NewStyle().Bold(true).Render(" piper ") + "· " + strings.Join(crumbs, " › ")
+	return header + "\n\n" + m.top().View() + "\n\n" + m.statusBar()
 }
 
 func (m Model) statusBar() string {
+	loc := fmt.Sprintf("%s · %s", m.box, m.addr)
 	switch {
 	case m.down:
-		return fmt.Sprintf(" ○ %s · %s · unreachable — retrying…", m.box, m.addr)
+		return fmt.Sprintf(" ○ %s · unreachable — retrying…", loc)
 	case !m.loaded:
-		return fmt.Sprintf(" … %s · %s · connecting…", m.box, m.addr)
+		return fmt.Sprintf(" … %s · connecting…", loc)
 	default:
-		return fmt.Sprintf(" ● %s · %s · %d apps", m.box, m.addr, m.appCount)
+		return fmt.Sprintf(" ● %s · %s", loc, pluralApps(m.stack[0].(appsView).count()))
 	}
 }

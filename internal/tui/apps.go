@@ -8,17 +8,32 @@ import (
 	"github.com/getpiper/piper/internal/api"
 )
 
-// appsView is the depth-0 home view: a read-only table of apps. Selection
-// and drill-down arrive in phase 3.
+// appsView is the depth-0 home view: a table of apps. Cursor + drill-in arrive
+// in Task 3.
 type appsView struct {
 	apps   []api.App
 	err    error
 	loaded bool
+	remote bool
 }
 
-func newAppsView() appsView { return appsView{} }
+func newAppsView(remote bool) appsView { return appsView{remote: remote} }
 
 func (v appsView) Init() tea.Cmd { return nil }
+
+func (v appsView) title() string { return "apps" }
+
+func (v appsView) count() int { return len(v.apps) }
+
+func (v appsView) refresh(c API) tea.Cmd {
+	return func() tea.Msg {
+		apps, err := c.ListApps()
+		if err != nil {
+			return errMsg{err}
+		}
+		return appsLoadedMsg{apps}
+	}
+}
 
 func (v appsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -46,7 +61,7 @@ func (v appsView) View() string {
 	fmt.Fprintf(&b, "  %-16s %-12s %s\n", "NAME", "STATUS", "URL")
 	for _, a := range v.apps {
 		status := strings.TrimSpace(statusIcon(a.Status) + " " + a.Status)
-		fmt.Fprintf(&b, "  %-16s %-12s %s\n", a.Name, status, appURL(a.Hostname))
+		fmt.Fprintf(&b, "  %-16s %-12s %s\n", a.Name, status, appURL(a.Hostname, v.remote))
 	}
 	return b.String()
 }
