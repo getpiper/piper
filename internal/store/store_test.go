@@ -636,6 +636,48 @@ func TestBuildingRowLifecycle(t *testing.T) {
 	}
 }
 
+func TestFailBuildingDeployments(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	building, err := s.CreateDeployment("web", "", "", 0, "building", "pulling base image...\n")
+	if err != nil {
+		t.Fatalf("CreateDeployment building: %v", err)
+	}
+	running, err := s.CreateDeployment("web", "img", "cid", 40001, "running", "done\n")
+	if err != nil {
+		t.Fatalf("CreateDeployment running: %v", err)
+	}
+
+	n, err := s.FailBuildingDeployments()
+	if err != nil {
+		t.Fatalf("FailBuildingDeployments: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("rows changed = %d, want 1", n)
+	}
+
+	deps, err := s.ListDeployments("web")
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+	byID := map[string]Deployment{}
+	for _, d := range deps {
+		byID[d.ID] = d
+	}
+	if got := byID[building.ID].Status; got != "failed" {
+		t.Fatalf("building row status = %q, want failed", got)
+	}
+	if got := byID[running.ID].Status; got != "running" {
+		t.Fatalf("running row status = %q, want untouched running", got)
+	}
+	logs, _ := s.DeploymentLogs("web", building.ID)
+	if !strings.Contains(logs, "pulling base image...") || !strings.Contains(logs, "aborted") {
+		t.Fatalf("failed building logs = %q, want streamed log kept + abort note", logs)
+	}
+}
+
 func TestDeleteAppUnknownIsNotFound(t *testing.T) {
 	s := openTemp(t)
 	if err := s.DeleteApp("ghost"); !errors.Is(err, ErrNotFound) {
