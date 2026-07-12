@@ -18,6 +18,14 @@ type FakeRuntime struct {
 	LogsErr         error
 	Stopped         []string
 	StopContextErrs []error
+	Pruned          []PruneCall
+	PruneErr        error
+}
+
+// PruneCall records one PruneAppImages invocation for assertions.
+type PruneCall struct {
+	App  string
+	Keep int
 }
 
 func (f *FakeRuntime) Build(_ context.Context, _, _ string, progress io.Writer) (BuildResult, error) {
@@ -37,6 +45,11 @@ func (f *FakeRuntime) Stop(ctx context.Context, id string) error {
 	f.Stopped = append(f.Stopped, id)
 	f.StopContextErrs = append(f.StopContextErrs, ctx.Err())
 	return nil
+}
+
+func (f *FakeRuntime) PruneAppImages(_ context.Context, app string, keep int) error {
+	f.Pruned = append(f.Pruned, PruneCall{App: app, Keep: keep})
+	return f.PruneErr
 }
 
 func (f *FakeRuntime) Logs(context.Context, string) (io.ReadCloser, error) {

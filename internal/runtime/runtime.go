@@ -26,4 +26,8 @@ type Runtime interface {
 	WaitHealthy(ctx context.Context, hostPort int) error
 	Stop(ctx context.Context, containerID string) error
 	Logs(ctx context.Context, containerID string) (io.ReadCloser, error)
+	// PruneAppImages removes an app's built images (tagged piper/<app>:<ts>),
+	// keeping the newest keep by creation time; keep<=0 removes them all.
+	// Best-effort: images still in use by a running container are left in place.
+	PruneAppImages(ctx context.Context, app string, keep int) error
 }

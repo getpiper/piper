@@ -1058,8 +1058,9 @@ func (g *gateRuntime) Build(context.Context, string, string, io.Writer) (runtime
 func (g *gateRuntime) Run(context.Context, string, int, map[string]string) (runtime.RunResult, error) {
 	return g.run, nil
 }
-func (g *gateRuntime) WaitHealthy(context.Context, int) error { return nil }
-func (g *gateRuntime) Stop(context.Context, string) error     { return nil }
+func (g *gateRuntime) WaitHealthy(context.Context, int) error            { return nil }
+func (g *gateRuntime) Stop(context.Context, string) error                { return nil }
+func (g *gateRuntime) PruneAppImages(context.Context, string, int) error { return nil }
 func (g *gateRuntime) Logs(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
@@ -1208,5 +1209,55 @@ func TestDeployPanicStopsContainerAndRecordsFailed(t *testing.T) {
 	}
 	if got := deploymentCountWithStatus(t, path, "failed"); got != 1 {
 		t.Errorf("failed deployment count = %d, want 1", got)
+	}
+}
+
+// A successful deploy GCs superseded images, keeping the newest N per app. #125.
+func TestDeployPrunesOldImages(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if len(rt.Pruned) != 1 || rt.Pruned[0] != (runtime.PruneCall{App: "blog", Keep: imageRetentionPerApp}) {
+		t.Fatalf("pruned = %+v, want one keep=%d prune of blog", rt.Pruned, imageRetentionPerApp)
+	}
+}
+
+// A failed deploy must NOT prune (its image is the newest and may still be
+// wanted for debugging; nothing was superseded).
+func TestFailedDeployDoesNotPrune(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+		HealthErr:      errors.New("unhealthy"),
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err == nil {
+		t.Fatal("Deploy should fail")
+	}
+	if len(rt.Pruned) != 0 {
+		t.Fatalf("pruned = %+v, want none on a failed deploy", rt.Pruned)
+	}
+}
+
+// Delete removes the app's every image (keep=0). #125.
+func TestDeletePrunesAllImages(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if err := d.Delete(context.Background(), "blog"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if len(rt.Pruned) != 1 || rt.Pruned[0] != (runtime.PruneCall{App: "blog", Keep: 0}) {
+		t.Fatalf("pruned = %+v, want one keep=0 prune of blog", rt.Pruned)
 	}
 }
