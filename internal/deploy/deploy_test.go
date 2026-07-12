@@ -21,6 +21,7 @@ type fakeCaddy struct {
 	tlsRoutes []string
 	removeErr error
 	upsertErr error
+	tlsErr    error
 }
 
 func newFakeCaddy() *fakeCaddy {
@@ -36,6 +37,9 @@ func (f *fakeCaddy) UpsertRoute(host string, port int) error {
 }
 
 func (f *fakeCaddy) UpsertRouteTLS(host string, port int) error {
+	if f.tlsErr != nil {
+		return f.tlsErr
+	}
 	f.tlsRoutes = append(f.tlsRoutes, fmt.Sprintf("%s->%d", host, port))
 	return nil
 }
@@ -1119,5 +1123,35 @@ func TestDeleteSerializesAgainstDeploy(t *testing.T) {
 	}
 	if err := <-deleteDone; err != nil {
 		t.Fatalf("delete: %v", err)
+	}
+}
+
+// A flaky Caddy admin call on the secondary custom-domain hostname must not
+// fail a deploy that already succeeded on its primary URL. #115.
+func TestDeployCustomDomainRouteFailureDoesNotAbort(t *testing.T) {
+	s, _ := newStore(t)
+	if err := s.SetDomainConfig("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDomainStatus("example.com", "active", "", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	routes.tlsErr = errors.New("caddy admin flaky")
+	d := New(s, rt, routes, "piper.localhost")
+
+	dep, err := d.Deploy(context.Background(), "blog", t.TempDir())
+	if err != nil {
+		t.Fatalf("deploy should succeed despite a secondary TLS-route failure: %v", err)
+	}
+	if dep.Status != "running" {
+		t.Errorf("status = %q, want running", dep.Status)
+	}
+	if routes.upserts["blog.piper.localhost"] != 40001 {
+		t.Errorf("primary route = %+v, want blog.piper.localhost -> 40001", routes.upserts)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
 
@@ -230,10 +231,14 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 		return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("record hostname: %w", err))
 	}
 	// An active BYO custom domain (#102) serves the app at <app>.<custom> over
-	// the box-terminated :443 alongside the primary host.
+	// the box-terminated :443 alongside the primary host. This is a secondary
+	// hostname: the primary route is already live and the domain manager re-arms
+	// custom-domain routes on renewal/resume, so a transient Caddy error here is
+	// logged and skipped rather than failing an otherwise-successful deploy (#115).
 	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {
-		if err := d.routes.UpsertRouteTLS(dep.App+"."+dc.Domain, run.HostPort); err != nil {
-			return d.failFinish(dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("route custom domain: %w", err))
+		host := dep.App + "." + dc.Domain
+		if err := d.routes.UpsertRouteTLS(host, run.HostPort); err != nil {
+			log.Printf("deploy %s: custom-domain route %s (deploy still succeeded on primary): %v", dep.App, host, err)
 		}
 	}
 
