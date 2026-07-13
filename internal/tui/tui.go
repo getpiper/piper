@@ -65,6 +65,20 @@ type (
 
 	// popMsg pops n views off the stack (e.g. a y/n confirm answered "no").
 	popMsg struct{ n int }
+
+	// deployMsg is the deploy confirm's intent; the root kicks off Deploy.
+	deployMsg struct {
+		name string
+		cwd  string
+	}
+
+	// deployStartedMsg is the deploy kickoff's outcome. On success the root
+	// replaces the deploy confirm with a follow logs view on the new build.
+	deployStartedMsg struct {
+		app string
+		id  string
+		err error
+	}
 )
 
 // pollResult is implemented by every message that is the outcome of a view's

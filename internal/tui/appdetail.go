@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -69,6 +71,11 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				d := v.deps[v.cursor]
 				return v, func() tea.Msg { return pushMsg{newLogsView(v.name, d.ID, d.Status)} }
 			}
+		case "d":
+			cwd, _ := os.Getwd()
+			_, statErr := os.Stat(filepath.Join(cwd, "Dockerfile"))
+			hasDockerfile := statErr == nil
+			return v, func() tea.Msg { return pushMsg{newDeployView(v.name, cwd, hasDockerfile)} }
 		case "s":
 			return v, func() tea.Msg { return pushMsg{newStopConfirm(v.name)} }
 		case "x":

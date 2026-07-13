@@ -86,3 +86,17 @@ func TestAppDetailStopAndDeleteKeysPushConfirm(t *testing.T) {
 		}
 	}
 }
+
+func TestAppDetailDKeyPushesDeploy(t *testing.T) {
+	_, cmd := newAppDetailView("blog", false).Update(keyRunes('d'))
+	if cmd == nil {
+		t.Fatal("d should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "deploy" {
+		t.Fatalf("want the deploy view, got title %q", pm.view.title())
+	}
+}

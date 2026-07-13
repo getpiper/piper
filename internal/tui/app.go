@@ -120,6 +120,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case popMsg:
 		m = m.popN(msg.n)
 		return m, m.refresh()
+	case deployMsg:
+		name, cwd, c := msg.name, msg.cwd, m.client
+		return m, func() tea.Msg {
+			dep, err := c.Deploy(name, cwd)
+			return deployStartedMsg{app: name, id: dep.ID, err: err}
+		}
+	case deployStartedMsg:
+		if _, ok := m.top().(deployView); !ok {
+			return m, nil // user navigated away before the kickoff returned
+		}
+		if msg.err != nil {
+			next, _ := m.top().Update(errMsg{msg.err})
+			m.stack[len(m.stack)-1] = next.(view)
+			return m, nil
+		}
+		m.stack[len(m.stack)-1] = newLogsView(msg.app, msg.id, "building")
+		if m.width > 0 {
+			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.stack[len(m.stack)-1] = seeded.(view)
+		}
+		return m, m.refresh()
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// no return: fall through to forward the size to the top view
