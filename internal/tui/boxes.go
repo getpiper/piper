@@ -34,8 +34,7 @@ func (v boxesView) footer() string {
 	return "↵ connect · a add · e edit · x remove · esc back · ? help"
 }
 
-// refresh reloads the client config off the UI thread. (Per-box reachability
-// probes are added in a later task.)
+// refresh reloads the client config off the UI thread.
 func (v boxesView) refresh(API) tea.Cmd {
 	return func() tea.Msg {
 		cf, err := config.LoadClientFile()

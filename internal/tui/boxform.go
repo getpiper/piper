@@ -111,7 +111,7 @@ func (v boxFormView) submit() (tea.Model, tea.Cmd) {
 		if err := saveBox(box, replacing); err != nil {
 			return errMsg{err}
 		}
-		return boxSavedMsg{box: box}
+		return boxSavedMsg{box: box, replacing: replacing}
 	}
 }
 

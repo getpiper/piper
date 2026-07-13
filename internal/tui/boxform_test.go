@@ -115,6 +115,15 @@ func TestBoxesKeyOpensForms(t *testing.T) {
 	}
 }
 
+func TestRootCurrentBoxRenameRedials(t *testing.T) {
+	m := NewModel("pi4", "192.168.1.6:8088", false, fakeAPI{}).WithDialer(fakeDialer(fakeAPI{}, "192.168.1.9:8088", false, nil))
+	m2, _ := m.Update(boxSavedMsg{box: config.Box{Name: "pi4-new", Addr: "192.168.1.9:8088"}, replacing: "pi4"})
+	m = m2.(Model)
+	if m.box != "pi4-new" || m.addr != "192.168.1.9:8088" {
+		t.Fatalf("renaming the current box should re-dial: got box=%q addr=%q", m.box, m.addr)
+	}
+}
+
 func TestRootBoxSavedPopsToBoxes(t *testing.T) {
 	m := NewModel("pi4", "a", false, fakeAPI{}).WithDialer(fakeDialer(fakeAPI{}, "", false, nil))
 	m2, _ := m.Update(pushMsg{newBoxesView(m.dial)})

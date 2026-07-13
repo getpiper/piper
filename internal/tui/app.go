@@ -149,7 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refresh()
 	case boxSavedMsg:
-		if msg.box.Name == m.box {
+		if msg.box.Name == m.box || msg.replacing == m.box {
 			return m.Update(switchBoxMsg{box: msg.box}) // current box changed: re-dial
 		}
 		m = m.popN(1)

@@ -75,8 +75,13 @@ type (
 
 	// boxSavedMsg is the box form's success outcome. The root pops back to the
 	// boxes view; if the saved box is the current one, it re-dials (its addr or
-	// token may have changed) via the same path as a switch.
-	boxSavedMsg struct{ box config.Box }
+	// token may have changed) via the same path as a switch. replacing is the
+	// box's prior name (empty for an add), used so the root also re-dials when
+	// an edit renamed the current box.
+	boxSavedMsg struct {
+		box       config.Box
+		replacing string
+	}
 
 	// removeBoxMsg is the remove confirm's intent; the root drops the box.
 	removeBoxMsg struct{ name string }
