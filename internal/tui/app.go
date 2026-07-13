@@ -148,6 +148,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stack[len(m.stack)-1] = seeded.(view)
 		}
 		return m, m.refresh()
+	case boxSavedMsg:
+		if msg.box.Name == m.box {
+			return m.Update(switchBoxMsg{box: msg.box}) // current box changed: re-dial
+		}
+		m = m.popN(1)
+		return m, m.refresh()
 	case createAppMsg:
 		name, port, c := msg.name, msg.port, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.CreateApp(name, port), popLevels: 1} }

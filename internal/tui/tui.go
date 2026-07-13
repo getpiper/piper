@@ -73,6 +73,11 @@ type (
 		reachable bool
 	}
 
+	// boxSavedMsg is the box form's success outcome. The root pops back to the
+	// boxes view; if the saved box is the current one, it re-dials (its addr or
+	// token may have changed) via the same path as a switch.
+	boxSavedMsg struct{ box config.Box }
+
 	// Action intents: a mutating view emits one of these; the root owns the
 	// client, runs the call off the UI thread, and reports the outcome.
 	createAppMsg struct {

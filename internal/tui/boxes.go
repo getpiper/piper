@@ -97,6 +97,14 @@ func (v boxesView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				box := v.boxes[v.cursor]
 				return v, func() tea.Msg { return switchBoxMsg{box: box} }
 			}
+		case "a":
+			boxes := v.boxes
+			return v, func() tea.Msg { return pushMsg{newBoxForm(v.dial, boxes)} }
+		case "e":
+			if len(v.boxes) > 0 {
+				boxes, orig := v.boxes, v.boxes[v.cursor]
+				return v, func() tea.Msg { return pushMsg{newBoxFormEdit(v.dial, boxes, orig)} }
+			}
 		}
 	}
 	return v, nil
@@ -138,4 +146,30 @@ func (v boxesView) status(i int) string {
 	default:
 		return "○"
 	}
+}
+
+// saveBox writes box to the client config: it updates the box named replacing
+// (whose name may change), else appends box. All other boxes are preserved; a
+// first box (empty config) becomes current. replacing == "" means add.
+func saveBox(box config.Box, replacing string) error {
+	cf, err := config.LoadClientFile()
+	if err != nil {
+		return err
+	}
+	if replacing != "" {
+		for i := range cf.Boxes {
+			if cf.Boxes[i].Name == replacing {
+				if cf.Current == replacing {
+					cf.Current = box.Name
+				}
+				cf.Boxes[i] = box
+				return config.SaveClientFile(cf)
+			}
+		}
+	}
+	cf.Boxes = append(cf.Boxes, box)
+	if cf.Current == "" {
+		cf.Current = box.Name
+	}
+	return config.SaveClientFile(cf)
 }
