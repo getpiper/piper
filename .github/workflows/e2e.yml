@@ -28,9 +28,9 @@ jobs:
     # A hung health-check loop would otherwise burn the 6-hour default.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
 
