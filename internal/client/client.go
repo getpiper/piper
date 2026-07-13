@@ -179,26 +179,26 @@ func (c *Client) App(name string) (api.App, error) {
 	return a, nil
 }
 
-// FollowDeploy polls until the deployment reaches a terminal status, writing
-// new log bytes to progress as the stored log grows. Returns the terminal
-// deployment. It stops when ctx is cancelled or times out — returning the
-// last-seen deployment and ctx.Err() so the caller can report a bounded
-// give-up instead of polling a stranded "building" row forever (#161).
+// FollowDeploy polls until the deployment finishes, writing new log output as
+// it appears. If the stored tail rotates after reaching its cap, it prints the
+// current snapshot again. It stops when ctx is cancelled or times out, returning
+// the last-seen deployment and ctx.Err() instead of polling a stranded
+// "building" row forever (#161).
 func (c *Client) FollowDeploy(ctx context.Context, name, id string, progress io.Writer) (store.Deployment, error) {
-	printed := 0
+	lastLogs := ""
 	var last store.Deployment
 	for {
 		logs, err := c.DeploymentLogs(name, id)
 		if err != nil {
 			return store.Deployment{}, err
 		}
-		if len(logs) >= printed {
-			_, _ = io.WriteString(progress, logs[printed:])
+		if strings.HasPrefix(logs, lastLogs) {
+			_, _ = io.WriteString(progress, logs[len(lastLogs):])
 		} else {
 			// Tail-cap dropped the front (log exceeded the cap): reprint whole.
 			_, _ = io.WriteString(progress, logs)
 		}
-		printed = len(logs)
+		lastLogs = logs
 
 		deps, err := c.Deployments(name)
 		if err != nil {

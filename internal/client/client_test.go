@@ -206,6 +206,48 @@ func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
 	}
 }
 
+func TestFollowDeployReprintsRotatedTail(t *testing.T) {
+	const first = "[log truncated]\nold tail\n"
+	const second = "[log truncated]\nnew tail\n"
+	if len(first) != len(second) {
+		t.Fatal("test snapshots must have equal length")
+	}
+	var polls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/apps/web/deployments/dep1/logs":
+			if atomic.AddInt32(&polls, 1) == 1 {
+				io.WriteString(w, first)
+			} else {
+				io.WriteString(w, second)
+			}
+		case "/v1/apps/web/deployments":
+			status := "building"
+			if atomic.LoadInt32(&polls) >= 2 {
+				status = "running"
+			}
+			writeJSONTest(w, []store.Deployment{{ID: "dep1", App: "web", Status: status}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	c.pollInterval = time.Millisecond
+	var progress bytes.Buffer
+	dep, err := c.FollowDeploy(context.Background(), "web", "dep1", &progress)
+	if err != nil {
+		t.Fatalf("FollowDeploy: %v", err)
+	}
+	if dep.Status != "running" {
+		t.Fatalf("status = %q, want running", dep.Status)
+	}
+	if progress.String() != first+second {
+		t.Fatalf("progress = %q, want both equal-length tail snapshots", progress.String())
+	}
+}
+
 // A row stuck "building" (piperd stranded it) must not poll forever: FollowDeploy
 // gives up when the context deadline passes, returning the last-seen row. #161.
 func TestFollowDeployHonorsContextDeadline(t *testing.T) {
