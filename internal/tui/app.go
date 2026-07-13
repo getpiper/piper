@@ -122,6 +122,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, func() tea.Msg { return pushMsg{newBoxesView(m.dial)} }
 				}
 				return m, nil
+			case "L":
+				if _, ok := m.top().(loginView); !ok {
+					return m, func() tea.Msg { return pushMsg{newLoginView(m.dial, m.box)} }
+				}
+				return m, nil
 			}
 		}
 	case tickMsg:
