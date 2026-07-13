@@ -63,7 +63,7 @@ func (v githubView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, func() tea.Msg { return popMsg{n: 1} }
 	case githubFormReadyMsg:
 		v.formURL = msg.url
-		return v, msg.wait
+		return v, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		v.spin, cmd = v.spin.Update(msg)

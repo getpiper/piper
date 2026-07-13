@@ -26,6 +26,8 @@ type Model struct {
 	loaded        bool // at least one successful poll
 	down          bool // last poll failed
 	width, height int
+
+	githubCancel context.CancelFunc // cancels the in-flight github manifest flow on leave
 }
 
 func NewModel(box, addr string, remote bool, c API) Model {
@@ -98,6 +100,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "esc":
 			if len(m.stack) > 1 {
+				if _, ok := m.top().(githubView); ok && m.githubCancel != nil {
+					m.githubCancel()
+					m.githubCancel = nil
+				}
 				m.stack = m.stack[:len(m.stack)-1]
 				return m, m.refresh()
 			}
@@ -194,7 +200,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch), popLevels: 1} }
 	case githubStartMsg:
 		org, c := msg.org, m.client
-		return m, func() tea.Msg { return beginManifestFlow(context.Background(), c, org) }
+		ctx, cancel := context.WithCancel(context.Background())
+		m.githubCancel = cancel
+		return m, func() tea.Msg { return beginManifestFlow(ctx, c, org) }
+	case githubFormReadyMsg:
+		// Always schedule wait so the flow's servers are torn down on every
+		// path — even if the user left the github view before the URL arrived
+		// (otherwise wait, whose defers close the servers, is never scheduled).
+		if gv, ok := m.top().(githubView); ok {
+			next, _ := gv.Update(msg) // sets formURL for the manual-open fallback
+			m.stack[len(m.stack)-1] = next.(view)
+		}
+		return m, msg.wait
+	case githubDoneMsg:
+		if m.githubCancel != nil {
+			m.githubCancel()
+			m.githubCancel = nil
+		}
+		if gv, ok := m.top().(githubView); ok {
+			next, cmd := gv.Update(msg) // nil → pop back to apps; err → banner in the view
+			m.stack[len(m.stack)-1] = next.(view)
+			return m, cmd
+		}
+		return m, nil // user already navigated away; the flow was torn down via cancel
 	case actionResultMsg:
 		if msg.err != nil {
 			next, _ := m.top().Update(errMsg{msg.err})
