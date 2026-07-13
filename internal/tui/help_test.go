@@ -73,3 +73,12 @@ func TestEscPopsHelpOverlay(t *testing.T) {
 }
 
 func keyEsc() tea.KeyMsg { return tea.KeyMsg(tea.Key{Type: tea.KeyEsc}) }
+
+func TestHelpOverlayIncludesBoxesKeymap(t *testing.T) {
+	out := helpView{}.View()
+	for _, want := range []string{"t boxes", "connect", "add", "edit", "remove"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help overlay missing boxes keymap %q:\n%s", want, out)
+		}
+	}
+}
