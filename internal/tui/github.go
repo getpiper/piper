@@ -21,8 +21,8 @@ import (
 // account), press ↵, and it serves a local auto-submitting form that POSTs the
 // manifest to GitHub, catches the ?code= redirect, and exchanges it for App
 // credentials on the box. It mirrors cmd/piper's `github setup`, bridged into a
-// tea.Cmd. The socket plumbing runs in runManifestFlow (below Update), so Update
-// stays a pure (msg) -> (model, cmd) machine.
+// tea.Cmd. The socket plumbing runs in beginManifestFlow (below Update), so
+// Update stays a pure (msg) -> (model, cmd) machine.
 type githubView struct {
 	org     textinput.Model
 	running bool
@@ -61,6 +61,9 @@ func (v githubView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, nil
 		}
 		return v, func() tea.Msg { return popMsg{n: 1} }
+	case githubFormReadyMsg:
+		v.formURL = msg.url
+		return v, msg.wait
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		v.spin, cmd = v.spin.Update(msg)
@@ -135,23 +138,26 @@ var openBrowser = func(rawURL string) error {
 	}
 }
 
-// runManifestFlow drives the two-server manifest dance and returns a
-// githubDoneMsg. It mirrors cmd/piper/main.go's githubSetup: a callback server
-// catches GitHub's ?code=, a form server serves an auto-submitting POST of the
-// manifest, the browser opens at the form, and the code is exchanged. It is
-// exercised by the CLI's githubSetup tests + e2e; unit tests here drive the
-// state machine directly (see github_test.go), not this function.
-func runManifestFlow(ctx context.Context, c API, org string) tea.Msg {
+// beginManifestFlow starts the two-server manifest dance and returns once the
+// servers are up: a githubFormReadyMsg carrying the form URL (for the running
+// view to display as a manual-open fallback on headless boxes) plus the wait
+// cmd that blocks on GitHub's callback, or a githubDoneMsg{err} if setup
+// failed before the servers could start. It mirrors cmd/piper/main.go's
+// githubSetup: a callback server catches GitHub's ?code=, a form server serves
+// an auto-submitting POST of the manifest, and the browser opens at the form.
+// It is exercised by the CLI's githubSetup tests + e2e; unit tests here drive
+// the state machine directly (see github_test.go), not this function.
+func beginManifestFlow(ctx context.Context, c API, org string) tea.Msg {
 	codeCh := make(chan string, 1)
 	cbLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return githubDoneMsg{err: err}
 	}
-	defer cbLn.Close()
 	redirect := "http://" + cbLn.Addr().String() + "/cb"
 
 	manifest, err := c.Manifest(redirect)
 	if err != nil {
+		cbLn.Close()
 		return githubDoneMsg{err: err}
 	}
 
@@ -165,7 +171,6 @@ func runManifestFlow(ctx context.Context, c API, org string) tea.Msg {
 		}
 	})}
 	go cbSrv.Serve(cbLn)
-	defer cbSrv.Close()
 
 	page := fmt.Sprintf(`<form id="f" action="%s" method="post">`+
 		`<input type="hidden" name="manifest" value='%s'></form>`+
@@ -173,6 +178,7 @@ func runManifestFlow(ctx context.Context, c API, org string) tea.Msg {
 		html.EscapeString(manifestActionURL(org)), html.EscapeString(manifest))
 	formLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		cbSrv.Close()
 		return githubDoneMsg{err: err}
 	}
 	formSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -180,16 +186,23 @@ func runManifestFlow(ctx context.Context, c API, org string) tea.Msg {
 		fmt.Fprint(w, page)
 	})}
 	go formSrv.Serve(formLn)
-	defer formSrv.Close()
 
-	_ = openBrowser("http://" + formLn.Addr().String())
+	formURL := "http://" + formLn.Addr().String()
+	_ = openBrowser(formURL)
 
-	select {
-	case code := <-codeCh:
-		return githubDoneMsg{err: c.ExchangeGitHub(code)}
-	case <-time.After(5 * time.Minute):
-		return githubDoneMsg{err: fmt.Errorf("timed out waiting for GitHub App approval")}
-	case <-ctx.Done():
-		return githubDoneMsg{err: ctx.Err()}
+	wait := func() tea.Msg {
+		defer cbSrv.Close()
+		defer formSrv.Close()
+		defer cbLn.Close()
+		defer formLn.Close()
+		select {
+		case code := <-codeCh:
+			return githubDoneMsg{err: c.ExchangeGitHub(code)}
+		case <-time.After(5 * time.Minute):
+			return githubDoneMsg{err: fmt.Errorf("timed out waiting for GitHub App approval")}
+		case <-ctx.Done():
+			return githubDoneMsg{err: ctx.Err()}
+		}
 	}
+	return githubFormReadyMsg{url: formURL, wait: wait}
 }

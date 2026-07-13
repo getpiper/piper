@@ -36,6 +36,15 @@ func TestGithubDoneErrorBanners(t *testing.T) {
 	}
 }
 
+func TestGithubFormReadyShowsURL(t *testing.T) {
+	// running view (post-start) should display the manual-open form URL.
+	v, _ := newGithubView().start()
+	next, _ := v.(githubView).Update(githubFormReadyMsg{url: "http://127.0.0.1:12345", wait: nil})
+	if !strings.Contains(next.(githubView).View(), "http://127.0.0.1:12345") {
+		t.Fatalf("running view should show the form URL, got:\n%s", next.(githubView).View())
+	}
+}
+
 func TestGKeyOpensGithub(t *testing.T) {
 	m := NewModel("pi4", "a", false, fakeAPI{}).WithDialer(fakeDialer(fakeAPI{}, "", false, nil))
 	next, cmd := m.Update(keyRunes('g'))

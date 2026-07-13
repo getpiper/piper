@@ -136,6 +136,15 @@ type (
 	// error banners in the github view.
 	githubDoneMsg struct{ err error }
 
+	// githubFormReadyMsg carries the local form URL once the manifest flow's
+	// servers are up, so the running github view can show a manual-open fallback
+	// for headless boxes where openBrowser fails. wait is the cmd that blocks on
+	// the GitHub callback and finishes the exchange (→ githubDoneMsg).
+	githubFormReadyMsg struct {
+		url  string
+		wait tea.Cmd
+	}
+
 	// githubStartMsg is the github view's "run it" intent; the root owns the
 	// client, so it launches the manifest flow.
 	githubStartMsg struct{ org string }

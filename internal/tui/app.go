@@ -194,7 +194,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch), popLevels: 1} }
 	case githubStartMsg:
 		org, c := msg.org, m.client
-		return m, func() tea.Msg { return runManifestFlow(context.Background(), c, org) }
+		return m, func() tea.Msg { return beginManifestFlow(context.Background(), c, org) }
 	case actionResultMsg:
 		if msg.err != nil {
 			next, _ := m.top().Update(errMsg{msg.err})
