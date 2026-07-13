@@ -1381,13 +1381,13 @@ Expected: PASS (the new test and the existing `?`-overlay tests).
 Run: `grep -n "#183\|#194\|Key discoverability" PROGRESS.md`
 Expected: shows the existing TUI phase lines to append near.
 
-Add a terse one-line entry beside the other TUI phase entries (matching the file's `[#N]`/`— #N` style), e.g.:
+Add a terse one-line entry beside the other TUI phase entries (matching the file's `[#N]`/`— #N` style):
 
 ```
-- ✅ Boxes view: switcher + add/edit/remove config editor over schema v2 — [#N](https://github.com/getpiper/piper/issues/N)
+- ✅ Boxes view: switcher + add/edit/remove config editor over schema v2 — [#198](https://github.com/getpiper/piper/issues/198)
 ```
 
-Replace `#N` with the phase-5 issue number once it is opened (the controller opens it at execution time; if unknown, use `#183` and note the phase). Keep it one line — detail lives in the issue.
+Keep it one line — detail lives in the issue.
 
 - [ ] **Step 6: Run the full verify gate**
 
