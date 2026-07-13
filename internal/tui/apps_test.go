@@ -88,3 +88,35 @@ func TestAppsViewNKeyPushesForm(t *testing.T) {
 		t.Fatalf("want the new-app form, got title %q", pm.view.title())
 	}
 }
+
+// a401 is a stand-in for *client.StatusError{Code:401} — the tui must classify
+// it without importing internal/client, so a local type satisfying the same
+// interface exercises isUnauthorized and the hint bar.
+type a401 struct{}
+
+func (a401) Error() string      { return "unauthorized" }
+func (a401) Unauthorized() bool { return true }
+
+func TestAppsUnauthorizedShowsLoginHint(t *testing.T) {
+	m := NewModel("pi4", "addr", false, fakeAPI{err: a401{}})
+	m = pump(t, m, m.refresh())
+	out := m.View()
+	if !strings.Contains(out, "press L") {
+		t.Fatalf("expected login hint, got:\n%s", out)
+	}
+	if strings.Contains(out, "⚠") {
+		t.Fatalf("401 should show the hint, not a raw error banner:\n%s", out)
+	}
+}
+
+func TestAppsNonAuthErrorStillBanners(t *testing.T) {
+	m := NewModel("pi4", "addr", false, fakeAPI{err: errors.New("dial tcp: refused")})
+	m = pump(t, m, m.refresh())
+	out := m.View()
+	if strings.Contains(out, "press L") {
+		t.Fatalf("a transport error must not show the login hint:\n%s", out)
+	}
+	if !strings.Contains(out, "⚠") {
+		t.Fatalf("expected an error banner, got:\n%s", out)
+	}
+}

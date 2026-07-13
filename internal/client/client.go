@@ -306,6 +306,11 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.Action, e.Status, e.Body)
 }
 
+// Unauthorized reports whether the server rejected the request as
+// unauthenticated (HTTP 401), letting callers tell a bad or absent token from
+// other HTTP errors and from transport errors (which are never a StatusError).
+func (e *StatusError) Unauthorized() bool { return e.Code == http.StatusUnauthorized }
+
 func responseError(action string, resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

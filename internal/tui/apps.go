@@ -73,7 +73,11 @@ func (v appsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (v appsView) View() string {
 	var b strings.Builder
 	if v.err != nil {
-		fmt.Fprintf(&b, " ⚠ %v\n\n", v.err)
+		if isUnauthorized(v.err) {
+			b.WriteString(" not logged in — press L to log in\n\n")
+		} else {
+			fmt.Fprintf(&b, " ⚠ %v\n\n", v.err)
+		}
 	}
 	if !v.loaded {
 		b.WriteString(" loading…")
