@@ -38,6 +38,10 @@ type fakeAPI struct {
 	stopErr   error
 	deleteErr error
 	linkErr   error
+
+	manifest    string
+	manifestErr error
+	exchangeErr error
 }
 
 func (f fakeAPI) ListApps() ([]api.App, error)                   { return f.apps, f.err }
@@ -79,6 +83,9 @@ func (f fakeAPI) LinkApp(name, repo, branch string) error {
 	}
 	return f.linkErr
 }
+
+func (f fakeAPI) Manifest(string) (string, error) { return f.manifest, f.manifestErr }
+func (f fakeAPI) ExchangeGitHub(string) error     { return f.exchangeErr }
 
 func keyRunes(r rune) tea.KeyMsg { return tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune{r}}) }
 func keyEnter() tea.KeyMsg       { return tea.KeyMsg(tea.Key{Type: tea.KeyEnter}) }

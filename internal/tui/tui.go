@@ -22,6 +22,8 @@ type API interface {
 	StopApp(name string) error
 	DeleteApp(name string) error
 	LinkApp(name, repo, branch string) error
+	Manifest(redirectURL string) (string, error)
+	ExchangeGitHub(code string) error
 }
 
 // Dialer builds a client for a saved box. cmd/piper supplies the real one
@@ -129,6 +131,14 @@ type (
 		id  string
 		err error
 	}
+
+	// githubDoneMsg is the manifest flow's outcome: nil pops back to apps, an
+	// error banners in the github view.
+	githubDoneMsg struct{ err error }
+
+	// githubStartMsg is the github view's "run it" intent; the root owns the
+	// client, so it launches the manifest flow.
+	githubStartMsg struct{ org string }
 )
 
 // pollResult is implemented by every message that is the outcome of a view's

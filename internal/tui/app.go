@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -127,6 +128,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, func() tea.Msg { return pushMsg{newLoginView(m.dial, m.box)} }
 				}
 				return m, nil
+			case "g":
+				if _, ok := m.top().(githubView); !ok {
+					return m, func() tea.Msg { return pushMsg{newGithubView()} }
+				}
+				return m, nil
 			}
 		}
 	case tickMsg:
@@ -186,6 +192,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case linkAppMsg:
 		name, repo, branch, c := msg.name, msg.repo, msg.branch, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch), popLevels: 1} }
+	case githubStartMsg:
+		org, c := msg.org, m.client
+		return m, func() tea.Msg { return runManifestFlow(context.Background(), c, org) }
 	case actionResultMsg:
 		if msg.err != nil {
 			next, _ := m.top().Update(errMsg{msg.err})
