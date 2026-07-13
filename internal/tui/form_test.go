@@ -38,30 +38,38 @@ func TestFormSubmitEmitsCreateIntent(t *testing.T) {
 }
 
 func TestFormValidationBanners(t *testing.T) {
-	// empty name
+	// empty name → name-required banner (assert the banner text, not the
+	// "name" field label, which is present unconditionally)
 	v := newFormView()
 	m, cmd := v.Update(keyEnter())
 	if cmd != nil {
 		t.Fatal("empty name must not submit")
 	}
-	if !strings.Contains(m.(formView).View(), "name") {
+	if !strings.Contains(m.(formView).View(), "name is required") {
 		t.Fatalf("want name-required banner:\n%s", m.(formView).View())
 	}
-	// bad port: clear the 8080 default and type letters
-	v = newFormView()
+	// resuming editing clears the stale banner
+	v = typeInto(m.(formView), "b")
+	if strings.Contains(v.View(), "name is required") {
+		t.Fatalf("banner should clear once the user resumes editing:\n%s", v.View())
+	}
+
+	// bad port → port banner. Give a valid name so submit reaches port
+	// validation (an empty name would short-circuit on the name error first).
+	v = typeInto(newFormView(), "blog")
 	m2, _ := v.Update(keyTab()) // focus port
 	v = m2.(formView)
-	// wipe default then type non-numeric
+	// wipe the 8080 default then type non-numeric
 	for range "8080" {
 		mm, _ := v.Update(keyBackspace())
 		v = mm.(formView)
 	}
-	v = typeInto(v, " abc")
+	v = typeInto(v, "abc")
 	m3, cmd := v.Update(keyEnter())
 	if cmd != nil {
 		t.Fatal("bad port must not submit")
 	}
-	if !strings.Contains(m3.(formView).View(), "port") {
+	if !strings.Contains(m3.(formView).View(), "port must be a number") {
 		t.Fatalf("want port banner:\n%s", m3.(formView).View())
 	}
 }

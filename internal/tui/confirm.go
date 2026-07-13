@@ -17,8 +17,9 @@ const (
 )
 
 // confirmView is a modal confirm pushed over the app-detail view: y/n for stop,
-// type-the-app-name for delete (matching the CLI's delete guard). On confirm it
-// emits the pending intent; "no"/mismatch cancels via the root.
+// type-the-app-name for delete (a stronger guard than the CLI's y/N, since
+// delete is irreversible). On confirm it emits the pending intent; "no"/mismatch
+// cancels via the root.
 type confirmView struct {
 	name   string
 	prompt string
@@ -83,6 +84,8 @@ func (v confirmView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.err = fmt.Errorf("that doesn't match %q", v.name)
 			return v, nil
 		}
+		// Any editing keystroke clears a stale mismatch banner.
+		v.err = nil
 		var cmd tea.Cmd
 		v.input, cmd = v.input.Update(msg)
 		return v, cmd

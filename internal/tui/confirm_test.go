@@ -37,6 +37,11 @@ func TestDeleteConfirmGatesOnTypedName(t *testing.T) {
 	if !strings.Contains(m.(confirmView).View(), "match") {
 		t.Fatalf("want mismatch banner:\n%s", m.(confirmView).View())
 	}
+	// resuming editing clears the stale mismatch banner
+	edited := typeInto2(m.(confirmView), "s")
+	if strings.Contains(edited.View(), "match") {
+		t.Fatalf("mismatch banner should clear once the user resumes typing:\n%s", edited.View())
+	}
 	// exact name: enter deletes
 	right := typeInto2(newDeleteConfirm("blog"), "blog")
 	_, cmd = right.Update(keyEnter())

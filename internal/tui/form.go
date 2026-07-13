@@ -78,6 +78,8 @@ func (v formView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v.submit()
 		}
 	}
+	// Any editing keystroke clears a stale validation banner.
+	v.err = nil
 	var cmd tea.Cmd
 	if v.focus == 0 {
 		v.name, cmd = v.name.Update(msg)
