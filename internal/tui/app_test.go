@@ -71,6 +71,8 @@ func (f fakeAPI) DeleteApp(name string) error {
 
 func keyRunes(r rune) tea.KeyMsg { return tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune{r}}) }
 func keyEnter() tea.KeyMsg       { return tea.KeyMsg(tea.Key{Type: tea.KeyEnter}) }
+func keyBackspace() tea.KeyMsg   { return tea.KeyMsg(tea.Key{Type: tea.KeyBackspace}) }
+func keyTab() tea.KeyMsg         { return tea.KeyMsg(tea.Key{Type: tea.KeyTab}) }
 
 // pump runs the poll cmd and feeds its message back, like the tea runtime.
 func pump(t *testing.T, m Model, cmd tea.Cmd) Model {
