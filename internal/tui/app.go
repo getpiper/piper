@@ -57,6 +57,21 @@ func (m Model) topCapturesText() bool {
 	return false
 }
 
+// footered is a view that offers a one-line key legend. The root renders it dim
+// between the body and the status bar; views without it render no footer.
+type footered interface{ footer() string }
+
+var footerStyle = lipgloss.NewStyle().Faint(true)
+
+// topFooter returns the dim key legend for the top view, or "" if it offers none.
+func (m Model) topFooter() string {
+	f, ok := m.top().(footered)
+	if !ok {
+		return ""
+	}
+	return footerStyle.Render(" " + f.footer())
+}
+
 // popN drops n views off the top of the stack without ever removing the root.
 func (m Model) popN(n int) Model {
 	if n > len(m.stack)-1 {
@@ -89,6 +104,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.refresh()
 			case "r":
 				return m, m.refresh()
+			case "?":
+				if _, ok := m.top().(helpView); !ok {
+					return m, func() tea.Msg { return pushMsg{helpView{}} }
+				}
+				return m, nil
 			}
 		}
 	case tickMsg:
@@ -162,7 +182,11 @@ func (m Model) View() string {
 		crumbs[i] = v.title()
 	}
 	header := lipgloss.NewStyle().Bold(true).Render(" piper ") + "· " + strings.Join(crumbs, " › ")
-	return header + "\n\n" + m.top().View() + "\n\n" + m.statusBar()
+	body := header + "\n\n" + m.top().View()
+	if f := m.topFooter(); f != "" {
+		body += "\n\n" + f
+	}
+	return body + "\n\n" + m.statusBar()
 }
 
 func (m Model) statusBar() string {
