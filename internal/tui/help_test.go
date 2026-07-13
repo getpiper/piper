@@ -82,3 +82,12 @@ func TestHelpOverlayIncludesBoxesKeymap(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpOverlayIncludesWizardKeys(t *testing.T) {
+	out := helpView{}.View()
+	for _, want := range []string{"L login", "g github", "l link"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help overlay missing %q:\n%s", want, out)
+		}
+	}
+}

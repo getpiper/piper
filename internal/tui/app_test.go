@@ -19,6 +19,9 @@ type apiCalls struct {
 	deployDir  string
 	stopped    string
 	deleted    string
+	linkName   string
+	linkRepo   string
+	linkBranch string
 }
 
 type fakeAPI struct {
@@ -34,6 +37,11 @@ type fakeAPI struct {
 	deployErr error
 	stopErr   error
 	deleteErr error
+	linkErr   error
+
+	manifest    string
+	manifestErr error
+	exchangeErr error
 }
 
 func (f fakeAPI) ListApps() ([]api.App, error)                   { return f.apps, f.err }
@@ -68,6 +76,16 @@ func (f fakeAPI) DeleteApp(name string) error {
 	}
 	return f.deleteErr
 }
+
+func (f fakeAPI) LinkApp(name, repo, branch string) error {
+	if f.rec != nil {
+		f.rec.linkName, f.rec.linkRepo, f.rec.linkBranch = name, repo, branch
+	}
+	return f.linkErr
+}
+
+func (f fakeAPI) Manifest(string) (string, error) { return f.manifest, f.manifestErr }
+func (f fakeAPI) ExchangeGitHub(string) error     { return f.exchangeErr }
 
 func keyRunes(r rune) tea.KeyMsg { return tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune{r}}) }
 func keyEnter() tea.KeyMsg       { return tea.KeyMsg(tea.Key{Type: tea.KeyEnter}) }
