@@ -104,6 +104,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.refresh()
 			case "r":
 				return m, m.refresh()
+			case "?":
+				if _, ok := m.top().(helpView); !ok {
+					return m, func() tea.Msg { return pushMsg{helpView{}} }
+				}
+				return m, nil
 			}
 		}
 	case tickMsg:
