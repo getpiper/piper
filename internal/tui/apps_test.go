@@ -18,7 +18,7 @@ func fixtureApps() []api.App {
 }
 
 func TestAppsViewRendersRows(t *testing.T) {
-	m, _ := newAppsView().Update(appsLoadedMsg{apps: fixtureApps()})
+	m, _ := newAppsView(false).Update(appsLoadedMsg{apps: fixtureApps()})
 	out := m.View()
 	for _, want := range []string{
 		"NAME", "STATUS", "URL",
@@ -33,17 +33,17 @@ func TestAppsViewRendersRows(t *testing.T) {
 }
 
 func TestAppsViewLoadingAndEmptyStates(t *testing.T) {
-	if out := newAppsView().View(); !strings.Contains(out, "loading") {
+	if out := newAppsView(false).View(); !strings.Contains(out, "loading") {
 		t.Fatalf("want loading state, got:\n%s", out)
 	}
-	m, _ := newAppsView().Update(appsLoadedMsg{apps: nil})
+	m, _ := newAppsView(false).Update(appsLoadedMsg{apps: nil})
 	if out := m.View(); !strings.Contains(out, "no apps yet") {
 		t.Fatalf("want empty state, got:\n%s", out)
 	}
 }
 
 func TestAppsViewErrorBannerKeepsLastRows(t *testing.T) {
-	m, _ := newAppsView().Update(appsLoadedMsg{apps: fixtureApps()})
+	m, _ := newAppsView(false).Update(appsLoadedMsg{apps: fixtureApps()})
 	m, _ = m.Update(errMsg{err: errors.New("connection refused")})
 	out := m.View()
 	if !strings.Contains(out, "⚠") || !strings.Contains(out, "connection refused") {
@@ -55,5 +55,21 @@ func TestAppsViewErrorBannerKeepsLastRows(t *testing.T) {
 	m, _ = m.Update(appsLoadedMsg{apps: fixtureApps()})
 	if out := m.View(); strings.Contains(out, "⚠") {
 		t.Fatalf("banner must clear on next successful poll:\n%s", out)
+	}
+}
+
+func TestAppsViewCursorAndEnterPushesDetail(t *testing.T) {
+	m, _ := newAppsView(false).Update(appsLoadedMsg{apps: fixtureApps()})
+	m, _ = m.Update(keyRunes('j')) // cursor to "shop"
+	_, cmd := m.Update(keyEnter())
+	if cmd == nil {
+		t.Fatal("enter should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "shop" {
+		t.Fatalf("want detail for shop, got title %q", pm.view.title())
 	}
 }

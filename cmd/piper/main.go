@@ -96,10 +96,11 @@ var launchTUI = func(remote string, stderr io.Writer) int {
 	if cc, err := config.LoadClient(); err == nil {
 		addr = cc.Addr // env overrides + localhost default applied
 	}
-	if remote != "" {
-		box, addr = remote, "via relay"
+	relay := remote != ""
+	if relay {
+		addr = remote // the relay base domain
 	}
-	if err := tui.Run(box, addr, c); err != nil {
+	if err := tui.Run(box, addr, relay, c); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}

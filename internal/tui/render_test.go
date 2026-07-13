@@ -3,11 +3,14 @@ package tui
 import "testing"
 
 func TestAppURL(t *testing.T) {
-	if got := appURL(""); got != "" {
+	if got := appURL("", false); got != "" {
 		t.Fatalf("empty hostname: got %q", got)
 	}
-	if got := appURL("blog.piper.localhost"); got != "http://blog.piper.localhost" {
+	if got := appURL("blog.piper.localhost", false); got != "http://blog.piper.localhost" {
 		t.Fatalf("got %q", got)
+	}
+	if got := appURL("blog.example.dev", true); got != "https://blog.example.dev" {
+		t.Fatalf("relay got %q", got)
 	}
 }
 

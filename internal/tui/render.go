@@ -1,13 +1,31 @@
 package tui
 
-// appURL renders the URL a local/BYO box serves an app on. Empty hostname
-// (never deployed) yields "". Relay-terminated HTTPS rendering arrives with
-// the boxes work (phase 5).
-func appURL(hostname string) string {
+import (
+	"fmt"
+	"time"
+
+	"github.com/getpiper/piper/internal/api"
+)
+
+// appURL renders the URL a box serves an app on from its stored hostname. A
+// relay-terminated box serves over HTTPS; a local/BYO box over HTTP. Empty
+// hostname (never deployed) yields "".
+func appURL(hostname string, remote bool) string {
 	if hostname == "" {
 		return ""
 	}
+	if remote {
+		return "https://" + hostname
+	}
 	return "http://" + hostname
+}
+
+// pluralApps renders an app count for the status bar ("1 app", "3 apps").
+func pluralApps(n int) string {
+	if n == 1 {
+		return "1 app"
+	}
+	return fmt.Sprintf("%d apps", n)
 }
 
 // statusIcon maps a deployment status to its one-glyph indicator; "" (never
@@ -24,4 +42,40 @@ func statusIcon(status string) string {
 		return "○"
 	}
 	return "—"
+}
+
+// relTime renders a compact "time ago" for the deployments table.
+func relTime(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	switch d := time.Since(t); {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// shortID trims a deployment id for table display.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// repoLine renders an app's source for the detail header.
+func repoLine(a api.App) string {
+	if a.Repo == "" {
+		return "(no repo)"
+	}
+	if a.Branch != "" {
+		return a.Repo + "@" + a.Branch
+	}
+	return a.Repo
 }
