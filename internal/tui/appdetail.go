@@ -33,7 +33,7 @@ func (v appDetailView) Init() tea.Cmd { return nil }
 func (v appDetailView) title() string { return v.name }
 
 func (v appDetailView) footer() string {
-	return "d deploy · s stop · x delete · ↵ logs · r refresh · esc back · ? help"
+	return "d deploy · s stop · x delete · l link · ↵ logs · r refresh · esc back · ? help"
 }
 
 func (v appDetailView) refresh(c API) tea.Cmd {
@@ -84,6 +84,8 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, func() tea.Msg { return pushMsg{newStopConfirm(v.name)} }
 		case "x":
 			return v, func() tea.Msg { return pushMsg{newDeleteConfirm(v.name)} }
+		case "l":
+			return v, func() tea.Msg { return pushMsg{newLinkForm(v.name)} }
 		}
 	}
 	return v, nil

@@ -106,6 +106,7 @@ Goal: bare `piper` in a TTY opens a full-screen control surface; every existing 
 - ✅ Actions: new-app form, deploy (confirm → live build), stop/delete confirms — [#194](https://github.com/getpiper/piper/issues/194)
 - ✅ Key discoverability: dim footer legend on nav views + `?` help overlay — [#196](https://github.com/getpiper/piper/issues/196)
 - ✅ Boxes view: switcher + add/edit/remove config editor over schema v2 — [#198](https://github.com/getpiper/piper/issues/198)
+- ✅ Wizards: login (LAN token, verify → save to current box), GitHub App setup, link repo; unauth hint on apps home — [#200](https://github.com/getpiper/piper/issues/200)
 
 ## Always-green gates
 

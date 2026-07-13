@@ -21,6 +21,9 @@ type API interface {
 	Deploy(name, srcDir string) (store.Deployment, error)
 	StopApp(name string) error
 	DeleteApp(name string) error
+	LinkApp(name, repo, branch string) error
+	Manifest(redirectURL string) (string, error)
+	ExchangeGitHub(code string) error
 }
 
 // Dialer builds a client for a saved box. cmd/piper supplies the real one
@@ -101,6 +104,9 @@ type (
 	}
 	stopAppMsg   struct{ name string }
 	deleteAppMsg struct{ name string }
+	// linkAppMsg is the link form's intent; the root runs LinkApp off the UI
+	// thread and reports via actionResultMsg (pop back to app detail on success).
+	linkAppMsg struct{ name, repo, branch string }
 
 	// actionResultMsg is a mutating action's outcome. On success the root pops
 	// popLevels views and refreshes; on error it banners the top overlay.
@@ -125,6 +131,23 @@ type (
 		id  string
 		err error
 	}
+
+	// githubDoneMsg is the manifest flow's outcome: nil pops back to apps, an
+	// error banners in the github view.
+	githubDoneMsg struct{ err error }
+
+	// githubFormReadyMsg carries the local form URL once the manifest flow's
+	// servers are up, so the running github view can show a manual-open fallback
+	// for headless boxes where openBrowser fails. wait is the cmd that blocks on
+	// the GitHub callback and finishes the exchange (→ githubDoneMsg).
+	githubFormReadyMsg struct {
+		url  string
+		wait tea.Cmd
+	}
+
+	// githubStartMsg is the github view's "run it" intent; the root owns the
+	// client, so it launches the manifest flow.
+	githubStartMsg struct{ org string }
 )
 
 // pollResult is implemented by every message that is the outcome of a view's

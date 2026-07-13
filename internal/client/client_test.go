@@ -522,3 +522,12 @@ func TestResponseErrorsCarryHTTPStatusCode(t *testing.T) {
 		t.Fatalf("Code = %d, want %d", se.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestStatusErrorUnauthorized(t *testing.T) {
+	if !(&StatusError{Code: http.StatusUnauthorized}).Unauthorized() {
+		t.Fatal("401 StatusError should report Unauthorized")
+	}
+	if (&StatusError{Code: http.StatusInternalServerError}).Unauthorized() {
+		t.Fatal("500 StatusError should not report Unauthorized")
+	}
+}
