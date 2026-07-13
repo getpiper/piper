@@ -19,6 +19,7 @@ type Model struct {
 	addr   string
 	remote bool
 	client API
+	dial   Dialer
 
 	stack         []view
 	loaded        bool // at least one successful poll
@@ -30,10 +31,17 @@ func NewModel(box, addr string, remote bool, c API) Model {
 	return Model{box: box, addr: addr, remote: remote, client: c, stack: []view{newAppsView(remote)}}
 }
 
+// WithDialer attaches the box-switch client factory and returns the model for
+// chaining. Kept separate from NewModel so existing call sites (and tests that
+// never switch boxes) stay four-argument.
+func (m Model) WithDialer(d Dialer) Model { m.dial = d; return m }
+
 // Run starts the interactive TUI against c, identified as box/addr in the
-// status bar. remote marks a relay-backed box (HTTPS URLs). It blocks until quit.
-func Run(box, addr string, remote bool, c API) error {
-	_, err := tea.NewProgram(NewModel(box, addr, remote, c), tea.WithAltScreen()).Run()
+// status bar. remote marks a relay-backed box (HTTPS URLs). dial builds clients
+// for the box switcher. It blocks until quit.
+func Run(box, addr string, remote bool, c API, dial Dialer) error {
+	m := NewModel(box, addr, remote, c).WithDialer(dial)
+	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -109,6 +117,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, func() tea.Msg { return pushMsg{helpView{}} }
 				}
 				return m, nil
+			case "t":
+				if _, ok := m.top().(boxesView); !ok {
+					return m, func() tea.Msg { return pushMsg{newBoxesView(m.dial)} }
+				}
+				return m, nil
 			}
 		}
 	case tickMsg:
@@ -119,6 +132,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 			m.stack[len(m.stack)-1] = seeded.(view)
 		}
+		return m, m.refresh()
+	case switchBoxMsg:
+		c, addr, remote, err := m.dial(msg.box)
+		if err != nil {
+			next, _ := m.top().Update(errMsg{err})
+			m.stack[len(m.stack)-1] = next.(view)
+			return m, nil
+		}
+		m.client, m.box, m.addr, m.remote = c, msg.box.Name, addr, remote
+		m.loaded, m.down = false, false
+		m.stack = []view{newAppsView(remote)}
+		if m.width > 0 {
+			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.stack[len(m.stack)-1] = seeded.(view)
+		}
+		return m, m.refresh()
+	case boxSavedMsg:
+		if msg.box.Name == m.box || msg.replacing == m.box {
+			return m.Update(switchBoxMsg{box: msg.box}) // current box changed: re-dial
+		}
+		m = m.popN(1)
+		return m, m.refresh()
+	case removeBoxMsg:
+		name := msg.name
+		return m, func() tea.Msg {
+			current, changed, err := removeBox(name)
+			if err != nil {
+				return errMsg{err}
+			}
+			return boxRemovedMsg{current: current, changed: changed}
+		}
+	case boxRemovedMsg:
+		if msg.changed {
+			return m.Update(switchBoxMsg{box: msg.current}) // current removed: switch to the promoted box
+		}
+		m = m.popN(1)
 		return m, m.refresh()
 	case createAppMsg:
 		name, port, c := msg.name, msg.port, m.client

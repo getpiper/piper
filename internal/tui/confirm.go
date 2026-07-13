@@ -38,6 +38,15 @@ func newStopConfirm(name string) confirmView {
 	}
 }
 
+func newRemoveBoxConfirm(name string) confirmView {
+	return confirmView{
+		name:   name,
+		prompt: fmt.Sprintf("Remove box %s? Its saved credentials are deleted from this machine.", name),
+		mode:   confirmYesNo,
+		intent: func(n string) tea.Msg { return removeBoxMsg{n} },
+	}
+}
+
 func newDeleteConfirm(name string) confirmView {
 	in := textinput.New()
 	in.Placeholder = name

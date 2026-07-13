@@ -6,6 +6,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -21,6 +22,11 @@ type API interface {
 	StopApp(name string) error
 	DeleteApp(name string) error
 }
+
+// Dialer builds a client for a saved box. cmd/piper supplies the real one
+// (LAN path); tests inject a fake. addr identifies the box in the status bar;
+// remote marks a relay-backed box (HTTPS app URLs).
+type Dialer func(config.Box) (c API, addr string, remote bool, err error)
 
 // view is a stack entry: a Bubble Tea model that refreshes its own data off the
 // UI thread and names itself for the breadcrumb. The root owns the stack; a
@@ -45,6 +51,46 @@ type (
 	logsLoadedMsg struct {
 		logs   string
 		status string
+	}
+
+	// boxesLoadedMsg carries the client config the boxes view renders. It is a
+	// local-config load, not a piperd poll, so it does not implement pollResult
+	// (the status bar keeps its last-known reachability while browsing boxes).
+	boxesLoadedMsg struct {
+		boxes   []config.Box
+		current string
+	}
+
+	// switchBoxMsg is the boxes view's connect intent; the root dials the box,
+	// swaps the active client, and resets the stack to a fresh apps view.
+	switchBoxMsg struct{ box config.Box }
+
+	// boxProbeMsg is one box's reachability probe result, rendered in the boxes
+	// view's STATUS column. Each box is probed by its own tea.Cmd, so a dead box
+	// resolves after its client timeout without blocking the others.
+	boxProbeMsg struct {
+		name      string
+		reachable bool
+	}
+
+	// boxSavedMsg is the box form's success outcome. The root pops back to the
+	// boxes view; if the saved box is the current one, it re-dials (its addr or
+	// token may have changed) via the same path as a switch. replacing is the
+	// box's prior name (empty for an add), used so the root also re-dials when
+	// an edit renamed the current box.
+	boxSavedMsg struct {
+		box       config.Box
+		replacing string
+	}
+
+	// removeBoxMsg is the remove confirm's intent; the root drops the box.
+	removeBoxMsg struct{ name string }
+
+	// boxRemovedMsg is a successful removal. If it changed the current box the
+	// root re-dials the promoted one; otherwise it pops back to the boxes view.
+	boxRemovedMsg struct {
+		current config.Box
+		changed bool
 	}
 
 	// Action intents: a mutating view emits one of these; the root owns the

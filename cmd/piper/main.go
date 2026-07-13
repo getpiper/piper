@@ -100,11 +100,17 @@ var launchTUI = func(remote string, stderr io.Writer) int {
 	if relay {
 		addr = remote // the relay base domain
 	}
-	if err := tui.Run(box, addr, relay, c); err != nil {
+	if err := tui.Run(box, addr, relay, c, dialBox); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
 	return 0
+}
+
+// dialBox builds a TUI client for an arbitrary saved box (LAN path), for the
+// in-TUI box switcher. Relay boxes are switched via the phase-6 wizard, not here.
+func dialBox(b config.Box) (tui.API, string, bool, error) {
+	return client.New(b.Addr, b.Token).WithTimeout(tuiRequestTimeout), b.Addr, false, nil
 }
 
 // login verifies token against the target (GET /v1/apps) and, on success,
