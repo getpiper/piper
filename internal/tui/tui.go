@@ -16,6 +16,10 @@ type API interface {
 	App(name string) (api.App, error)
 	Deployments(name string) ([]store.Deployment, error)
 	DeploymentLogs(name, id string) (string, error)
+	CreateApp(name string, port int) error
+	Deploy(name, srcDir string) (store.Deployment, error)
+	StopApp(name string) error
+	DeleteApp(name string) error
 }
 
 // view is a stack entry: a Bubble Tea model that refreshes its own data off the
@@ -41,6 +45,39 @@ type (
 	logsLoadedMsg struct {
 		logs   string
 		status string
+	}
+
+	// Action intents: a mutating view emits one of these; the root owns the
+	// client, runs the call off the UI thread, and reports the outcome.
+	createAppMsg struct {
+		name string
+		port int
+	}
+	stopAppMsg   struct{ name string }
+	deleteAppMsg struct{ name string }
+
+	// actionResultMsg is a mutating action's outcome. On success the root pops
+	// popLevels views and refreshes; on error it banners the top overlay.
+	actionResultMsg struct {
+		err       error
+		popLevels int
+	}
+
+	// popMsg pops n views off the stack (e.g. a y/n confirm answered "no").
+	popMsg struct{ n int }
+
+	// deployMsg is the deploy confirm's intent; the root kicks off Deploy.
+	deployMsg struct {
+		name string
+		cwd  string
+	}
+
+	// deployStartedMsg is the deploy kickoff's outcome. On success the root
+	// replaces the deploy confirm with a follow logs view on the new build.
+	deployStartedMsg struct {
+		app string
+		id  string
+		err error
 	}
 )
 

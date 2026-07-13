@@ -73,3 +73,18 @@ func TestAppsViewCursorAndEnterPushesDetail(t *testing.T) {
 		t.Fatalf("want detail for shop, got title %q", pm.view.title())
 	}
 }
+
+func TestAppsViewNKeyPushesForm(t *testing.T) {
+	m, _ := newAppsView(false).Update(appsLoadedMsg{apps: fixtureApps()})
+	_, cmd := m.Update(keyRunes('n'))
+	if cmd == nil {
+		t.Fatal("n should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "new app" {
+		t.Fatalf("want the new-app form, got title %q", pm.view.title())
+	}
+}

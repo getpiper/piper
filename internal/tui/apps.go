@@ -59,6 +59,8 @@ func (v appsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				name := v.apps[v.cursor].Name
 				return v, func() tea.Msg { return pushMsg{newAppDetailView(name, v.remote)} }
 			}
+		case "n":
+			return v, func() tea.Msg { return pushMsg{newFormView()} }
 		}
 	}
 	return v, nil
