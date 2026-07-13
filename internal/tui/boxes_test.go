@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/config"
 )
 
@@ -132,5 +133,52 @@ func TestRootSwitchFailureBannersAndKeepsBox(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "dial refused") {
 		t.Fatalf("switch error should banner in the boxes view:\n%s", m.View())
+	}
+}
+
+func TestBoxesRefreshEmitsProbePerRemoteBox(t *testing.T) {
+	v := newBoxesView(fakeDialer(fakeAPI{}, "", false, nil))
+	// current box (pi4) is not probed; blog and shop are.
+	vv, cmd := v.Update(boxesLoadedMsg{
+		boxes:   []config.Box{{Name: "pi4"}, {Name: "blog", Addr: "a"}, {Name: "shop", Addr: "b"}},
+		current: "pi4",
+	})
+	_ = vv
+	if cmd == nil {
+		t.Fatal("loading boxes should emit reachability probes")
+	}
+	msg := cmd() // tea.Batch aggregates into a BatchMsg of cmds
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("want tea.BatchMsg of probes, got %T", msg)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("want 2 probes (non-current, non-relay), got %d", len(batch))
+	}
+}
+
+func TestBoxProbeMsgFlipsRowStatus(t *testing.T) {
+	v := newBoxesView(fakeDialer(fakeAPI{}, "", false, nil))
+	vv, _ := v.Update(boxesLoadedMsg{boxes: []config.Box{{Name: "pi4"}, {Name: "blog", Addr: "a"}}, current: "pi4"})
+	v = vv.(boxesView)
+
+	vv, _ = v.Update(boxProbeMsg{name: "blog", reachable: true})
+	if out := vv.(boxesView).View(); !strings.Contains(out, "●") {
+		t.Fatalf("reachable box should show ●:\n%s", out)
+	}
+
+	vv, _ = v.Update(boxProbeMsg{name: "blog", reachable: false})
+	if out := vv.(boxesView).View(); !strings.Contains(out, "○") {
+		t.Fatalf("unreachable box should show ○:\n%s", out)
+	}
+}
+
+func TestBoxProbeReflectsDialerResult(t *testing.T) {
+	// a dialer whose client ListApps errors => unreachable
+	v := newBoxesView(fakeDialer(fakeAPI{err: errors.New("refused")}, "", false, nil))
+	probe := v.probe(config.Box{Name: "blog", Addr: "a"})
+	msg := probe().(boxProbeMsg)
+	if msg.name != "blog" || msg.reachable {
+		t.Fatalf("want blog unreachable, got %#v", msg)
 	}
 }

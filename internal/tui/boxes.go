@@ -19,9 +19,12 @@ type boxesView struct {
 	loaded  bool
 	cursor  int
 	err     error
+	reach   map[string]bool // box name -> last probe result; absent = probing
 }
 
-func newBoxesView(dial Dialer) boxesView { return boxesView{dial: dial} }
+func newBoxesView(dial Dialer) boxesView {
+	return boxesView{dial: dial, reach: map[string]bool{}}
+}
 
 func (v boxesView) Init() tea.Cmd { return nil }
 
@@ -46,13 +49,37 @@ func (v boxesView) refresh(API) tea.Cmd {
 // isRelay reports whether the box at i is relay-backed (not switchable here).
 func (v boxesView) isRelay(i int) bool { return v.boxes[i].RelayAPI != "" }
 
+// probe returns a cmd that dials box and calls ListApps; reachable is true iff
+// both succeed. One cmd per box keeps a dead box from blocking the others.
+func (v boxesView) probe(box config.Box) tea.Cmd {
+	dial := v.dial
+	return func() tea.Msg {
+		c, _, _, err := dial(box)
+		if err == nil {
+			_, err = c.ListApps()
+		}
+		return boxProbeMsg{name: box.Name, reachable: err == nil}
+	}
+}
+
 func (v boxesView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case boxesLoadedMsg:
 		v.boxes, v.current, v.loaded, v.err = msg.boxes, msg.current, true, nil
+		v.reach = map[string]bool{}
 		if v.cursor >= len(v.boxes) {
 			v.cursor = max(0, len(v.boxes)-1)
 		}
+		var probes []tea.Cmd
+		for i, box := range v.boxes {
+			if box.Name == v.current || v.isRelay(i) {
+				continue
+			}
+			probes = append(probes, v.probe(box))
+		}
+		return v, tea.Batch(probes...)
+	case boxProbeMsg:
+		v.reach[msg.name] = msg.reachable
 	case errMsg:
 		v.err = msg.err
 	case tea.KeyMsg:
@@ -95,16 +122,20 @@ func (v boxesView) View() string {
 	return b.String()
 }
 
-// status renders the STATUS column for row i: "current" for the active box, "—"
-// for relay boxes (not switchable here); reachability probes fill the rest in a
-// later task.
 func (v boxesView) status(i int) string {
 	switch {
 	case v.boxes[i].Name == v.current:
 		return "current"
 	case v.isRelay(i):
 		return "—"
+	}
+	reachable, probed := v.reach[v.boxes[i].Name]
+	switch {
+	case !probed:
+		return "…"
+	case reachable:
+		return "●"
 	default:
-		return ""
+		return "○"
 	}
 }

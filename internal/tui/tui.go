@@ -65,6 +65,14 @@ type (
 	// swaps the active client, and resets the stack to a fresh apps view.
 	switchBoxMsg struct{ box config.Box }
 
+	// boxProbeMsg is one box's reachability probe result, rendered in the boxes
+	// view's STATUS column. Each box is probed by its own tea.Cmd, so a dead box
+	// resolves after its client timeout without blocking the others.
+	boxProbeMsg struct {
+		name      string
+		reachable bool
+	}
+
 	// Action intents: a mutating view emits one of these; the root owns the
 	// client, runs the call off the UI thread, and reports the outcome.
 	createAppMsg struct {
