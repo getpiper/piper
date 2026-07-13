@@ -10,18 +10,64 @@ import (
 	"github.com/getpiper/piper/internal/store"
 )
 
+// apiCalls records the mutating calls a test drives, so assertions can check
+// the TUI passed the right arguments through to the client.
+type apiCalls struct {
+	createName string
+	createPort int
+	deployName string
+	deployDir  string
+	stopped    string
+	deleted    string
+}
+
 type fakeAPI struct {
 	apps []api.App
 	err  error
 	app  api.App
 	deps []store.Deployment
 	logs string
+
+	rec       *apiCalls
+	deployDep store.Deployment
+	createErr error
+	deployErr error
+	stopErr   error
+	deleteErr error
 }
 
 func (f fakeAPI) ListApps() ([]api.App, error)                   { return f.apps, f.err }
 func (f fakeAPI) App(string) (api.App, error)                    { return f.app, f.err }
 func (f fakeAPI) Deployments(string) ([]store.Deployment, error) { return f.deps, f.err }
 func (f fakeAPI) DeploymentLogs(string, string) (string, error)  { return f.logs, f.err }
+
+func (f fakeAPI) CreateApp(name string, port int) error {
+	if f.rec != nil {
+		f.rec.createName, f.rec.createPort = name, port
+	}
+	return f.createErr
+}
+
+func (f fakeAPI) Deploy(name, srcDir string) (store.Deployment, error) {
+	if f.rec != nil {
+		f.rec.deployName, f.rec.deployDir = name, srcDir
+	}
+	return f.deployDep, f.deployErr
+}
+
+func (f fakeAPI) StopApp(name string) error {
+	if f.rec != nil {
+		f.rec.stopped = name
+	}
+	return f.stopErr
+}
+
+func (f fakeAPI) DeleteApp(name string) error {
+	if f.rec != nil {
+		f.rec.deleted = name
+	}
+	return f.deleteErr
+}
 
 func keyRunes(r rune) tea.KeyMsg { return tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune{r}}) }
 func keyEnter() tea.KeyMsg       { return tea.KeyMsg(tea.Key{Type: tea.KeyEnter}) }
@@ -104,5 +150,77 @@ func TestModelBreadcrumbAndRelayBar(t *testing.T) {
 	}
 	if !strings.Contains(out, "https://blog.example.dev") {
 		t.Fatalf("relay app should render https:\n%s", out)
+	}
+}
+
+func TestRootRunsCreateStopDeleteIntents(t *testing.T) {
+	rec := &apiCalls{}
+	m := NewModel("b", "a", false, fakeAPI{rec: rec})
+
+	_, cmd := m.Update(createAppMsg{name: "blog", port: 9000})
+	res, ok := cmd().(actionResultMsg)
+	if !ok || res.err != nil || res.popLevels != 1 {
+		t.Fatalf("create: want actionResultMsg{nil,1}, got %#v (ok=%v)", cmd(), ok)
+	}
+	if rec.createName != "blog" || rec.createPort != 9000 {
+		t.Fatalf("create not passed through: %+v", rec)
+	}
+
+	_, cmd = m.Update(stopAppMsg{name: "blog"})
+	if res := cmd().(actionResultMsg); res.popLevels != 1 || rec.stopped != "blog" {
+		t.Fatalf("stop: got %#v rec=%+v", res, rec)
+	}
+
+	_, cmd = m.Update(deleteAppMsg{name: "blog"})
+	if res := cmd().(actionResultMsg); res.popLevels != 2 || rec.deleted != "blog" {
+		t.Fatalf("delete: want popLevels 2, got %#v rec=%+v", res, rec)
+	}
+}
+
+func TestRootActionResultSuccessPopsAndErrorBanners(t *testing.T) {
+	m := NewModel("b", "a", false, fakeAPI{})
+	// stack: apps -> detail -> detail (simulate depth 3)
+	m2, _ := m.Update(pushMsg{newAppDetailView("blog", false)})
+	m = m2.(Model)
+	m2, _ = m.Update(pushMsg{newAppDetailView("blog", false)})
+	m = m2.(Model)
+	if len(m.stack) != 3 {
+		t.Fatalf("setup: want depth 3, got %d", len(m.stack))
+	}
+
+	// success pops popLevels and does not exceed the root
+	m2, _ = m.Update(actionResultMsg{err: nil, popLevels: 2})
+	m = m2.(Model)
+	if len(m.stack) != 1 {
+		t.Fatalf("success: want popped to root (1), got %d", len(m.stack))
+	}
+
+	// error keeps the stack and banners the top view
+	m2, _ = m.Update(pushMsg{newAppDetailView("blog", false)})
+	m = m2.(Model)
+	m2, _ = m.Update(actionResultMsg{err: errors.New("name taken")})
+	m = m2.(Model)
+	if len(m.stack) != 2 {
+		t.Fatalf("error must not pop: got depth %d", len(m.stack))
+	}
+	if !strings.Contains(m.View(), "name taken") {
+		t.Fatalf("error banner missing:\n%s", m.View())
+	}
+}
+
+func TestRootPopMsg(t *testing.T) {
+	m := NewModel("b", "a", false, fakeAPI{})
+	m2, _ := m.Update(pushMsg{newAppDetailView("blog", false)})
+	m = m2.(Model)
+	m2, _ = m.Update(popMsg{1})
+	m = m2.(Model)
+	if len(m.stack) != 1 {
+		t.Fatalf("popMsg{1} should return to root, got depth %d", len(m.stack))
+	}
+	// popN never removes the root
+	m2, _ = m.Update(popMsg{5})
+	m = m2.(Model)
+	if len(m.stack) != 1 {
+		t.Fatalf("popMsg over-pop must keep root, got depth %d", len(m.stack))
 	}
 }
