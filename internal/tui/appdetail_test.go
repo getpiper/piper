@@ -63,3 +63,26 @@ func TestAppDetailCursorAndEnterPushesLogs(t *testing.T) {
 		t.Fatalf("want logs view pushed, got title %q", pm.view.title())
 	}
 }
+
+func TestAppDetailStopAndDeleteKeysPushConfirm(t *testing.T) {
+	base := newAppDetailView("blog", false)
+	for _, tc := range []struct {
+		key  rune
+		want string // substring the confirm prompt must contain
+	}{
+		{'s', "Stop blog"},
+		{'x', "Delete blog"},
+	} {
+		_, cmd := base.Update(keyRunes(tc.key))
+		if cmd == nil {
+			t.Fatalf("%c should emit a push command", tc.key)
+		}
+		pm, ok := cmd().(pushMsg)
+		if !ok {
+			t.Fatalf("%c: want pushMsg, got %T", tc.key, cmd())
+		}
+		if pm.view.title() != "confirm" || !strings.Contains(pm.view.View(), tc.want) {
+			t.Fatalf("%c: wrong confirm view: title=%q view=%s", tc.key, pm.view.title(), pm.view.View())
+		}
+	}
+}

@@ -69,6 +69,10 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				d := v.deps[v.cursor]
 				return v, func() tea.Msg { return pushMsg{newLogsView(v.name, d.ID, d.Status)} }
 			}
+		case "s":
+			return v, func() tea.Msg { return pushMsg{newStopConfirm(v.name)} }
+		case "x":
+			return v, func() tea.Msg { return pushMsg{newDeleteConfirm(v.name)} }
 		}
 	}
 	return v, nil
