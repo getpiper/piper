@@ -102,6 +102,7 @@ Goal: bare `piper` in a TTY opens a full-screen control surface; every existing 
 
 - ✅ Multi-box client config (schema v2, silent migration) — [#184](https://github.com/getpiper/piper/issues/184)
 - ✅ TUI skeleton: bare-piper TTY entry, root model + view stack + 2s poll, status bar, read-only apps table — [#185](https://github.com/getpiper/piper/issues/185)
+- ✅ Drill-down: app detail + live deployments table, per-deployment log viewer with follow, breadcrumb navigation — [#191](https://github.com/getpiper/piper/issues/191)
 
 ## Always-green gates
 
