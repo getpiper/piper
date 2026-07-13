@@ -105,6 +105,11 @@ func (v boxesView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				boxes, orig := v.boxes, v.boxes[v.cursor]
 				return v, func() tea.Msg { return pushMsg{newBoxFormEdit(v.dial, boxes, orig)} }
 			}
+		case "x":
+			if len(v.boxes) > 0 {
+				name := v.boxes[v.cursor].Name
+				return v, func() tea.Msg { return pushMsg{newRemoveBoxConfirm(name)} }
+			}
 		}
 	}
 	return v, nil
@@ -172,4 +177,29 @@ func saveBox(box config.Box, replacing string) error {
 		cf.Current = box.Name
 	}
 	return config.SaveClientFile(cf)
+}
+
+// removeBox drops the box named name from the client config. If it was the
+// current box, the first remaining box is promoted and returned with
+// changed=true. Removing the last box is refused (the CLI always needs one).
+func removeBox(name string) (current config.Box, changed bool, err error) {
+	cf, err := config.LoadClientFile()
+	if err != nil {
+		return config.Box{}, false, err
+	}
+	if len(cf.Boxes) <= 1 {
+		return config.Box{}, false, fmt.Errorf("can't remove the last box")
+	}
+	kept := cf.Boxes[:0]
+	for _, b := range cf.Boxes {
+		if b.Name != name {
+			kept = append(kept, b)
+		}
+	}
+	cf.Boxes = kept
+	if cf.Current == name {
+		cf.Current = cf.Boxes[0].Name
+		current, changed = cf.Boxes[0], true
+	}
+	return current, changed, config.SaveClientFile(cf)
 }

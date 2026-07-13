@@ -78,6 +78,16 @@ type (
 	// token may have changed) via the same path as a switch.
 	boxSavedMsg struct{ box config.Box }
 
+	// removeBoxMsg is the remove confirm's intent; the root drops the box.
+	removeBoxMsg struct{ name string }
+
+	// boxRemovedMsg is a successful removal. If it changed the current box the
+	// root re-dials the promoted one; otherwise it pops back to the boxes view.
+	boxRemovedMsg struct {
+		current config.Box
+		changed bool
+	}
+
 	// Action intents: a mutating view emits one of these; the root owns the
 	// client, runs the call off the UI thread, and reports the outcome.
 	createAppMsg struct {

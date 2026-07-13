@@ -182,3 +182,76 @@ func TestBoxProbeReflectsDialerResult(t *testing.T) {
 		t.Fatalf("want blog unreachable, got %#v", msg)
 	}
 }
+
+func TestXOpensRemoveConfirm(t *testing.T) {
+	v := newBoxesView(fakeDialer(fakeAPI{}, "", false, nil))
+	vv, _ := v.Update(boxesLoadedMsg{boxes: []config.Box{{Name: "pi4"}, {Name: "blog", Addr: "a"}}, current: "pi4"})
+	v = vv.(boxesView)
+	vv, _ = v.Update(keyRunes('j')) // move to blog
+	v = vv.(boxesView)
+	_, cmd := v.Update(keyRunes('x'))
+	push, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("x should push a confirm, got %T", cmd())
+	}
+	if _, ok := push.view.(confirmView); !ok {
+		t.Fatalf("x should push confirmView, got %T", push.view)
+	}
+}
+
+func TestRemoveBoxDropsIt(t *testing.T) {
+	seedConfig(t, config.ClientFile{Boxes: []config.Box{{Name: "pi4"}, {Name: "blog"}}, Current: "pi4"})
+	current, changed, err := removeBox("blog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatalf("removing a non-current box should not change current: %+v", current)
+	}
+	cf, _ := config.LoadClientFile()
+	if len(cf.Boxes) != 1 || cf.Boxes[0].Name != "pi4" {
+		t.Fatalf("blog not removed: %+v", cf.Boxes)
+	}
+}
+
+func TestRemoveCurrentBoxPromotesFirst(t *testing.T) {
+	seedConfig(t, config.ClientFile{Boxes: []config.Box{{Name: "pi4"}, {Name: "blog"}}, Current: "pi4"})
+	current, changed, err := removeBox("pi4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || current.Name != "blog" {
+		t.Fatalf("removing current should promote blog, got changed=%v current=%+v", changed, current)
+	}
+	cf, _ := config.LoadClientFile()
+	if cf.Current != "blog" {
+		t.Fatalf("current not promoted on disk: %q", cf.Current)
+	}
+}
+
+func TestRemoveLastBoxRefused(t *testing.T) {
+	seedConfig(t, config.ClientFile{Boxes: []config.Box{{Name: "pi4"}}, Current: "pi4"})
+	if _, _, err := removeBox("pi4"); err == nil {
+		t.Fatal("removing the last box must be refused")
+	}
+	cf, _ := config.LoadClientFile()
+	if len(cf.Boxes) != 1 {
+		t.Fatalf("refused remove must not write: %+v", cf.Boxes)
+	}
+}
+
+func TestRootBoxRemovedNonCurrentPopsToBoxes(t *testing.T) {
+	m := NewModel("pi4", "a", false, fakeAPI{}).WithDialer(fakeDialer(fakeAPI{}, "", false, nil))
+	m2, _ := m.Update(pushMsg{newBoxesView(m.dial)})
+	m = m2.(Model)
+	m2, _ = m.Update(pushMsg{newRemoveBoxConfirm("blog")})
+	m = m2.(Model)
+	if len(m.stack) != 3 {
+		t.Fatalf("setup: want depth 3, got %d", len(m.stack))
+	}
+	m2, _ = m.Update(boxRemovedMsg{changed: false})
+	m = m2.(Model)
+	if len(m.stack) != 2 {
+		t.Fatalf("removed (non-current) should pop to boxes (depth 2), got %d", len(m.stack))
+	}
+}

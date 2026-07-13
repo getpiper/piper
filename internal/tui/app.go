@@ -154,6 +154,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m = m.popN(1)
 		return m, m.refresh()
+	case removeBoxMsg:
+		name := msg.name
+		return m, func() tea.Msg {
+			current, changed, err := removeBox(name)
+			if err != nil {
+				return errMsg{err}
+			}
+			return boxRemovedMsg{current: current, changed: changed}
+		}
+	case boxRemovedMsg:
+		if msg.changed {
+			return m.Update(switchBoxMsg{box: msg.current}) // current removed: switch to the promoted box
+		}
+		m = m.popN(1)
+		return m, m.refresh()
 	case createAppMsg:
 		name, port, c := msg.name, msg.port, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.CreateApp(name, port), popLevels: 1} }
