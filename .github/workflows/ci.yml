@@ -9,7 +9,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # `verify` is a required status check, so the job must always run and
       # report — a path-filtered trigger would leave docs-only PRs forever
@@ -33,7 +33,7 @@ jobs:
               - 'deploy/compose/**'
               - '.github/workflows/ci.yml'
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         if: steps.changes.outputs.code == 'true'
         with:
           go-version: "1.26"
