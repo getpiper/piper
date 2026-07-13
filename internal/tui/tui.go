@@ -21,6 +21,7 @@ type API interface {
 	Deploy(name, srcDir string) (store.Deployment, error)
 	StopApp(name string) error
 	DeleteApp(name string) error
+	LinkApp(name, repo, branch string) error
 }
 
 // Dialer builds a client for a saved box. cmd/piper supplies the real one
@@ -101,6 +102,9 @@ type (
 	}
 	stopAppMsg   struct{ name string }
 	deleteAppMsg struct{ name string }
+	// linkAppMsg is the link form's intent; the root runs LinkApp off the UI
+	// thread and reports via actionResultMsg (pop back to app detail on success).
+	linkAppMsg struct{ name, repo, branch string }
 
 	// actionResultMsg is a mutating action's outcome. On success the root pops
 	// popLevels views and refreshes; on error it banners the top overlay.

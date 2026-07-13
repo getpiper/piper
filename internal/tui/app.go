@@ -183,6 +183,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case deleteAppMsg:
 		name, c := msg.name, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.DeleteApp(name), popLevels: 2} }
+	case linkAppMsg:
+		name, repo, branch, c := msg.name, msg.repo, msg.branch, m.client
+		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch), popLevels: 1} }
 	case actionResultMsg:
 		if msg.err != nil {
 			next, _ := m.top().Update(errMsg{msg.err})
