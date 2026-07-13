@@ -226,3 +226,34 @@ func TestRootPopMsg(t *testing.T) {
 		t.Fatalf("popMsg over-pop must keep root, got depth %d", len(m.stack))
 	}
 }
+
+func TestNavViewsRenderFooterLegend(t *testing.T) {
+	// apps list (root) footer
+	f := fakeAPI{apps: []api.App{{App: store.App{Name: "blog"}, Status: "running"}}}
+	m := NewModel("pi4", "addr", false, f)
+	m = pump(t, m, m.refresh())
+	if out := m.View(); !strings.Contains(out, "n new") || !strings.Contains(out, "? help") {
+		t.Fatalf("apps-list footer missing keys:\n%s", out)
+	}
+
+	// app detail footer
+	m2, _ := m.Update(pushMsg{newAppDetailView("blog", false)})
+	m = m2.(Model)
+	m = pump(t, m, m.refresh())
+	out := m.View()
+	for _, want := range []string{"d deploy", "s stop", "x delete", "esc back", "? help"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("app-detail footer missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestModalViewsRenderNoFooterLegend(t *testing.T) {
+	m := NewModel("pi4", "addr", false, fakeAPI{})
+	// push the new-app form (a text-capturing modal, not footered)
+	m2, _ := m.Update(pushMsg{newFormView()})
+	m = m2.(Model)
+	if got := m.topFooter(); got != "" {
+		t.Fatalf("modal must have no footer, got %q", got)
+	}
+}

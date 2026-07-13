@@ -32,6 +32,10 @@ func (v appDetailView) Init() tea.Cmd { return nil }
 
 func (v appDetailView) title() string { return v.name }
 
+func (v appDetailView) footer() string {
+	return "d deploy · s stop · x delete · ↵ logs · r refresh · esc back · ? help"
+}
+
 func (v appDetailView) refresh(c API) tea.Cmd {
 	name := v.name
 	return func() tea.Msg {

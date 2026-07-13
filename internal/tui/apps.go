@@ -25,6 +25,8 @@ func (v appsView) title() string { return "apps" }
 
 func (v appsView) count() int { return len(v.apps) }
 
+func (v appsView) footer() string { return "n new · ↵ open · r refresh · q quit · ? help" }
+
 func (v appsView) refresh(c API) tea.Cmd {
 	return func() tea.Msg {
 		apps, err := c.ListApps()
