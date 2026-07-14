@@ -24,7 +24,8 @@ type Model struct {
 
 	stack         []view
 	loaded        bool // at least one successful poll
-	down          bool // last poll failed
+	down          bool // last poll failed (dial/timeout)
+	unauthorized  bool // last poll was rejected 401 — reachable, needs a token
 	width, height int
 
 	githubCancel context.CancelFunc // cancels the in-flight github manifest flow on leave
@@ -158,7 +159,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.client, m.box, m.addr, m.remote = c, msg.box.Name, addr, remote
-		m.loaded, m.down = false, false
+		m.loaded, m.down, m.unauthorized = false, false, false
 		m.stack = []view{newAppsView(remote)}
 		if m.width > 0 {
 			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -263,7 +264,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if pr.reachable() {
 			m.loaded = true
 		}
-		m.down = !pr.reachable()
+		// A 401 means the box is up and answering — an auth failure, not a
+		// dial failure. Keep it out of the "unreachable — retrying" path so
+		// the bar points the user at login instead of at ports/services.
+		m.unauthorized = false
+		if e, ok := msg.(errMsg); ok && isUnauthorized(e.err) {
+			m.down, m.unauthorized = false, true
+		} else {
+			m.down = !pr.reachable()
+		}
 	}
 	next, cmd := m.top().Update(msg)
 	m.stack[len(m.stack)-1] = next.(view)
@@ -286,6 +295,8 @@ func (m Model) View() string {
 func (m Model) statusBar() string {
 	loc := fmt.Sprintf("%s · %s", m.box, m.addr)
 	switch {
+	case m.unauthorized:
+		return fmt.Sprintf(" ○ %s · unauthorized — press L to log in", loc)
 	case m.down:
 		return fmt.Sprintf(" ○ %s · unreachable — retrying…", loc)
 	case !m.loaded:
