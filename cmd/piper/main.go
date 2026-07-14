@@ -186,7 +186,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	})
 	if remoteFlagSet {
 		switch args[0] {
-		case "version", "login", "connect":
+		case "version", "login", "connect", "agent":
 			fmt.Fprintf(stderr, "error: --remote does not apply to %q\n", args[0])
 			return 2
 		}
@@ -216,6 +216,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return connect(connectOpts{dataDir: *dataDir}, stdout, stderr)
+	case "agent":
+		return agent(args[1:], stdout, stderr)
 	case "create":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper create <name> [--port N]")
@@ -577,7 +579,7 @@ func confirmDelete(stdout io.Writer, name string) bool {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|delete|app|github> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|delete|app|github|agent> [args]")
 	fmt.Fprintln(w, "       piper                # no subcommand in a terminal: interactive TUI")
 	return 2
 }

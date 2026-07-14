@@ -27,6 +27,28 @@ via `CAP_NET_BIND_SERVICE` — no root. Edit `/etc/piper/piperd.env` to override
 or switch on relay mode. See the
 [end-to-end runbook](runbooks/git-deploy-e2e.md) for verification, logs, and teardown.
 
+## Run the agent on macOS (dev box)
+
+macOS is a **development** target: instead of a boot-surviving root service, piperd
+runs **rootless** as your user on high ports (`:8080`/`:8443`), toggled on and off by
+hand — no `sudo` to run it (only to drop the binary in `/usr/local/bin`). Install the
+binary and the shipped LaunchAgent:
+
+```bash
+sudo install -m 0755 bin/piperd /usr/local/bin/piperd
+install -m 0644 packaging/launchd/com.getpiper.piperd.plist \
+  ~/Library/LaunchAgents/com.getpiper.piperd.plist
+mkdir -p ~/.piper
+cp packaging/launchd/piperd.env.macos.example ~/.piper/piperd.env   # optional overrides
+piper agent up
+```
+
+The agent stores everything under `~/.piper/` (SQLite DB, Caddy data, logs at
+`~/.piper/piper{,.err}.log`) and serves apps at `http://<name>.piper.localhost:8080`.
+It is **not** a boot service — it's gone after a reboot; re-run `piper agent up`.
+Stop it with `piper agent down`; check it with `piper agent status`. This path is
+LAN-only; the relay/public-URL flow is Linux/Pi (systemd) only.
+
 ## Run piperd in Docker (Compose)
 
 Prefer to run `piperd` itself as a container instead of a systemd service? Build and
