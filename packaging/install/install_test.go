@@ -305,8 +305,8 @@ func TestRootlessAgentInstall(t *testing.T) {
 	assets := map[string][]byte{
 		fmt.Sprintf("piperd_%s_%s_%s.tar.gz", ver, osTok, archTok): tarGz(t, "piperd", "fake-piperd"),
 		fmt.Sprintf("piper_%s_%s_%s.tar.gz", ver, osTok, archTok):  tarGz(t, "piper", "fake-piper"),
-		"piperd.user.service": []byte("[Service]\nExecStart=%h/.local/bin/piperd\n"),
-		"piperd.env.example":  []byte("#PIPER_API_ADDR=127.0.0.1:8088\n"),
+		"piperd.user.service":     []byte("[Service]\nExecStart=%h/.local/bin/piperd\n"),
+		"piperd.env.user.example": []byte("#PIPER_API_ADDR=127.0.0.1:8088\n"),
 	}
 	srv := newReleaseServer(t, assets, nil)
 
@@ -388,14 +388,17 @@ func TestRootlessDocumentation(t *testing.T) {
 		filepath.Join("docs", "getting-started.md"): {
 			"piper agent up",
 			"sudo piper agent daemonize",
+			"in the foreground", // #211: journalctl --user may be empty
 		},
 		filepath.Join("docs", "manual-setup.md"): {
 			"packaging/systemd/piperd.user.service",
+			"packaging/systemd/piperd.env.user.example", // #211: rootless env template
 			"systemctl --user",
 		},
 		filepath.Join("docs", "runbooks", "git-deploy-e2e.md"): {
 			"piper agent status",
 			"journalctl --user -u piperd",
+			"in the foreground", // #211: foreground-run fallback
 		},
 	}
 	for name, wants := range docs {

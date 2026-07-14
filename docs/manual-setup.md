@@ -39,7 +39,7 @@ install -m 0755 bin/piper  ~/.local/bin/piper
 mkdir -p ~/.config/systemd/user ~/.piper
 install -m 0644 packaging/systemd/piperd.user.service \
   ~/.config/systemd/user/piperd.service
-cp packaging/systemd/piperd.env.example ~/.piper/piperd.env   # optional overrides
+cp packaging/systemd/piperd.env.user.example ~/.piper/piperd.env   # optional overrides
 systemctl --user daemon-reload
 piper agent up
 ```

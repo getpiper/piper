@@ -139,8 +139,8 @@ install_agent_rootless() { # install_agent_rootless OS ARCH TAG
 
 	mkdir -p "$HOME/.piper"
 	if [ ! -f "$HOME/.piper/piperd.env" ]; then
-		fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.env.example" \
-			"$HOME/.piper/piperd.env" || die "download failed: piperd.env.example"
+		fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.env.user.example" \
+			"$HOME/.piper/piperd.env" || die "download failed: piperd.env.user.example"
 	fi
 	echo "installed rootless piperd + piper $tag -> $prefix"
 

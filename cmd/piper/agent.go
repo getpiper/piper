@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed piperd.service
@@ -51,6 +52,36 @@ const userUnitName = "piperd"
 var systemctlRun = func(args ...string) (string, error) {
 	out, err := exec.Command("systemctl", args...).CombinedOutput()
 	return string(out), err
+}
+
+// activePollAttempts/activePollDelay bound how long waitActive watches a
+// just-started unit to prove it holds `active`; vars so tests run instantly.
+var (
+	activePollAttempts = 12
+	activePollDelay    = 150 * time.Millisecond
+)
+
+// waitActive reports whether the unit reaches and holds `active`, returning the
+// last state seen. A Type=simple unit reports `active` the instant ExecStart
+// forks, so one that immediately exits and enters Restart= backoff only shows
+// as `activating`/`failed`/`inactive` a moment later — so we poll and fail on
+// the first non-active sample rather than trusting the initial `active`. scope
+// is the systemctl scope prefix (nil for the system manager, {"--user"} for the
+// per-user one).
+func waitActive(scope ...string) (string, bool) {
+	args := append(append([]string{}, scope...), "is-active", userUnitName)
+	var state string
+	for i := 0; i < activePollAttempts; i++ {
+		if i > 0 {
+			time.Sleep(activePollDelay)
+		}
+		out, _ := systemctlRun(args...)
+		state = strings.TrimSpace(out)
+		if state != "active" {
+			return state, false
+		}
+	}
+	return state, true
 }
 
 // userUnitPath returns the installed systemd user-unit path; a var so tests can
@@ -144,6 +175,13 @@ func agentUpLinux(stdout, stderr io.Writer) int {
 	}
 	if out, err := systemctlRun("--user", "start", userUnitName); err != nil {
 		fmt.Fprintf(stderr, "error: systemctl --user start failed: %v\n%s", err, out)
+		return 1
+	}
+	// `systemctl start` returns before a Type=simple unit can fail, so confirm
+	// it actually stays up rather than crash-looping (e.g. a port already held
+	// by a leftover system piperd) (#211).
+	if state, ok := waitActive("--user"); !ok {
+		fmt.Fprintf(stderr, "error: piperd started but is not active (state: %s) — it may be crash-looping.\nCheck: systemctl --user status piperd (a leftover system piperd holding :8088 is a common cause — stop it with `sudo systemctl stop piperd`).\nSee startup logs: docs/getting-started.md (Rootless on Linux).\n", state)
 		return 1
 	}
 	fmt.Fprintln(stdout, "piperd started")
@@ -302,6 +340,14 @@ func agentDaemonize(stdout, stderr io.Writer) int {
 	}
 	if out, err := systemctlRun("enable", "--now", "piperd"); err != nil {
 		fmt.Fprintf(stderr, "error: systemctl enable --now piperd: %v\n%s", err, out)
+		return 1
+	}
+	// `enable --now` returns before a Type=simple unit can fail, so confirm the
+	// system service actually stays up. A rootless piperd still holding
+	// :2019/:8088 (when the best-effort teardown above could not reach the user
+	// manager) is the common cause of a crash-loop here (#211).
+	if state, ok := waitActive(); !ok {
+		fmt.Fprintf(stderr, "error: system piperd enabled but is not active (state: %s) — it may be crash-looping.\nCheck: systemctl status piperd. If the rootless service is still holding :2019/:8088, stop it: run `piper agent down` as %s.\n", state, sudoUser)
 		return 1
 	}
 	fmt.Fprintln(stdout, "piperd daemonized — system service on :80/:443, boot-surviving")

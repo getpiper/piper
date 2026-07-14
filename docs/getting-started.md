@@ -37,6 +37,22 @@ piper agent down          # stop it
 Apps are served at `http://<name>.piper.localhost:8080`. Your user must be able to
 reach a Docker socket — be in the `docker` group, or set `DOCKER_HOST`.
 
+**If `piper agent up` reports a crash-loop**, the startup error goes to the
+`systemd --user` journal, which minimal distros (e.g. Raspberry Pi OS) don't
+persist — so `journalctl --user -u piperd` can be empty. Run piperd
+in the foreground with the unit's environment to see the real error:
+
+```bash
+piper agent down
+XDG_DATA_HOME=~/.piper/piperd XDG_CONFIG_HOME=~/.piper/piperd \
+  PIPER_HTTP_ADDR=:8080 PIPER_HTTPS_ADDR=:8443 \
+  PIPER_CADDY_ADMIN=http://127.0.0.1:2020 ~/.local/bin/piperd
+```
+
+A `listen address … already held` error means another piperd (commonly a
+leftover system service) owns the port — stop it with `sudo systemctl stop
+piperd`.
+
 **Promote to a real daemon.** When you want a durable, boot-surviving service on
 `:80`/`:443` (a Pi, a home server), promote it:
 
