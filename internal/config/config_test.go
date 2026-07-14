@@ -415,3 +415,29 @@ func TestSaveClientMigratesLegacyFlatFileToV2(t *testing.T) {
 		t.Fatalf("file not rewritten in v2 form: %s", data)
 	}
 }
+
+func TestLoadListenDefaults(t *testing.T) {
+	t.Setenv("PIPER_DATA_DIR", t.TempDir())
+	t.Setenv("PIPER_HTTP_ADDR", "")
+	t.Setenv("PIPER_HTTPS_ADDR", "")
+	c := Load()
+	if c.HTTPAddr != ":80" {
+		t.Errorf("HTTPAddr = %q, want :80", c.HTTPAddr)
+	}
+	if c.HTTPSAddr != ":443" {
+		t.Errorf("HTTPSAddr = %q, want :443", c.HTTPSAddr)
+	}
+}
+
+func TestLoadListenOverride(t *testing.T) {
+	t.Setenv("PIPER_DATA_DIR", t.TempDir())
+	t.Setenv("PIPER_HTTP_ADDR", ":8080")
+	t.Setenv("PIPER_HTTPS_ADDR", ":8443")
+	c := Load()
+	if c.HTTPAddr != ":8080" {
+		t.Errorf("HTTPAddr = %q, want :8080", c.HTTPAddr)
+	}
+	if c.HTTPSAddr != ":8443" {
+		t.Errorf("HTTPSAddr = %q, want :8443", c.HTTPSAddr)
+	}
+}
