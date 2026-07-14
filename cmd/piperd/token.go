@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -22,61 +24,64 @@ func ownerOf(path string) (uid, gid int, err error) {
 	return int(st.Uid), int(st.Gid), nil
 }
 
-// dropToStateDirOwner switches the process to the uid/gid owning dir, so the
-// SQLite side files (-wal/-shm) this command creates stay reopenable by the
-// service's DynamicUser. A dir already owned by the current euid — including a
-// root-owned one before the service's first start, which systemd re-chowns on
-// start — is a no-op.
-func dropToStateDirOwner(dir string) error {
-	uid, gid, err := ownerOf(dir)
-	if err != nil {
-		return err
-	}
-	if uid == os.Geteuid() {
-		return nil
-	}
-	if err := syscall.Setgroups([]int{}); err != nil {
-		return fmt.Errorf("setgroups: %w", err)
-	}
-	if err := syscall.Setgid(gid); err != nil {
-		return fmt.Errorf("setgid %d: %w", gid, err)
-	}
-	if err := syscall.Setuid(uid); err != nil {
-		return fmt.Errorf("setuid %d: %w", uid, err)
+// stateOwner is the uid/gid that must own the token DB files so the service's
+// DynamicUser can reopen them (#134).
+type stateOwner struct{ uid, gid int }
+
+// chownDataFiles chowns the token DB and its SQLite side files to uid/gid, so a
+// DynamicUser service can reopen the -wal/-shm this command may create. Side
+// files absent after a checkpointed op are skipped.
+func chownDataFiles(dir string, uid, gid int) error {
+	for _, name := range []string{"piper.db", "piper.db-wal", "piper.db-shm"} {
+		if err := os.Chown(filepath.Join(dir, name), uid, gid); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
 	}
 	return nil
 }
 
 // resolveTokenDataDir picks the directory holding the DB `piperd token`
-// operates on. Explicit PIPER_DATA_DIR always wins; otherwise, on a
-// systemd-managed box, it targets the service's state dir — dropping this
-// process to the dir owner's uid/gid when root, and failing with the exact
-// sudo command to run when not — so the command can never silently write a
-// DB the running service ignores (#134). args is the token subcommand line,
-// echoed in that message.
-func resolveTokenDataDir(args []string) (string, error) {
+// operates on, and (on a systemd box) the owner its DB files must be chowned
+// back to. Explicit PIPER_DATA_DIR always wins; otherwise, on a systemd-managed
+// box, it targets the service's state dir, failing with the exact sudo command
+// to run when not root — so the command can never silently write a DB the
+// running service ignores (#134). args is the token subcommand line, echoed in
+// that message.
+//
+// It stays root rather than dropping to the dir owner: the shipped unit runs
+// DynamicUser with StateDirectory=, so systemd stores the real state under a
+// 0700 root-owned /var/lib/private and symlinks the state dir into it. Only
+// root can traverse that wrapper, so a dropped process cannot reach its own
+// state dir (#212). We instead operate as root and chown the created DB files
+// back to the dir owner afterward (see chownDataFiles), which keeps #134's
+// guarantee. A returned owner of nil means no chown is needed.
+func resolveTokenDataDir(args []string) (string, *stateOwner, error) {
 	if v := os.Getenv("PIPER_DATA_DIR"); v != "" {
-		return v, nil
+		return v, nil, nil
 	}
 	if !config.SystemManaged() {
-		return config.DefaultDataDir(), nil
+		return config.DefaultDataDir(), nil, nil
 	}
 	if _, err := os.Stat(config.SystemStateDir); os.IsNotExist(err) {
-		return "", fmt.Errorf("service data dir %s does not exist; start the service first: sudo systemctl start piperd", config.SystemStateDir)
+		return "", nil, fmt.Errorf("service data dir %s does not exist; start the service first: sudo systemctl start piperd", config.SystemStateDir)
 	} else if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if os.Geteuid() != 0 {
 		quoted := make([]string, len(args))
 		for i, a := range args {
 			quoted[i] = shellQuote(a)
 		}
-		return "", fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, strings.Join(quoted, " "))
+		return "", nil, fmt.Errorf("this box is systemd-managed and the service data dir %s needs root; run: sudo piperd token %s", config.SystemStateDir, strings.Join(quoted, " "))
 	}
-	if err := dropToStateDirOwner(config.SystemStateDir); err != nil {
-		return "", err
+	uid, gid, err := ownerOf(config.SystemStateDir)
+	if err != nil {
+		return "", nil, err
 	}
-	return config.SystemStateDir, nil
+	return config.SystemStateDir, &stateOwner{uid, gid}, nil
 }
 
 // shellQuote renders s as a single POSIX-shell word so the sudo hint above can

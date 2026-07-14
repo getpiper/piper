@@ -71,6 +71,8 @@ release:
   prerelease: auto
   extra_files:
     - glob: packaging/systemd/piperd.service
+    - glob: packaging/systemd/piperd.user.service
     - glob: packaging/systemd/piper-relay.service
     - glob: packaging/systemd/piperd.env.example
+    - glob: packaging/systemd/piperd.env.user.example
     - glob: install.sh

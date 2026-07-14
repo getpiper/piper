@@ -20,6 +20,54 @@ one), and runs `systemctl enable --now piperd`. Re-run any time to upgrade.
 Add `--rc` to install the latest release candidate instead of the latest stable
 release.
 
+### Rootless on Linux (dev boxes)
+
+Run the installer **without** `sudo` and you get a rootless dev agent — piperd
+runs as **you** on high ports (`:8080`/`:8443`) under `~/.piper`, managed by
+`systemctl --user`. No root, and on a headless box it does not survive a reboot
+(no login to start the user manager — re-run `piper agent up`).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+piper agent up            # start it (no sudo)
+piper agent status        # running / stopped / not installed
+piper agent down          # stop it
+```
+
+Apps are served at `http://<name>.piper.localhost:8080`. Your user must be able to
+reach a Docker socket — be in the `docker` group, or set `DOCKER_HOST`.
+
+**If `piper agent up` reports a crash-loop**, the startup error goes to the
+`systemd --user` journal, which minimal distros (e.g. Raspberry Pi OS) don't
+persist — so `journalctl --user -u piperd` can be empty. Run piperd
+in the foreground with the unit's environment to see the real error:
+
+```bash
+piper agent down
+XDG_DATA_HOME=~/.piper/piperd XDG_CONFIG_HOME=~/.piper/piperd \
+  PIPER_HTTP_ADDR=:8080 PIPER_HTTPS_ADDR=:8443 \
+  PIPER_CADDY_ADMIN=http://127.0.0.1:2020 ~/.local/bin/piperd
+```
+
+A `listen address … already held` error means another piperd (commonly a
+leftover system service) owns the port — stop it with `sudo systemctl stop
+piperd`.
+
+**Promote to a real daemon.** When you want a durable, boot-surviving service on
+`:80`/`:443` (a Pi, a home server), promote it:
+
+```bash
+sudo piper agent daemonize
+```
+
+This installs the systemd **system** service (as `curl | sudo sh` would) and stops
+the rootless one. It's a fresh durable install — your rootless `~/.piper` apps are
+not migrated; redeploy them.
+
+> If `sudo piper agent daemonize` reports `command not found`, `sudo` has dropped
+> `~/.local/bin` from `PATH` (its `secure_path`); run it as
+> `sudo ~/.local/bin/piper agent daemonize`.
+
 Install just the CLI (Linux or macOS) — for driving `piperd` from another
 machine, e.g. your laptop and a Pi on the same LAN:
 

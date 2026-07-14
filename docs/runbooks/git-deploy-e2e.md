@@ -352,6 +352,35 @@ sudo systemctl clean --what=state piper-relay
 
 ---
 
+## Linux (rootless user agent)
+
+On a dev box the agent can run rootless via `systemctl --user`:
+
+```bash
+piper agent status                 # running / stopped / not installed
+journalctl --user -u piperd -f     # agent logs
+piper agent down                   # stop it
+```
+
+**If `journalctl --user -u piperd` is empty:** the `systemd --user` journal is
+not persisted by default on minimal distros (e.g. Raspberry Pi OS), so a
+crash-looping agent leaves no entries there. Run piperd in the foreground with
+the user unit's environment to see the real startup error:
+
+```bash
+piper agent down
+XDG_DATA_HOME=~/.piper/piperd XDG_CONFIG_HOME=~/.piper/piperd \
+  PIPER_HTTP_ADDR=:8080 PIPER_HTTPS_ADDR=:8443 \
+  PIPER_CADDY_ADMIN=http://127.0.0.1:2020 ~/.local/bin/piperd
+```
+
+A `listen address … already held` error means another piperd (often a leftover
+system service) owns the port — stop it with `sudo systemctl stop piperd`. To
+persist the user journal instead, enable lingering (`loginctl enable-linger
+$USER`) with journald `Storage=persistent`.
+
+---
+
 ## macOS (rootless launchd agent)
 
 On a Mac dev box the agent runs rootless via launchd (see
