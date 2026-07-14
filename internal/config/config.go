@@ -15,6 +15,8 @@ type Config struct {
 	DataDir     string // directory for the SQLite file
 	BaseDomain  string // apps served at <name>.<BaseDomain>
 	CaddyAdmin  string // Caddy admin API base URL
+	HTTPAddr    string // embedded Caddy HTTP listen address (default :80)
+	HTTPSAddr   string // embedded Caddy HTTPS listen address (default :443)
 
 	RelayAddr   string // relay tunnel endpoint; empty ⇒ LAN-only (Plan 1)
 	RelayToken  string // enrollment token presented to the relay
@@ -50,6 +52,8 @@ func Load() Config {
 		DataDir:     dataDir,
 		BaseDomain:  firstNonEmpty(os.Getenv("PIPER_BASE_DOMAIN"), rf.BaseDomain, "piper.localhost"),
 		CaddyAdmin:  env("PIPER_CADDY_ADMIN", "http://127.0.0.1:2019"),
+		HTTPAddr:    env("PIPER_HTTP_ADDR", ":80"),
+		HTTPSAddr:   env("PIPER_HTTPS_ADDR", ":443"),
 
 		RelayAddr:   firstNonEmpty(os.Getenv("PIPER_RELAY_ADDR"), rf.RelayAddr),
 		RelayToken:  firstNonEmpty(os.Getenv("PIPER_RELAY_TOKEN"), rf.RelayToken),

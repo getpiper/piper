@@ -207,9 +207,9 @@ func main() {
 	if os.Getenv("PIPER_SKIP_CADDY") == "" {
 		opts := []caddy.Option{}
 		if cfg.RelayAddr != "" && !cfg.Terminated {
-			opts = append(opts, caddy.WithHTTPS(":443"))
+			opts = append(opts, caddy.WithHTTPS(cfg.HTTPSAddr))
 		}
-		mgr, err = caddy.StartManager(cfg.CaddyAdmin, ":80", opts...)
+		mgr, err = caddy.StartManager(cfg.CaddyAdmin, cfg.HTTPAddr, opts...)
 		if err != nil {
 			log.Fatalf("caddy: %v", err)
 		}
