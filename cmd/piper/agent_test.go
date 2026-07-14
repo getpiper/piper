@@ -345,3 +345,30 @@ func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
 		t.Errorf("env clobbered: got %q", string(b))
 	}
 }
+
+func TestCopyFileOverwritesAndSetsMode(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	if err := os.WriteFile(src, []byte("NEW"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing dst with different content and a restrictive mode: copyFile
+	// removes then recreates, so both content and mode reflect the copy.
+	if err := os.WriteFile(dst, []byte("OLD"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(src, dst, 0o755); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "NEW" {
+		t.Errorf("content = %q, want NEW", string(b))
+	}
+	fi, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Errorf("mode = %o, want 755", fi.Mode().Perm())
+	}
+}

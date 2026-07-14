@@ -24,7 +24,8 @@ release.
 
 Run the installer **without** `sudo` and you get a rootless dev agent — piperd
 runs as **you** on high ports (`:8080`/`:8443`) under `~/.piper`, managed by
-`systemctl --user`. No root, and it's gone after a reboot (re-run `piper agent up`).
+`systemctl --user`. No root, and on a headless box it does not survive a reboot
+(no login to start the user manager — re-run `piper agent up`).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
@@ -46,6 +47,10 @@ sudo piper agent daemonize
 This installs the systemd **system** service (as `curl | sudo sh` would) and stops
 the rootless one. It's a fresh durable install — your rootless `~/.piper` apps are
 not migrated; redeploy them.
+
+> If `sudo piper agent daemonize` reports `command not found`, `sudo` has dropped
+> `~/.local/bin` from `PATH` (its `secure_path`); run it as
+> `sudo ~/.local/bin/piper agent daemonize`.
 
 Install just the CLI (Linux or macOS) — for driving `piperd` from another
 machine, e.g. your laptop and a Pi on the same LAN:

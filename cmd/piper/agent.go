@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -310,6 +311,12 @@ func agentDaemonize(stdout, stderr io.Writer) int {
 func copyFile(src, dst string, mode os.FileMode) error {
 	b, err := os.ReadFile(src)
 	if err != nil {
+		return err
+	}
+	// Remove any existing file first: WriteFile applies mode only on create, and
+	// writing in place to a running binary fails with ETXTBSY. Removing then
+	// recreating dodges both (re-running daemonize over a live system piperd).
+	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return os.WriteFile(dst, b, mode)
