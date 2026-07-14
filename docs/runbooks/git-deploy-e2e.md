@@ -352,6 +352,19 @@ sudo systemctl clean --what=state piper-relay
 
 ---
 
+## macOS (rootless launchd agent)
+
+On a Mac dev box the agent runs rootless via launchd (see
+[manual setup](../manual-setup.md#run-the-agent-on-macos-dev-box)):
+
+```bash
+piper agent status          # running / stopped / not installed
+tail -f ~/.piper/piper.log  # agent logs (errors in ~/.piper/piper.err.log)
+piper agent down            # stop it
+```
+
+---
+
 ## Appendix A — local loopback smoke test
 
 No domain, no VPS, no GitHub — just proves the relay→tunnel→TLS→container plumbing

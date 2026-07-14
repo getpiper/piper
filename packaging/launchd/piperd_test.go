@@ -2,6 +2,7 @@ package launchd
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,39 @@ func TestPiperdEnvMacosExample(t *testing.T) {
 	for _, s := range []string{"PIPER_API_ADDR", "PIPER_BASE_DOMAIN", "DOCKER_HOST"} {
 		if !strings.Contains(env, s) {
 			t.Errorf("env example missing %q", s)
+		}
+	}
+}
+
+func repositoryFile(t *testing.T, parts ...string) string {
+	t.Helper()
+	path := filepath.Join(append([]string{"..", ".."}, parts...)...)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestPiperdLaunchdDocumentation(t *testing.T) {
+	manual := repositoryFile(t, "docs", "manual-setup.md")
+	for _, s := range []string{
+		"packaging/launchd/com.getpiper.piperd.plist",
+		"piper agent up",
+	} {
+		if !strings.Contains(manual, s) {
+			t.Errorf("docs/manual-setup.md missing %q", s)
+		}
+	}
+
+	runbook := repositoryFile(t, "docs", "runbooks", "git-deploy-e2e.md")
+	for _, s := range []string{
+		"piper agent status",
+		"~/.piper/piper.log",
+		"piper agent down",
+	} {
+		if !strings.Contains(runbook, s) {
+			t.Errorf("runbook missing %q", s)
 		}
 	}
 }
