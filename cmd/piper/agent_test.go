@@ -198,3 +198,150 @@ func TestAgentUsage(t *testing.T) {
 		t.Errorf("stderr = %q", errb.String())
 	}
 }
+
+func TestEmbeddedSystemFilesMatchCanonical(t *testing.T) {
+	for _, name := range []string{"piperd.service", "piperd.env.example"} {
+		got, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(filepath.Join("..", "..", "packaging", "systemd", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("cmd/piper/%s differs from packaging/systemd/%s — re-copy it", name, name)
+		}
+	}
+}
+
+func TestDaemonizeNeedsRoot(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldEUID := agentEUID
+	agentEUID = func() int { return 1000 }
+	defer func() { agentEUID = oldEUID }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "sudo") {
+		t.Errorf("stderr = %q", errb.String())
+	}
+}
+
+func TestDaemonizeNeedsSudoUser(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+	t.Setenv("SUDO_USER", "")
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "SUDO_USER") {
+		t.Errorf("stderr = %q", errb.String())
+	}
+}
+
+func TestDaemonizePromotes(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+	t.Setenv("SUDO_USER", "alice")
+
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "piperd"), []byte("PIPERD-BIN"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldHome := userHomeDir
+	userHomeDir = func(u string) (string, error) { return home, nil }
+	defer func() { userHomeDir = oldHome }()
+
+	binDir, unitDir, envDir := t.TempDir(), t.TempDir(), t.TempDir()
+	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
+	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
+	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
+
+	var calls [][]string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { calls = append(calls, args); return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	// user teardown, daemon-reload, enable --now
+	joined := ""
+	for _, c := range calls {
+		joined += strings.Join(c, " ") + "\n"
+	}
+	for _, want := range []string{
+		"--user --machine=alice@.host disable --now piperd",
+		"daemon-reload",
+		"enable --now piperd",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing systemctl call %q; got:\n%s", want, joined)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(binDir, "piperd")); string(b) != "PIPERD-BIN" {
+		t.Errorf("piperd not installed to system bindir; got %q", string(b))
+	}
+	if _, err := os.Stat(filepath.Join(unitDir, "piperd.service")); err != nil {
+		t.Errorf("system unit not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(envDir, "piperd.env")); err != nil {
+		t.Errorf("env not seeded: %v", err)
+	}
+	if !strings.Contains(out.String(), "daemonized") {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+	t.Setenv("SUDO_USER", "alice")
+
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755)
+	os.WriteFile(filepath.Join(home, ".local", "bin", "piperd"), []byte("x"), 0o755)
+	oldHome := userHomeDir
+	userHomeDir = func(u string) (string, error) { return home, nil }
+	defer func() { userHomeDir = oldHome }()
+
+	binDir, unitDir, envDir := t.TempDir(), t.TempDir(), t.TempDir()
+	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
+	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
+	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
+
+	edited := "PIPER_BASE_DOMAIN=example.com\n"
+	if err := os.WriteFile(filepath.Join(envDir, "piperd.env"), []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(envDir, "piperd.env")); string(b) != edited {
+		t.Errorf("env clobbered: got %q", string(b))
+	}
+}
