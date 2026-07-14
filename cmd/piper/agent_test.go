@@ -35,9 +35,18 @@ func TestAgentUpLinuxStarts(t *testing.T) {
 	userUnitPath = func() (string, error) { return unit, nil }
 	defer func() { userUnitPath = oldPath }()
 
-	var gotArgs []string
+	defer fastPoll(t)()
+	var startArgs []string
 	oldRun := systemctlRun
-	systemctlRun = func(args ...string) (string, error) { gotArgs = args; return "", nil }
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 2 && args[1] == "start" {
+			startArgs = args
+		}
+		if len(args) >= 2 && args[1] == "is-active" {
+			return "active", nil // stays up
+		}
+		return "", nil
+	}
 	defer func() { systemctlRun = oldRun }()
 
 	var out, errb bytes.Buffer
@@ -45,11 +54,56 @@ func TestAgentUpLinuxStarts(t *testing.T) {
 		t.Fatalf("code = %d, stderr = %s", code, errb.String())
 	}
 	want := []string{"--user", "start", "piperd"}
-	if strings.Join(gotArgs, " ") != strings.Join(want, " ") {
-		t.Errorf("args = %v, want %v", gotArgs, want)
+	if strings.Join(startArgs, " ") != strings.Join(want, " ") {
+		t.Errorf("start args = %v, want %v", startArgs, want)
 	}
 	if !strings.Contains(out.String(), "started") {
 		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+// fastPoll zeroes waitActive's inter-poll delay so readiness-check tests don't
+// sleep; it returns a restore func for defer.
+func fastPoll(t *testing.T) func() {
+	t.Helper()
+	old := activePollDelay
+	activePollDelay = 0
+	return func() { activePollDelay = old }
+}
+
+func TestAgentUpLinuxReportsCrashLoop(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+
+	dir := t.TempDir()
+	unit := filepath.Join(dir, "piperd.service")
+	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := userUnitPath
+	userUnitPath = func() (string, error) { return unit, nil }
+	defer func() { userUnitPath = oldPath }()
+
+	defer fastPoll(t)()
+	oldRun := systemctlRun
+	// start succeeds, but is-active reports the unit fell into Restart= backoff.
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 2 && args[1] == "is-active" {
+			return "activating\n", nil
+		}
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1 (stderr=%q)", code, errb.String())
+	}
+	if strings.Contains(out.String(), "started") {
+		t.Errorf("must not report success when crash-looping: %q", out.String())
+	}
+	if !strings.Contains(errb.String(), "activating") || !strings.Contains(errb.String(), "crash-looping") {
+		t.Errorf("stderr should name the state and the crash-loop: %q", errb.String())
 	}
 }
 
@@ -272,9 +326,16 @@ func TestDaemonizePromotes(t *testing.T) {
 	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
 	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
 
+	defer fastPoll(t)()
 	var calls [][]string
 	oldRun := systemctlRun
-	systemctlRun = func(args ...string) (string, error) { calls = append(calls, args); return "", nil }
+	systemctlRun = func(args ...string) (string, error) {
+		calls = append(calls, args)
+		if len(args) >= 1 && args[0] == "is-active" {
+			return "active", nil // system service stays up
+		}
+		return "", nil
+	}
 	defer func() { systemctlRun = oldRun }()
 
 	var out, errb bytes.Buffer
@@ -333,8 +394,14 @@ func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(envDir, "piperd.env"), []byte(edited), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	defer fastPoll(t)()
 	oldRun := systemctlRun
-	systemctlRun = func(args ...string) (string, error) { return "", nil }
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 1 && args[0] == "is-active" {
+			return "active", nil
+		}
+		return "", nil
+	}
 	defer func() { systemctlRun = oldRun }()
 
 	var out, errb bytes.Buffer
@@ -343,6 +410,50 @@ func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(envDir, "piperd.env")); string(b) != edited {
 		t.Errorf("env clobbered: got %q", string(b))
+	}
+}
+
+func TestDaemonizeReportsCrashLoop(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+	t.Setenv("SUDO_USER", "alice")
+
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755)
+	os.WriteFile(filepath.Join(home, ".local", "bin", "piperd"), []byte("x"), 0o755)
+	oldHome := userHomeDir
+	userHomeDir = func(u string) (string, error) { return home, nil }
+	defer func() { userHomeDir = oldHome }()
+
+	binDir, unitDir, envDir := t.TempDir(), t.TempDir(), t.TempDir()
+	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
+	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
+	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
+
+	defer fastPoll(t)()
+	oldRun := systemctlRun
+	// enable --now succeeds, but the system service never reaches active — e.g.
+	// a rootless piperd the machined teardown could not reach still holds :2019.
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 1 && args[0] == "is-active" {
+			return "activating\n", nil
+		}
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1 (stderr=%q)", code, errb.String())
+	}
+	if strings.Contains(out.String(), "daemonized") {
+		t.Errorf("must not report success when the system service isn't active: %q", out.String())
+	}
+	if !strings.Contains(errb.String(), "not active") || !strings.Contains(errb.String(), "piper agent down") {
+		t.Errorf("stderr should flag the failure and the remedy: %q", errb.String())
 	}
 }
 

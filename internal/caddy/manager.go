@@ -113,7 +113,7 @@ func preflightListen(addrs []string) error {
 	for _, addr := range addrs {
 		l, err := net.Listen("tcp", addr)
 		if err != nil {
-			return fmt.Errorf("listen address %s is already held by another process (a stray caddy?) — piperd would start but receive no traffic: %w", addr, err)
+			return fmt.Errorf("listen address %s is already held by another process (another piperd instance, or a stray caddy?) — piperd would start but receive no traffic; stop the other one first (`systemctl --user stop piperd` for a rootless instance, `sudo systemctl stop piperd` for the system service): %w", addr, err)
 		}
 		l.Close()
 	}
