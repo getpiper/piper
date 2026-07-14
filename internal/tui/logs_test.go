@@ -45,6 +45,16 @@ func TestLogsTailAppendAndAutoStop(t *testing.T) {
 	}
 }
 
+func TestLogsFollowAdoptsRotatedEqualLengthTail(t *testing.T) {
+	v := newLogsView("blog", "dep-123456789abc", "building")
+	m, _ := v.Update(logsLoadedMsg{logs: "[log truncated]\nold tail\n", status: "building"})
+	m, _ = m.Update(logsLoadedMsg{logs: "[log truncated]\nnew tail\n", status: "building"})
+
+	if got := m.(logsView).logs; got != "[log truncated]\nnew tail\n" {
+		t.Fatalf("rotated equal-length tail was not adopted: %q", got)
+	}
+}
+
 func TestLogsViewShowsContextAndFollowTag(t *testing.T) {
 	v := newLogsView("blog", "dep-123456789abc", "building")
 	m, _ := v.Update(logsLoadedMsg{logs: "hello\n", status: "building"})
