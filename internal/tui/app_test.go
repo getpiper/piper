@@ -123,6 +123,24 @@ func TestModelPollFailureShowsUnreachable(t *testing.T) {
 	}
 }
 
+func TestModelUnauthorizedShowsAuthStateNotUnreachable(t *testing.T) {
+	m := NewModel("default", "http://127.0.0.1:8088", false, fakeAPI{err: a401{}})
+	m = pump(t, m, m.refresh())
+	out := m.View()
+	if strings.Contains(out, "unreachable") {
+		t.Fatalf("a 401 must not render as unreachable:\n%s", out)
+	}
+	if !strings.Contains(out, "unauthorized") || !strings.Contains(out, "log in") {
+		t.Fatalf("want an auth state pointing at login, got:\n%s", out)
+	}
+	// authenticating clears it: a later successful poll returns to ●.
+	m.client = fakeAPI{apps: nil}
+	m = pump(t, m, m.refresh())
+	if out := m.View(); !strings.Contains(out, "● default") || strings.Contains(out, "unauthorized") {
+		t.Fatalf("auth state did not clear after a good poll:\n%s", out)
+	}
+}
+
 func TestModelRecoversAfterFailure(t *testing.T) {
 	m := NewModel("pi4", "addr", false, fakeAPI{err: errors.New("down")})
 	m = pump(t, m, m.refresh())
