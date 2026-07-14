@@ -76,11 +76,17 @@ func TestOwnerOfMissingPath(t *testing.T) {
 	}
 }
 
-func TestDropToStateDirOwnerNoopWhenAlreadyOwner(t *testing.T) {
-	// The dir is owned by whoever runs the test, so euid already matches and
-	// no setuid is attempted — this covers the decision, not the syscall.
-	if err := dropToStateDirOwner(t.TempDir()); err != nil {
-		t.Fatalf("want nil for already-owned dir, got %v", err)
+func TestChownDataFilesSkipsMissingAndChownsExisting(t *testing.T) {
+	dir := t.TempDir()
+	// Only piper.db exists; the -wal/-shm side files are absent, as they are
+	// after a plain create against a checkpointed DB.
+	if err := os.WriteFile(filepath.Join(dir, "piper.db"), nil, 0o600); err != nil {
+		t.Fatalf("write db: %v", err)
+	}
+	// Chowning to our own uid/gid is permitted without privilege, so this
+	// exercises the chown call and the missing-file skip without needing root.
+	if err := chownDataFiles(dir, os.Getuid(), os.Getgid()); err != nil {
+		t.Fatalf("chownDataFiles: %v", err)
 	}
 }
 
@@ -98,12 +104,15 @@ func TestResolveTokenDataDirEnvWins(t *testing.T) {
 	t.Setenv("PIPER_DATA_DIR", "/custom/dir")
 	systemManaged(t, t.TempDir()) // even on a systemd box
 
-	dir, err := resolveTokenDataDir([]string{"create", "--name", "x"})
+	dir, owner, err := resolveTokenDataDir([]string{"create", "--name", "x"})
 	if err != nil {
 		t.Fatalf("resolveTokenDataDir: %v", err)
 	}
 	if dir != "/custom/dir" {
 		t.Errorf("dir = %q, want /custom/dir", dir)
+	}
+	if owner != nil {
+		t.Errorf("owner = %+v, want nil for an explicit PIPER_DATA_DIR", owner)
 	}
 }
 
@@ -113,12 +122,15 @@ func TestResolveTokenDataDirDefaultWhenNotManaged(t *testing.T) {
 	config.SystemEnvDir = filepath.Join(t.TempDir(), "absent") // not systemd-managed
 	defer func() { config.SystemEnvDir = old }()
 
-	dir, err := resolveTokenDataDir([]string{"list"})
+	dir, owner, err := resolveTokenDataDir([]string{"list"})
 	if err != nil {
 		t.Fatalf("resolveTokenDataDir: %v", err)
 	}
 	if want := config.DefaultDataDir(); dir != want {
 		t.Errorf("dir = %q, want %q", dir, want)
+	}
+	if owner != nil {
+		t.Errorf("owner = %+v, want nil when not systemd-managed", owner)
 	}
 }
 
@@ -129,7 +141,7 @@ func TestResolveTokenDataDirSystemManagedNonRoot(t *testing.T) {
 	t.Setenv("PIPER_DATA_DIR", "")
 	systemManaged(t, t.TempDir())
 
-	_, err := resolveTokenDataDir([]string{"create", "--name", "laptop"})
+	_, _, err := resolveTokenDataDir([]string{"create", "--name", "laptop"})
 	if err == nil {
 		t.Fatal("want error for non-root on a systemd-managed box")
 	}
@@ -147,7 +159,7 @@ func TestResolveTokenDataDirSudoHintQuotesSpacedArgs(t *testing.T) {
 
 	// The hint is meant to be pasted verbatim, so a name with a space must stay
 	// a single argument — an unquoted `--name my laptop` re-parses into two (#145).
-	_, err := resolveTokenDataDir([]string{"create", "--name", "my laptop"})
+	_, _, err := resolveTokenDataDir([]string{"create", "--name", "my laptop"})
 	if err == nil {
 		t.Fatal("want error for non-root on a systemd-managed box")
 	}
@@ -160,12 +172,44 @@ func TestResolveTokenDataDirStateDirMissing(t *testing.T) {
 	t.Setenv("PIPER_DATA_DIR", "")
 	systemManaged(t, filepath.Join(t.TempDir(), "absent"))
 
-	_, err := resolveTokenDataDir([]string{"list"})
+	_, _, err := resolveTokenDataDir([]string{"list"})
 	if err == nil {
 		t.Fatal("want error when the state dir does not exist")
 	}
 	if !strings.Contains(err.Error(), "systemctl start piperd") {
 		t.Errorf("error %q does not say to start the service", err)
+	}
+}
+
+func TestResolveTokenDataDirSystemManagedRootStaysRoot(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root")
+	}
+	t.Setenv("PIPER_DATA_DIR", "")
+	// Mirror the DynamicUser StateDirectory layout: the state dir is a symlink
+	// (systemd points /var/lib/piper -> private/piper). Root must resolve it,
+	// return the owner to chown DB files to, and — the #212 regression — stay
+	// root rather than setuid to the dir owner, which would strand it outside
+	// the 0700 /var/lib/private wrapper.
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "piper")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	systemManaged(t, link)
+
+	dir, owner, err := resolveTokenDataDir([]string{"create", "--name", "x"})
+	if err != nil {
+		t.Fatalf("resolveTokenDataDir: %v", err)
+	}
+	if os.Geteuid() != 0 {
+		t.Fatalf("euid = %d, want 0 (process must not drop privileges)", os.Geteuid())
+	}
+	if owner == nil {
+		t.Fatal("owner = nil, want the state-dir owner to chown DB files to")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) must succeed as root through the symlink: %v", dir, err)
 	}
 }
 

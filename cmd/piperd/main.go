@@ -166,7 +166,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "token" {
-		dataDir, err := resolveTokenDataDir(os.Args[2:])
+		dataDir, owner, err := resolveTokenDataDir(os.Args[2:])
 		if err != nil {
 			log.Fatalf("token: %v", err)
 		}
@@ -177,9 +177,17 @@ func main() {
 		if err != nil {
 			log.Fatalf("store: %v", err)
 		}
-		defer st.Close()
 		if err := runTokenCmd(st, os.Args[2:], os.Stdout); err != nil {
+			st.Close()
 			log.Fatalf("token: %v", err)
+		}
+		// Close before chowning so any -wal/-shm are flushed to their final
+		// state, then hand the DB files to the service's DynamicUser (#134).
+		st.Close()
+		if owner != nil {
+			if err := chownDataFiles(dataDir, owner.uid, owner.gid); err != nil {
+				log.Fatalf("data dir: chown: %v", err)
+			}
 		}
 		return
 	}
