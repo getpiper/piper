@@ -31,12 +31,14 @@ or switch on relay mode. See the
 
 macOS is a **development** target: instead of a boot-surviving root service, piperd
 runs **rootless** as your user on high ports (`:8080`/`:8443`), toggled on and off by
-hand. No `sudo`. Install the binary and the shipped LaunchAgent:
+hand — no `sudo` to run it (only to drop the binary in `/usr/local/bin`). Install the
+binary and the shipped LaunchAgent:
 
 ```bash
 sudo install -m 0755 bin/piperd /usr/local/bin/piperd
 install -m 0644 packaging/launchd/com.getpiper.piperd.plist \
   ~/Library/LaunchAgents/com.getpiper.piperd.plist
+mkdir -p ~/.piper
 cp packaging/launchd/piperd.env.macos.example ~/.piper/piperd.env   # optional overrides
 piper agent up
 ```
