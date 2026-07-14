@@ -57,16 +57,15 @@ piperd`.
 `:80`/`:443` (a Pi, a home server), promote it:
 
 ```bash
-sudo piper agent daemonize
+piper agent daemonize
 ```
 
-This installs the systemd **system** service (as `curl | sudo sh` would) and stops
-the rootless one. It's a fresh durable install — your rootless `~/.piper` apps are
-not migrated; redeploy them.
-
-> If `sudo piper agent daemonize` reports `command not found`, `sudo` has dropped
-> `~/.local/bin` from `PATH` (its `secure_path`); run it as
-> `sudo ~/.local/bin/piper agent daemonize`.
+No `sudo` — promotion needs root, so `piper` re-runs itself under `sudo` and
+prompts for your password. This installs the systemd **system** service (as
+`curl | sudo sh` would), stops the rootless one, and also puts `piper` in
+`/usr/local/bin` so later root commands (`sudo piperd token …`) resolve by name.
+It's a fresh durable install — your rootless `~/.piper` apps are not migrated;
+redeploy them.
 
 Install just the CLI (Linux or macOS) — for driving `piperd` from another
 machine, e.g. your laptop and a Pi on the same LAN:

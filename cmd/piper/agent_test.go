@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -269,19 +270,35 @@ func TestEmbeddedSystemFilesMatchCanonical(t *testing.T) {
 	}
 }
 
-func TestDaemonizeNeedsRoot(t *testing.T) {
+func TestDaemonizeSelfEscalatesWhenNotRoot(t *testing.T) {
 	agentGOOS = "linux"
 	defer func() { agentGOOS = runtime.GOOS }()
 	oldEUID := agentEUID
 	agentEUID = func() int { return 1000 }
 	defer func() { agentEUID = oldEUID }()
 
-	var out, errb bytes.Buffer
-	if code := agent([]string{"daemonize"}, &out, &errb); code != 1 {
-		t.Fatalf("code = %d, want 1", code)
+	var gotArgs []string
+	oldExec := selfExecSudo
+	selfExecSudo = func(args []string, stdout, stderr io.Writer) int { gotArgs = args; return 7 }
+	defer func() { selfExecSudo = oldExec }()
+
+	// If it tried the actual promotion instead of re-execing, this would fire.
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		t.Fatalf("must not run promotion before escalating; called systemctl %v", args)
+		return "", nil
 	}
-	if !strings.Contains(errb.String(), "sudo") {
-		t.Errorf("stderr = %q", errb.String())
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 7 {
+		t.Fatalf("code = %d, want the re-exec's exit code 7", code)
+	}
+	if strings.Join(gotArgs, " ") != "agent daemonize" {
+		t.Errorf("re-exec args = %v, want [agent daemonize]", gotArgs)
+	}
+	if !strings.Contains(errb.String(), "under sudo") {
+		t.Errorf("stderr should announce the escalation: %q", errb.String())
 	}
 }
 
@@ -315,6 +332,9 @@ func TestDaemonizePromotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "piperd"), []byte("PIPERD-BIN"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "piper"), []byte("PIPER-CLI"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	oldHome := userHomeDir
@@ -359,6 +379,9 @@ func TestDaemonizePromotes(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(binDir, "piperd")); string(b) != "PIPERD-BIN" {
 		t.Errorf("piperd not installed to system bindir; got %q", string(b))
 	}
+	if b, _ := os.ReadFile(filepath.Join(binDir, "piper")); string(b) != "PIPER-CLI" {
+		t.Errorf("piper CLI not installed to system bindir; got %q", string(b))
+	}
 	if _, err := os.Stat(filepath.Join(unitDir, "piperd.service")); err != nil {
 		t.Errorf("system unit not written: %v", err)
 	}
@@ -381,6 +404,7 @@ func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755)
 	os.WriteFile(filepath.Join(home, ".local", "bin", "piperd"), []byte("x"), 0o755)
+	os.WriteFile(filepath.Join(home, ".local", "bin", "piper"), []byte("x"), 0o755)
 	oldHome := userHomeDir
 	userHomeDir = func(u string) (string, error) { return home, nil }
 	defer func() { userHomeDir = oldHome }()
@@ -424,6 +448,7 @@ func TestDaemonizeReportsCrashLoop(t *testing.T) {
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755)
 	os.WriteFile(filepath.Join(home, ".local", "bin", "piperd"), []byte("x"), 0o755)
+	os.WriteFile(filepath.Join(home, ".local", "bin", "piper"), []byte("x"), 0o755)
 	oldHome := userHomeDir
 	userHomeDir = func(u string) (string, error) { return home, nil }
 	defer func() { userHomeDir = oldHome }()
