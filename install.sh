@@ -10,6 +10,7 @@ PIPER_VERSION="${PIPER_VERSION:-}"
 PIPER_PREFIX="${PIPER_PREFIX:-}"
 PIPER_SYSTEMD_DIR="${PIPER_SYSTEMD_DIR:-/etc/systemd/system}"
 PIPER_ENV_DIR="${PIPER_ENV_DIR:-/etc/piper}"
+PIPER_USER_SYSTEMD_DIR="${PIPER_USER_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 cli_only="${PIPER_CLI_ONLY:-}"
 use_rc="${PIPER_RC:-}"
 no_enable=""
@@ -125,13 +126,45 @@ install_cli() { # install_cli OS ARCH TAG
 	esac
 }
 
+install_agent_rootless() { # install_agent_rootless OS ARCH TAG
+	os="$1"; arch="$2"; tag="$3"
+	prefix="$HOME/.local/bin"
+	mkdir -p "$prefix"
+	download_verify piperd "$tag" "$os" "$arch" "$prefix"
+	download_verify piper "$tag" "$os" "$arch" "$prefix"
+
+	mkdir -p "$PIPER_USER_SYSTEMD_DIR"
+	fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.user.service" \
+		"$PIPER_USER_SYSTEMD_DIR/piperd.service" || die "download failed: piperd.user.service"
+
+	mkdir -p "$HOME/.piper"
+	if [ ! -f "$HOME/.piper/piperd.env" ]; then
+		fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.env.example" \
+			"$HOME/.piper/piperd.env" || die "download failed: piperd.env.example"
+	fi
+	echo "installed rootless piperd + piper $tag -> $prefix"
+
+	if [ -z "$no_enable" ] && have systemctl; then
+		systemctl --user daemon-reload
+		systemctl --user enable --now piperd
+		echo "rootless piperd enabled and started (systemctl --user)"
+	else
+		echo "note: not started (no systemctl or --no-enable); start with: piper agent up"
+	fi
+	case ":$PATH:" in
+		*":$prefix:"*) ;;
+		*) echo "note: $prefix is not on your PATH — add it to use piper/piperd" ;;
+	esac
+}
+
 install_agent() { # install_agent OS ARCH TAG
 	os="$1"; arch="$2"; tag="$3"
-	[ "$os" = linux ] || die "the full agent install needs Linux + systemd; on macOS use --cli-only (launchd support tracked in #56)"
-	prefix="${PIPER_PREFIX:-/usr/local/bin}"
+	[ "$os" = linux ] || die "on macOS use --cli-only, then follow docs/manual-setup.md (Run the agent on macOS) to run 'piper agent up'"
 	if [ -z "$PIPER_PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
-		die "the full agent install needs root — re-run with sudo, or use --cli-only"
+		install_agent_rootless "$os" "$arch" "$tag"
+		return
 	fi
+	prefix="${PIPER_PREFIX:-/usr/local/bin}"
 	mkdir -p "$prefix"
 	download_verify piperd "$tag" "$os" "$arch" "$prefix"
 	download_verify piper "$tag" "$os" "$arch" "$prefix"

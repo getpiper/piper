@@ -103,8 +103,17 @@ func run(t *testing.T, args []string, env map[string]string) (string, error) {
 		t.Skip("tar not available")
 	}
 	cmd := exec.Command("sh", append([]string{scriptPath(t)}, args...)...)
-	cmd.Env = os.Environ()
+	merged := map[string]string{}
+	for _, kv := range os.Environ() {
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			merged[kv[:i]] = kv[i+1:]
+		}
+	}
 	for k, v := range env {
+		merged[k] = v
+	}
+	cmd.Env = nil
+	for k, v := range merged {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 	out, err := cmd.CombinedOutput()
@@ -280,6 +289,65 @@ func TestAgentInstallDropsUnitAndEnv(t *testing.T) {
 	}
 	if string(got) != edited {
 		t.Errorf("env file was clobbered on re-run: got %q", string(got))
+	}
+}
+
+func TestRootlessAgentInstall(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("rootless agent path targets Linux/systemd")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("rootless path requires a non-root user")
+	}
+	osTok, archTok := hostOSArch()
+	tag := "v9.9.9"
+	ver := strings.TrimPrefix(tag, "v")
+	assets := map[string][]byte{
+		fmt.Sprintf("piperd_%s_%s_%s.tar.gz", ver, osTok, archTok): tarGz(t, "piperd", "fake-piperd"),
+		fmt.Sprintf("piper_%s_%s_%s.tar.gz", ver, osTok, archTok):  tarGz(t, "piper", "fake-piper"),
+		"piperd.user.service": []byte("[Service]\nExecStart=%h/.local/bin/piperd\n"),
+		"piperd.env.example":  []byte("#PIPER_API_ADDR=127.0.0.1:8088\n"),
+	}
+	srv := newReleaseServer(t, assets, nil)
+
+	home := t.TempDir()
+	unitDir := t.TempDir()
+	env := map[string]string{
+		"PIPER_BASE_URL":         srv.URL,
+		"PIPER_VERSION":          tag,
+		"HOME":                   home,
+		"PIPER_USER_SYSTEMD_DIR": unitDir,
+	}
+	// No --cli-only (full agent) and --no-enable (skip systemctl --user shell-out).
+	out, err := run(t, []string{"--no-enable"}, env)
+	if err != nil {
+		t.Fatalf("rootless install failed: %v\n%s", err, out)
+	}
+	for _, p := range []string{
+		filepath.Join(home, ".local", "bin", "piperd"),
+		filepath.Join(home, ".local", "bin", "piper"),
+		filepath.Join(unitDir, "piperd.service"),
+		filepath.Join(home, ".piper", "piperd.env"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("missing %s: %v\n%s", p, err, out)
+		}
+	}
+
+	// Re-run must not clobber an operator-edited env file.
+	edited := "PIPER_BASE_DOMAIN=example.com\n"
+	if err := os.WriteFile(filepath.Join(home, ".piper", "piperd.env"), []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, []string{"--no-enable"}, env); err != nil {
+		t.Fatalf("re-run failed: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(filepath.Join(home, ".piper", "piperd.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != edited {
+		t.Errorf("env file clobbered on re-run: got %q", string(got))
 	}
 }
 
