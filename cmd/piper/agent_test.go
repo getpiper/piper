@@ -177,6 +177,45 @@ func TestAgentStatusLinux(t *testing.T) {
 	}
 }
 
+func TestAgentStatusLinuxShowsAddresses(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+
+	dir := t.TempDir()
+	unit := filepath.Join(dir, "piperd.service")
+	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := userUnitPath
+	userUnitPath = func() (string, error) { return unit, nil }
+	defer func() { userUnitPath = oldPath }()
+
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { return "active\n", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	oldEnv := agentEnviron
+	agentEnviron = func() map[string]string {
+		return map[string]string{
+			"PIPER_API_ADDR":   "0.0.0.0:8088",
+			"PIPER_HTTP_ADDR":  ":8080",
+			"PIPER_HTTPS_ADDR": ":8443",
+			"PIPER_DATA_DIR":   "/home/pi/.piper/piperd",
+		}
+	}
+	defer func() { agentEnviron = oldEnv }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d", code)
+	}
+	for _, want := range []string{"piperd: running", "http://0.0.0.0:8088", ":8080", ":8443", "/home/pi/.piper/piperd"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestAgentStatusLinuxNotInstalled(t *testing.T) {
 	agentGOOS = "linux"
 	defer func() { agentGOOS = runtime.GOOS }()

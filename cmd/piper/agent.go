@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/getpiper/piper/internal/config"
 )
 
 //go:embed piperd.service
@@ -197,6 +199,42 @@ func agentDownLinux(stdout, stderr io.Writer) int {
 	return 0
 }
 
+// agentEnviron reads the running rootless agent's start-time environment from
+// /proc/<MainPID>/environ (NUL-separated KEY=VALUE), so `status` can report the
+// address the agent is actually bound to — honoring any env-file overrides
+// (e.g. PIPER_API_ADDR=0.0.0.0:8088 for LAN access). Returns nil when the agent
+// isn't running or /proc can't be read. A var so tests stub it.
+var agentEnviron = func() map[string]string {
+	out, err := systemctlRun("--user", "show", userUnitName, "--property=MainPID", "--value")
+	if err != nil {
+		return nil
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || pid <= 0 {
+		return nil
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	if err != nil {
+		return nil
+	}
+	m := map[string]string{}
+	for _, kv := range strings.Split(string(raw), "\x00") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// envOr looks key up in the running agent's environment, falling back to def
+// (the same default piperd's config.Load would apply) when unset or unread.
+func envOr(env map[string]string, key, def string) string {
+	if v := env[key]; v != "" {
+		return v
+	}
+	return def
+}
+
 func agentStatusLinux(stdout, stderr io.Writer) int {
 	unit, err := userUnitPath()
 	if err != nil {
@@ -208,11 +246,20 @@ func agentStatusLinux(stdout, stderr io.Writer) int {
 		return 0
 	}
 	out, _ := systemctlRun("--user", "is-active", userUnitName)
-	if strings.TrimSpace(out) == "active" {
-		fmt.Fprintln(stdout, "piperd: running")
-	} else {
+	if strings.TrimSpace(out) != "active" {
 		fmt.Fprintln(stdout, "piperd: stopped")
+		return 0
 	}
+	fmt.Fprintln(stdout, "piperd: running")
+	env := agentEnviron()
+	fmt.Fprintf(stdout, "  control API  http://%s\n", envOr(env, "PIPER_API_ADDR", "127.0.0.1:8088"))
+	// http/https are set by the user unit (:8080/:8443); only shown when we
+	// could read them, since piperd's built-in :80/:443 defaults would misreport
+	// a rootless instance.
+	if h := env["PIPER_HTTP_ADDR"]; h != "" {
+		fmt.Fprintf(stdout, "  http/https   %s / %s\n", h, envOr(env, "PIPER_HTTPS_ADDR", "?"))
+	}
+	fmt.Fprintf(stdout, "  data dir     %s\n", envOr(env, "PIPER_DATA_DIR", config.DefaultDataDir()))
 	return 0
 }
 

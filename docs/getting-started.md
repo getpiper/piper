@@ -30,7 +30,8 @@ runs as **you** on high ports (`:8080`/`:8443`) under `~/.piper`, managed by
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 piper agent up            # start it (no sudo)
-piper agent status        # running / stopped / not installed
+piper agent status        # running / stopped / not installed; when running,
+                          # prints the control-API address, app ports, and data dir
 piper agent down          # stop it
 ```
 
