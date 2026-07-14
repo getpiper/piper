@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,17 +10,135 @@ import (
 	"testing"
 )
 
-func TestAgentNonDarwinGate(t *testing.T) {
-	agentGOOS = "linux"
+func TestAgentUnsupportedGOOS(t *testing.T) {
+	agentGOOS = "windows"
 	defer func() { agentGOOS = runtime.GOOS }()
 	var out, errb bytes.Buffer
 	if code := agent([]string{"up"}, &out, &errb); code != 2 {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if !strings.Contains(errb.String(), "systemctl") {
-		t.Errorf("stderr = %q, want systemctl hint", errb.String())
+	if !strings.Contains(errb.String(), "macOS and Linux only") {
+		t.Errorf("stderr = %q", errb.String())
 	}
 }
+
+func TestAgentUpLinuxStarts(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+
+	dir := t.TempDir()
+	unit := filepath.Join(dir, "piperd.service")
+	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := userUnitPath
+	userUnitPath = func() (string, error) { return unit, nil }
+	defer func() { userUnitPath = oldPath }()
+
+	var gotArgs []string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { gotArgs = args; return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	want := []string{"--user", "start", "piperd"}
+	if strings.Join(gotArgs, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", gotArgs, want)
+	}
+	if !strings.Contains(out.String(), "started") {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+func TestAgentUpLinuxNotInstalled(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldPath := userUnitPath
+	userUnitPath = func() (string, error) { return filepath.Join(t.TempDir(), "absent.service"), nil }
+	defer func() { userUnitPath = oldPath }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "not installed") {
+		t.Errorf("stderr = %q", errb.String())
+	}
+}
+
+func TestAgentDownLinuxStops(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	var gotArgs []string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { gotArgs = args; return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"down"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	want := []string{"--user", "stop", "piperd"}
+	if strings.Join(gotArgs, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", gotArgs, want)
+	}
+}
+
+func TestAgentStatusLinux(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+
+	dir := t.TempDir()
+	unit := filepath.Join(dir, "piperd.service")
+	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := userUnitPath
+	userUnitPath = func() (string, error) { return unit, nil }
+	defer func() { userUnitPath = oldPath }()
+
+	cases := []struct {
+		active string
+		err    error
+		want   string
+	}{
+		{"active\n", nil, "piperd: running"},
+		{"inactive\n", errFake, "piperd: stopped"},
+	}
+	for _, c := range cases {
+		oldRun := systemctlRun
+		systemctlRun = func(args ...string) (string, error) { return c.active, c.err }
+		var out, errb bytes.Buffer
+		if code := agent([]string{"status"}, &out, &errb); code != 0 {
+			t.Fatalf("code = %d", code)
+		}
+		if !strings.Contains(out.String(), c.want) {
+			t.Errorf("active=%q: stdout = %q, want %q", c.active, out.String(), c.want)
+		}
+		systemctlRun = oldRun
+	}
+}
+
+func TestAgentStatusLinuxNotInstalled(t *testing.T) {
+	agentGOOS = "linux"
+	defer func() { agentGOOS = runtime.GOOS }()
+	oldPath := userUnitPath
+	userUnitPath = func() (string, error) { return filepath.Join(t.TempDir(), "absent.service"), nil }
+	defer func() { userUnitPath = oldPath }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d", code)
+	}
+	if !strings.Contains(out.String(), "not installed") {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+var errFake = fmt.Errorf("exit status 3")
 
 func TestAgentUpBootstraps(t *testing.T) {
 	agentGOOS = "darwin"
