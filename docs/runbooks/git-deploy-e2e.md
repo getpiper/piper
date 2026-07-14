@@ -352,6 +352,18 @@ sudo systemctl clean --what=state piper-relay
 
 ---
 
+## Linux (rootless user agent)
+
+On a dev box the agent can run rootless via `systemctl --user`:
+
+```bash
+piper agent status                 # running / stopped / not installed
+journalctl --user -u piperd -f     # agent logs
+piper agent down                   # stop it
+```
+
+---
+
 ## macOS (rootless launchd agent)
 
 On a Mac dev box the agent runs rootless via launchd (see

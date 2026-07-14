@@ -382,3 +382,32 @@ func TestInstallDocumentation(t *testing.T) {
 		}
 	}
 }
+
+func TestRootlessDocumentation(t *testing.T) {
+	docs := map[string][]string{
+		filepath.Join("docs", "getting-started.md"): {
+			"piper agent up",
+			"sudo piper agent daemonize",
+		},
+		filepath.Join("docs", "manual-setup.md"): {
+			"packaging/systemd/piperd.user.service",
+			"systemctl --user",
+		},
+		filepath.Join("docs", "runbooks", "git-deploy-e2e.md"): {
+			"piper agent status",
+			"journalctl --user -u piperd",
+		},
+	}
+	for name, wants := range docs {
+		b, err := os.ReadFile(filepath.Join(repoRoot(t), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(b)
+		for _, want := range wants {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s missing %q", name, want)
+			}
+		}
+	}
+}
