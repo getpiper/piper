@@ -108,6 +108,25 @@ func provisionRelayControl(st relayTokenStore, push func(string) error, baseDoma
 	log.Printf("relay control provision: pushed control bearer for %s", baseDomain)
 }
 
+// startAuthAPI serves handler wrapped in RequireToken on an ephemeral loopback
+// listener and returns the bound address. It is the control API's authenticated
+// entry point: the relay tunnel dials it for control streams, so the bearer
+// keeps gating internet-originated requests while the local listener
+// (cfg.APIAddr) serves the on-box CLI tokenless (#221).
+func startAuthAPI(st *store.Store, handler http.Handler) (string, *http.Server, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	srv := &http.Server{Handler: api.RequireToken(st, handler)}
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("auth api serve: %v", err)
+		}
+	}()
+	return ln.Addr().String(), srv, nil
+}
+
 // runTokenCmd implements `piperd token <create|list|revoke>`, writing directly
 // to the on-box store. It needs no auth: running it is proof of box ownership.
 func runTokenCmd(st tokenStore, args []string, out io.Writer) error {

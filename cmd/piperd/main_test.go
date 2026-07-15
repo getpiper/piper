@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -221,6 +224,65 @@ func TestProvisionRelayControlPushFailureUnwinds(t *testing.T) {
 	// The mint must be unwound so the marker doesn't block the next attempt.
 	if len(f.deleted) != 1 || f.deleted[0] != "relay:base.example.com" {
 		t.Fatalf("deleted = %v, want the just-minted label", f.deleted)
+	}
+}
+
+// The authenticated listener is the relay tunnel's control-API entry point:
+// it must sit on loopback at an ephemeral port and enforce the bearer, while
+// the local listener (cfg.APIAddr) serves tokenless. #221.
+func TestStartAuthAPIRequiresToken(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "piper.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	tok, err := st.CreateToken("test", "admin")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	addr, srv, err := startAuthAPI(st, handler)
+	if err != nil {
+		t.Fatalf("startAuthAPI: %v", err)
+	}
+	defer srv.Close()
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("addr %q: %v", addr, err)
+	}
+	if host != "127.0.0.1" {
+		t.Errorf("host = %q, want 127.0.0.1", host)
+	}
+	if port == "0" || port == "" {
+		t.Errorf("port = %q, want a bound ephemeral port", port)
+	}
+
+	get := func(bearer string) int {
+		req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/apps", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := get(""); code != http.StatusUnauthorized {
+		t.Errorf("no bearer = %d, want 401", code)
+	}
+	if code := get("nope"); code != http.StatusUnauthorized {
+		t.Errorf("bad bearer = %d, want 401", code)
+	}
+	if code := get(tok); code != http.StatusOK {
+		t.Errorf("valid bearer = %d, want 200", code)
 	}
 }
 
