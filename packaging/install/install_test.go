@@ -387,7 +387,7 @@ func TestRootlessDocumentation(t *testing.T) {
 	docs := map[string][]string{
 		filepath.Join("docs", "getting-started.md"): {
 			"piper agent up",
-			"sudo piper agent daemonize",
+			"piper agent daemonize",
 			"in the foreground", // #211: journalctl --user may be empty
 		},
 		filepath.Join("docs", "manual-setup.md"): {

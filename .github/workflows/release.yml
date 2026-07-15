@@ -28,3 +28,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Force the tag that triggered the run. goreleaser otherwise resolves
+          # the "current" tag via git describe, which is ambiguous when a final
+          # release and its RC point at the same commit (v0.2.1 + v0.2.1-rc.2) —
+          # it then rebuilt the RC and collided with its existing assets.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}

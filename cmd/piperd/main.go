@@ -108,6 +108,92 @@ func provisionRelayControl(st relayTokenStore, push func(string) error, baseDoma
 	log.Printf("relay control provision: pushed control bearer for %s", baseDomain)
 }
 
+// apiServers folds the control API's two servers (local tokenless +
+// authenticated) into the one apiShutdowner slot shutdown() has, so both go
+// through the same graceful drain (#221).
+type apiServers []apiShutdowner
+
+func (s apiServers) Shutdown(ctx context.Context) error {
+	var first error
+	for _, srv := range s {
+		if err := srv.Shutdown(ctx); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func (s apiServers) Close() error {
+	var first error
+	for _, srv := range s {
+		if err := srv.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// startAuthAPI serves handler wrapped in RequireToken on an ephemeral loopback
+// listener and returns the bound address. It is the control API's authenticated
+// entry point: the relay tunnel dials it for control streams, so the bearer
+// keeps gating internet-originated requests while the local listener
+// (cfg.APIAddr) serves the on-box CLI tokenless (#221).
+func startAuthAPI(st *store.Store, handler http.Handler) (string, *http.Server, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	srv := &http.Server{Handler: api.RequireToken(st, handler)}
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("auth api serve: %v", err)
+		}
+	}()
+	return ln.Addr().String(), srv, nil
+}
+
+// newLocalHandler picks the auth mode for the local control-API listener from
+// its bind address: loopback serves tokenless (the bind is the trust boundary),
+// while a non-loopback bind (the documented PIPER_API_ADDR=0.0.0.0:8088 LAN
+// flow) keeps requiring the bearer — otherwise that flow would expose an
+// unauthenticated control API to the whole LAN (#221).
+func newLocalHandler(st *store.Store, handler http.Handler, addr string) http.Handler {
+	if loopbackAddr(addr) {
+		return handler
+	}
+	return api.RequireToken(st, handler)
+}
+
+// loopbackAddr reports whether addr binds only the loopback interface.
+func loopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// newDialLocal maps relay tunnel stream kinds to local addresses. Control
+// streams go to the authenticated listener (authAddr) — never the tokenless
+// local one, or the relay path would silently lose its bearer gate (#221).
+// Terminated mode serves apps plaintext on :80; otherwise TLS on :443.
+func newDialLocal(terminated bool, authAddr string) func(kind byte) (net.Conn, error) {
+	return func(kind byte) (net.Conn, error) {
+		switch {
+		case kind == tunnel.KindControlAPI:
+			return net.Dial("tcp", authAddr)
+		case terminated && kind == tunnel.KindHTTP:
+			return net.Dial("tcp", "127.0.0.1:80")
+		default:
+			return net.Dial("tcp", "127.0.0.1:443")
+		}
+	}
+}
+
 // runTokenCmd implements `piperd token <create|list|revoke>`, writing directly
 // to the on-box store. It needs no auth: running it is proof of box ownership.
 func runTokenCmd(st tokenStore, args []string, out io.Writer) error {
@@ -251,25 +337,36 @@ func main() {
 		domMgr = domain.New(opts)
 	}
 
+	// The control API mux, shared by both listeners. wh is assigned below in
+	// relay mode; the onGitHubApp closure captures the variable so `piper github
+	// setup` can start serving webhooks without a restart.
+	var wh *webhookStarter
+	var dm api.DomainManager
+	if domMgr != nil {
+		dm = domMgr
+	}
+	apiHandler := api.New(st, dep, cfg.BaseDomain, "", func() {
+		if wh != nil {
+			wh.start()
+		}
+	}, dm)
+
+	// The authenticated entry point. Always on, so LAN-only and relay-connected
+	// boxes run the identical listener topology; the relay tunnel below is its
+	// consumer (#221).
+	authAddr, authSrv, err := startAuthAPI(st, apiHandler)
+	if err != nil {
+		log.Fatalf("auth api listen: %v", err)
+	}
+
 	// Relay mode: dial the relay and forward its streams. Terminated (free-tier)
 	// mode holds no box cert and serves apps on :80; the relay terminates TLS and
 	// opens KindHTTP streams. Non-terminated (BYO-domain) mode obtains a wildcard
-	// cert, serves :443, and answers KindPassthrough streams.
-	var wh *webhookStarter
+	// cert, serves :443, and answers KindPassthrough streams. Control streams go
+	// to the authenticated listener — never the tokenless local one.
 	if cfg.RelayAddr != "" {
-		var dialLocal func(kind byte) (net.Conn, error)
-		if cfg.Terminated {
-			dialLocal = func(kind byte) (net.Conn, error) {
-				switch kind {
-				case tunnel.KindControlAPI:
-					return net.Dial("tcp", cfg.APIAddr)
-				case tunnel.KindHTTP:
-					return net.Dial("tcp", "127.0.0.1:80")
-				default:
-					return net.Dial("tcp", "127.0.0.1:443")
-				}
-			}
-		} else {
+		dialLocal := newDialLocal(cfg.Terminated, authAddr)
+		if !cfg.Terminated {
 			if cfg.TLSCertFile != "" {
 				certPEM, err := os.ReadFile(cfg.TLSCertFile)
 				if err != nil {
@@ -290,12 +387,6 @@ func main() {
 				if err := domMgr.RunEnv(ctx, iss); err != nil {
 					log.Fatalf("relay tls: %v", err)
 				}
-			}
-			dialLocal = func(kind byte) (net.Conn, error) {
-				if kind == tunnel.KindControlAPI {
-					return net.Dial("tcp", cfg.APIAddr)
-				}
-				return net.Dial("tcp", "127.0.0.1:443")
 			}
 		}
 		tc := &agent.TunnelClient{}
@@ -318,19 +409,12 @@ func main() {
 		}
 	}
 
-	// After `piper github setup` stores App creds at runtime, start serving
-	// webhooks immediately (relay mode only) instead of waiting for a restart.
-	var dm api.DomainManager
-	if domMgr != nil {
-		dm = domMgr
-	}
-	handler := api.RequireToken(st, api.New(st, dep, cfg.BaseDomain, "", func() {
-		if wh != nil {
-			wh.start()
-		}
-	}, dm))
-
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
+	// The local listener: tokenless on a loopback bind — whoever can run the
+	// CLI on the box already owns the Docker socket piperd drives. A LAN bind
+	// keeps the bearer (see newLocalHandler). Internet-originated
+	// (relay-proxied) requests never land here; they go to the authenticated
+	// listener above (#221).
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: newLocalHandler(st, apiHandler, cfg.APIAddr)}
 	go func() {
 		log.Printf("piperd listening on %s (apps at *.%s)", cfg.APIAddr, cfg.BaseDomain)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -348,7 +432,7 @@ func main() {
 	if wh != nil {
 		whLifecycle = wh
 	}
-	shutdown(srv, whLifecycle, mgrStop, st)
+	shutdown(apiServers{srv, authSrv}, whLifecycle, mgrStop, st)
 	os.Exit(0)
 }
 

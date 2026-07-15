@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/getpiper/piper/internal/config"
 )
 
 //go:embed piperd.service
@@ -197,6 +199,42 @@ func agentDownLinux(stdout, stderr io.Writer) int {
 	return 0
 }
 
+// agentEnviron reads the running rootless agent's start-time environment from
+// /proc/<MainPID>/environ (NUL-separated KEY=VALUE), so `status` can report the
+// address the agent is actually bound to — honoring any env-file overrides
+// (e.g. PIPER_API_ADDR=0.0.0.0:8088 for LAN access). Returns nil when the agent
+// isn't running or /proc can't be read. A var so tests stub it.
+var agentEnviron = func() map[string]string {
+	out, err := systemctlRun("--user", "show", userUnitName, "--property=MainPID", "--value")
+	if err != nil {
+		return nil
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || pid <= 0 {
+		return nil
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	if err != nil {
+		return nil
+	}
+	m := map[string]string{}
+	for _, kv := range strings.Split(string(raw), "\x00") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// envOr looks key up in the running agent's environment, falling back to def
+// (the same default piperd's config.Load would apply) when unset or unread.
+func envOr(env map[string]string, key, def string) string {
+	if v := env[key]; v != "" {
+		return v
+	}
+	return def
+}
+
 func agentStatusLinux(stdout, stderr io.Writer) int {
 	unit, err := userUnitPath()
 	if err != nil {
@@ -208,11 +246,20 @@ func agentStatusLinux(stdout, stderr io.Writer) int {
 		return 0
 	}
 	out, _ := systemctlRun("--user", "is-active", userUnitName)
-	if strings.TrimSpace(out) == "active" {
-		fmt.Fprintln(stdout, "piperd: running")
-	} else {
+	if strings.TrimSpace(out) != "active" {
 		fmt.Fprintln(stdout, "piperd: stopped")
+		return 0
 	}
+	fmt.Fprintln(stdout, "piperd: running")
+	env := agentEnviron()
+	fmt.Fprintf(stdout, "  control API  http://%s\n", envOr(env, "PIPER_API_ADDR", "127.0.0.1:8088"))
+	// http/https are set by the user unit (:8080/:8443); only shown when we
+	// could read them, since piperd's built-in :80/:443 defaults would misreport
+	// a rootless instance.
+	if h := env["PIPER_HTTP_ADDR"]; h != "" {
+		fmt.Fprintf(stdout, "  http/https   %s / %s\n", h, envOr(env, "PIPER_HTTPS_ADDR", "?"))
+	}
+	fmt.Fprintf(stdout, "  data dir     %s\n", envOr(env, "PIPER_DATA_DIR", config.DefaultDataDir()))
 	return 0
 }
 
@@ -276,13 +323,40 @@ func agentStatus(stdout, stderr io.Writer) int {
 	return 0
 }
 
+// selfExecSudo re-runs this binary under sudo with its own absolute path,
+// passing args through and wiring the real stdio so sudo can prompt for a
+// password. A rootless piper lives in ~/.local/bin, which sudo's secure_path
+// skips — but an absolute path bypasses the PATH lookup entirely, so the user
+// never needs to type the path or a symlink. A var so tests stub it. Returns
+// the child's exit code.
+var selfExecSudo = func(args []string, stdout, stderr io.Writer) int {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot locate the piper binary to re-run under sudo: %v\n", err)
+		return 1
+	}
+	cmd := exec.Command("sudo", append([]string{exe}, args...)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "error: could not re-run under sudo: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 // agentDaemonize promotes the rootless per-user agent into the systemd system
-// daemon (durable, :80/:443, boot-surviving). Linux + root only. It does NOT
-// migrate ~/.piper state to /var/lib/piper — a fresh durable install.
+// daemon (durable, :80/:443, boot-surviving). Linux only. It does NOT migrate
+// ~/.piper state to /var/lib/piper — a fresh durable install.
 func agentDaemonize(stdout, stderr io.Writer) int {
 	if agentEUID() != 0 {
-		fmt.Fprintln(stderr, "error: `piper agent daemonize` needs root — re-run with sudo")
-		return 1
+		// Promotion needs root; re-run ourselves under sudo by absolute path so
+		// the user runs a bare `piper agent daemonize` — no sudo, no path (#211).
+		fmt.Fprintln(stderr, "promotion needs root — re-running under sudo…")
+		return selfExecSudo([]string{"agent", "daemonize"}, stdout, stderr)
 	}
 	sudoUser := os.Getenv("SUDO_USER")
 	if sudoUser == "" {
@@ -307,6 +381,13 @@ func agentDaemonize(stdout, stderr io.Writer) int {
 	}
 	if err := copyFile(filepath.Join(home, ".local", "bin", "piperd"), filepath.Join(systemBinDir, "piperd"), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: installing piperd to %s: %v\n", systemBinDir, err)
+		return 1
+	}
+	// Also install the CLI, so afterward the box matches a `curl | sudo sh`
+	// system install: piper lives on sudo's secure_path, so later root commands
+	// (`sudo piper …`, `sudo piperd token …`) resolve by name (#211).
+	if err := copyFile(filepath.Join(home, ".local", "bin", "piper"), filepath.Join(systemBinDir, "piper"), 0o755); err != nil {
+		fmt.Fprintf(stderr, "error: installing piper to %s: %v\n", systemBinDir, err)
 		return 1
 	}
 

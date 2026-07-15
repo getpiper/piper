@@ -47,10 +47,9 @@ piper agent up
 It serves apps on `http://<name>.piper.localhost:8080`, stores state under
 `~/.piper/`, and is **not** boot-surviving on a headless box (no login to start
 the user manager after reboot; re-run `piper agent up`). Your user must reach a Docker socket (`docker` group or
-`DOCKER_HOST`). To make it durable on `:80`/`:443`, run `sudo piper agent
-daemonize` — see the system-service section above. (If that reports `command not
-found`, `sudo` dropped `~/.local/bin` from `PATH`; use `sudo ~/.local/bin/piper
-agent daemonize`.)
+`DOCKER_HOST`). To make it durable on `:80`/`:443`, run `piper agent daemonize`
+(no `sudo` — it re-runs itself under `sudo` and prompts for your password) — see
+the system-service section above.
 
 ## Run the agent on macOS (dev box)
 

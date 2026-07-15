@@ -1,7 +1,7 @@
 # Getting started
 
-The full journey, in order: install → drive `piperd` from your laptop →
-join the public relay → drive a box remotely → git deploys. Each section
+The full journey, in order: install → drive `piperd` (CLI or the interactive
+TUI) → join the public relay → drive a box remotely → git deploys. Each section
 builds on the previous one, but you can stop wherever your setup is complete —
 a LAN-only box never needs the relay sections.
 
@@ -30,7 +30,8 @@ runs as **you** on high ports (`:8080`/`:8443`) under `~/.piper`, managed by
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 piper agent up            # start it (no sudo)
-piper agent status        # running / stopped / not installed
+piper agent status        # running / stopped / not installed; when running,
+                          # prints the control-API address, app ports, and data dir
 piper agent down          # stop it
 ```
 
@@ -57,16 +58,15 @@ piperd`.
 `:80`/`:443` (a Pi, a home server), promote it:
 
 ```bash
-sudo piper agent daemonize
+piper agent daemonize
 ```
 
-This installs the systemd **system** service (as `curl | sudo sh` would) and stops
-the rootless one. It's a fresh durable install — your rootless `~/.piper` apps are
-not migrated; redeploy them.
-
-> If `sudo piper agent daemonize` reports `command not found`, `sudo` has dropped
-> `~/.local/bin` from `PATH` (its `secure_path`); run it as
-> `sudo ~/.local/bin/piper agent daemonize`.
+No `sudo` — promotion needs root, so `piper` re-runs itself under `sudo` and
+prompts for your password. This installs the systemd **system** service (as
+`curl | sudo sh` would), stops the rootless one, and also puts `piper` in
+`/usr/local/bin` so later root commands (`sudo piperd token …`) resolve by name.
+It's a fresh durable install — your rootless `~/.piper` apps are not migrated;
+redeploy them.
 
 Install just the CLI (Linux or macOS) — for driving `piperd` from another
 machine, e.g. your laptop and a Pi on the same LAN:
@@ -85,16 +85,45 @@ Shell completions and a Homebrew tap are planned follow-ups.
 Prefer to build from source, run piperd in Docker via Compose, run the relay as
 a service, or wire your own automation? See [`manual-setup.md`](manual-setup.md).
 
+## The interactive TUI
+
+`piper` is dual-mode. Every subcommand stays scriptable and byte-for-byte
+unchanged, but bare `piper` in a terminal opens a full-screen TUI — a complete
+control surface, not just a dashboard:
+
+```bash
+piper            # opens the TUI against the current box
+```
+
+- **Apps table** (home) — NAME · STATUS · URL · LAST DEPLOY, refreshed every 2s.
+- **Drill down** — `↵` opens an app's detail, deployments, and logs (with live
+  follow).
+- **Actions** — deploy, new app, stop, delete, right from the TUI.
+- **Boxes** — `t` opens a box switcher and config editor to add/edit/remove
+  targets.
+- **Wizards** — login, `piper connect`, GitHub App setup, and repo linking run
+  interactively.
+
+Keys: `↵` open · `esc` back · `r` refresh · `t` boxes · `?` help · `q` quit.
+Run it on the box and it's authless (see below); point it at a remote box with
+`piper --remote <base-domain>`. Non-TTY invocation (scripts, pipes) is
+untouched — bare `piper` with no terminal still prints usage and exits 2.
+
 ## Drive piperd from another machine on the LAN
 
-The control API requires a bearer token, so mint one on the box and log the CLI
-in first. Running `piperd token create` on the box is itself the proof you own
-it — no auth needed for that step; on a systemd install it needs `sudo` to reach
-the service's data dir and will say so if you forget.
+**On the box itself, the CLI needs no login**: the control API binds to
+loopback (`127.0.0.1:8088`) by default and serves it tokenless — being able to
+run `piper` on the box is itself the proof you own it. `piper list`, `piper
+deploy`, etc. just work.
 
-The control API binds to loopback (`127.0.0.1:8088`) by default. To reach it
-from another machine on the LAN set `PIPER_API_ADDR=0.0.0.0:8088` on the box —
-uncomment it in `/etc/piper/piperd.env` and restart:
+Once the API leaves loopback it requires a bearer token, so mint one on the box
+and log the CLI in first. Running `piperd token create` on the box needs no
+auth either; on a systemd install it needs `sudo` to reach the service's data
+dir and will say so if you forget.
+
+To reach the control API from another machine on the LAN set
+`PIPER_API_ADDR=0.0.0.0:8088` on the box — uncomment it in
+`/etc/piper/piperd.env` and restart:
 
 ```bash
 # on the box:
