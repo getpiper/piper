@@ -295,18 +295,40 @@ func main() {
 		domMgr = domain.New(opts)
 	}
 
+	// The control API mux, shared by both listeners. wh is assigned below in
+	// relay mode; the onGitHubApp closure captures the variable so `piper github
+	// setup` can start serving webhooks without a restart.
+	var wh *webhookStarter
+	var dm api.DomainManager
+	if domMgr != nil {
+		dm = domMgr
+	}
+	apiHandler := api.New(st, dep, cfg.BaseDomain, "", func() {
+		if wh != nil {
+			wh.start()
+		}
+	}, dm)
+
+	// The authenticated entry point. Always on, so LAN-only and relay-connected
+	// boxes run the identical listener topology; the relay tunnel below is its
+	// consumer (#221).
+	authAddr, authSrv, err := startAuthAPI(st, apiHandler)
+	if err != nil {
+		log.Fatalf("auth api listen: %v", err)
+	}
+
 	// Relay mode: dial the relay and forward its streams. Terminated (free-tier)
 	// mode holds no box cert and serves apps on :80; the relay terminates TLS and
 	// opens KindHTTP streams. Non-terminated (BYO-domain) mode obtains a wildcard
-	// cert, serves :443, and answers KindPassthrough streams.
-	var wh *webhookStarter
+	// cert, serves :443, and answers KindPassthrough streams. Control streams go
+	// to the authenticated listener — never the tokenless local one.
 	if cfg.RelayAddr != "" {
 		var dialLocal func(kind byte) (net.Conn, error)
 		if cfg.Terminated {
 			dialLocal = func(kind byte) (net.Conn, error) {
 				switch kind {
 				case tunnel.KindControlAPI:
-					return net.Dial("tcp", cfg.APIAddr)
+					return net.Dial("tcp", authAddr)
 				case tunnel.KindHTTP:
 					return net.Dial("tcp", "127.0.0.1:80")
 				default:
@@ -337,7 +359,7 @@ func main() {
 			}
 			dialLocal = func(kind byte) (net.Conn, error) {
 				if kind == tunnel.KindControlAPI {
-					return net.Dial("tcp", cfg.APIAddr)
+					return net.Dial("tcp", authAddr)
 				}
 				return net.Dial("tcp", "127.0.0.1:443")
 			}
@@ -362,19 +384,11 @@ func main() {
 		}
 	}
 
-	// After `piper github setup` stores App creds at runtime, start serving
-	// webhooks immediately (relay mode only) instead of waiting for a restart.
-	var dm api.DomainManager
-	if domMgr != nil {
-		dm = domMgr
-	}
-	handler := api.RequireToken(st, api.New(st, dep, cfg.BaseDomain, "", func() {
-		if wh != nil {
-			wh.start()
-		}
-	}, dm))
-
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler}
+	// The local listener: tokenless. The loopback bind is the trust boundary —
+	// whoever can run the CLI on the box already owns the Docker socket piperd
+	// drives. Internet-originated (relay-proxied) requests never land here; they
+	// go to the authenticated listener above (#221).
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: apiHandler}
 	go func() {
 		log.Printf("piperd listening on %s (apps at *.%s)", cfg.APIAddr, cfg.BaseDomain)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -392,7 +406,7 @@ func main() {
 	if wh != nil {
 		whLifecycle = wh
 	}
-	shutdown(srv, whLifecycle, mgrStop, st)
+	shutdown(apiServers{srv, authSrv}, whLifecycle, mgrStop, st)
 	os.Exit(0)
 }
 

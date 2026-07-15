@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -34,19 +33,6 @@ func TestEndToEndDeploy(t *testing.T) {
 		t.Fatalf("build piperd: %v\n%s", err, out)
 	}
 
-	// Mint a token before starting the daemon, so there's only one writer to
-	// piper.db at a time.
-	tokenCmd := exec.Command(bin, "token", "create", "--name", "e2e")
-	tokenCmd.Env = append(os.Environ(), "PIPER_DATA_DIR="+dataDir)
-	tokenOut, err := tokenCmd.Output()
-	if err != nil {
-		t.Fatalf("token create: %v", err)
-	}
-	token := strings.TrimSpace(string(tokenOut))
-	if token == "" {
-		t.Fatal("token create: empty token")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin)
@@ -62,7 +48,9 @@ func TestEndToEndDeploy(t *testing.T) {
 
 	waitPort(t, "127.0.0.1:8088", 15*time.Second)
 
-	c := client.New("http://127.0.0.1:8088", token)
+	// Tokenless: the local control API needs no auth (#221) — the golden path
+	// on the box is `piper up` with zero login.
+	c := client.New("http://127.0.0.1:8088", "")
 	if err := c.CreateApp("blog", 8080); err != nil {
 		t.Fatalf("CreateApp: %v", err)
 	}
