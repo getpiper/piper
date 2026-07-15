@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/store"
+	"github.com/getpiper/piper/internal/tunnel"
 	"github.com/getpiper/piper/internal/version"
 )
 
@@ -302,6 +303,42 @@ func TestStartAuthAPIRequiresToken(t *testing.T) {
 	}
 	if code := get(tok); code != http.StatusOK {
 		t.Errorf("valid bearer = %d, want 200", code)
+	}
+}
+
+// Tunnel control streams must land on the authenticated listener, never the
+// tokenless local one — otherwise the relay path silently loses its bearer
+// gate. Pins the dial wiring for both relay modes. #221.
+func TestDialLocalControlGoesToAuthListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	accepted := make(chan struct{}, 2)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+			accepted <- struct{}{}
+		}
+	}()
+
+	for _, terminated := range []bool{true, false} {
+		dial := newDialLocal(terminated, ln.Addr().String())
+		conn, err := dial(tunnel.KindControlAPI)
+		if err != nil {
+			t.Fatalf("terminated=%v: dial control: %v", terminated, err)
+		}
+		conn.Close()
+		select {
+		case <-accepted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("terminated=%v: control stream did not reach the auth listener", terminated)
+		}
 	}
 }
 

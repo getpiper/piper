@@ -152,6 +152,23 @@ func startAuthAPI(st *store.Store, handler http.Handler) (string, *http.Server, 
 	return ln.Addr().String(), srv, nil
 }
 
+// newDialLocal maps relay tunnel stream kinds to local addresses. Control
+// streams go to the authenticated listener (authAddr) — never the tokenless
+// local one, or the relay path would silently lose its bearer gate (#221).
+// Terminated mode serves apps plaintext on :80; otherwise TLS on :443.
+func newDialLocal(terminated bool, authAddr string) func(kind byte) (net.Conn, error) {
+	return func(kind byte) (net.Conn, error) {
+		switch {
+		case kind == tunnel.KindControlAPI:
+			return net.Dial("tcp", authAddr)
+		case terminated && kind == tunnel.KindHTTP:
+			return net.Dial("tcp", "127.0.0.1:80")
+		default:
+			return net.Dial("tcp", "127.0.0.1:443")
+		}
+	}
+}
+
 // runTokenCmd implements `piperd token <create|list|revoke>`, writing directly
 // to the on-box store. It needs no auth: running it is proof of box ownership.
 func runTokenCmd(st tokenStore, args []string, out io.Writer) error {
@@ -323,19 +340,8 @@ func main() {
 	// cert, serves :443, and answers KindPassthrough streams. Control streams go
 	// to the authenticated listener — never the tokenless local one.
 	if cfg.RelayAddr != "" {
-		var dialLocal func(kind byte) (net.Conn, error)
-		if cfg.Terminated {
-			dialLocal = func(kind byte) (net.Conn, error) {
-				switch kind {
-				case tunnel.KindControlAPI:
-					return net.Dial("tcp", authAddr)
-				case tunnel.KindHTTP:
-					return net.Dial("tcp", "127.0.0.1:80")
-				default:
-					return net.Dial("tcp", "127.0.0.1:443")
-				}
-			}
-		} else {
+		dialLocal := newDialLocal(cfg.Terminated, authAddr)
+		if !cfg.Terminated {
 			if cfg.TLSCertFile != "" {
 				certPEM, err := os.ReadFile(cfg.TLSCertFile)
 				if err != nil {
@@ -356,12 +362,6 @@ func main() {
 				if err := domMgr.RunEnv(ctx, iss); err != nil {
 					log.Fatalf("relay tls: %v", err)
 				}
-			}
-			dialLocal = func(kind byte) (net.Conn, error) {
-				if kind == tunnel.KindControlAPI {
-					return net.Dial("tcp", authAddr)
-				}
-				return net.Dial("tcp", "127.0.0.1:443")
 			}
 		}
 		tc := &agent.TunnelClient{}
