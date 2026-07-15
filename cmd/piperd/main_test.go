@@ -227,6 +227,25 @@ func TestProvisionRelayControlPushFailureUnwinds(t *testing.T) {
 	}
 }
 
+// Both control-API servers (local tokenless + authenticated) must go through
+// the same graceful drain; apiServers folds them into the one apiShutdowner
+// slot shutdown() already has. #221.
+func TestAPIServersShutdownCoversAll(t *testing.T) {
+	rec := &recorder{}
+	s := apiServers{&recServer{rec}, &recServer{rec}}
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := rec.snapshot()
+	want := []string{"api-shutdown", "api-shutdown", "api-close", "api-close"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+}
+
 // The authenticated listener is the relay tunnel's control-API entry point:
 // it must sit on loopback at an ephemeral port and enforce the bearer, while
 // the local listener (cfg.APIAddr) serves tokenless. #221.

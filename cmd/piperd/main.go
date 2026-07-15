@@ -108,6 +108,31 @@ func provisionRelayControl(st relayTokenStore, push func(string) error, baseDoma
 	log.Printf("relay control provision: pushed control bearer for %s", baseDomain)
 }
 
+// apiServers folds the control API's two servers (local tokenless +
+// authenticated) into the one apiShutdowner slot shutdown() has, so both go
+// through the same graceful drain (#221).
+type apiServers []apiShutdowner
+
+func (s apiServers) Shutdown(ctx context.Context) error {
+	var first error
+	for _, srv := range s {
+		if err := srv.Shutdown(ctx); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func (s apiServers) Close() error {
+	var first error
+	for _, srv := range s {
+		if err := srv.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
 // startAuthAPI serves handler wrapped in RequireToken on an ephemeral loopback
 // listener and returns the bound address. It is the control API's authenticated
 // entry point: the relay tunnel dials it for control streams, so the bearer
