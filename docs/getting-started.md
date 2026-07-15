@@ -87,14 +87,19 @@ a service, or wire your own automation? See [`manual-setup.md`](manual-setup.md)
 
 ## Drive piperd from another machine on the LAN
 
-The control API requires a bearer token, so mint one on the box and log the CLI
-in first. Running `piperd token create` on the box is itself the proof you own
-it — no auth needed for that step; on a systemd install it needs `sudo` to reach
-the service's data dir and will say so if you forget.
+**On the box itself, the CLI needs no login**: the control API binds to
+loopback (`127.0.0.1:8088`) by default and serves it tokenless — being able to
+run `piper` on the box is itself the proof you own it. `piper list`, `piper
+deploy`, etc. just work.
 
-The control API binds to loopback (`127.0.0.1:8088`) by default. To reach it
-from another machine on the LAN set `PIPER_API_ADDR=0.0.0.0:8088` on the box —
-uncomment it in `/etc/piper/piperd.env` and restart:
+Once the API leaves loopback it requires a bearer token, so mint one on the box
+and log the CLI in first. Running `piperd token create` on the box needs no
+auth either; on a systemd install it needs `sudo` to reach the service's data
+dir and will say so if you forget.
+
+To reach the control API from another machine on the LAN set
+`PIPER_API_ADDR=0.0.0.0:8088` on the box — uncomment it in
+`/etc/piper/piperd.env` and restart:
 
 ```bash
 # on the box:
