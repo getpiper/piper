@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -303,6 +304,41 @@ func TestStartAuthAPIRequiresToken(t *testing.T) {
 	}
 	if code := get(tok); code != http.StatusOK {
 		t.Errorf("valid bearer = %d, want 200", code)
+	}
+}
+
+// The local listener is tokenless only while it binds loopback. A non-loopback
+// bind (the documented PIPER_API_ADDR=0.0.0.0:8088 LAN flow) keeps requiring
+// the bearer — otherwise that flow would expose an unauthenticated control API
+// to the whole LAN. #221.
+func TestNewLocalHandlerAuthFollowsBindAddress(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "piper.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	cases := []struct {
+		addr     string
+		wantCode int
+	}{
+		{"127.0.0.1:8088", http.StatusOK},
+		{"localhost:8088", http.StatusOK},
+		{"[::1]:8088", http.StatusOK},
+		{"0.0.0.0:8088", http.StatusUnauthorized},
+		{":8088", http.StatusUnauthorized},
+		{"192.168.1.50:8088", http.StatusUnauthorized},
+	}
+	for _, c := range cases {
+		t.Run(c.addr, func(t *testing.T) {
+			h := newLocalHandler(st, ok, c.addr)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apps", nil))
+			if rec.Code != c.wantCode {
+				t.Fatalf("tokenless request on bind %q = %d, want %d", c.addr, rec.Code, c.wantCode)
+			}
+		})
 	}
 }
 

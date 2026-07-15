@@ -152,6 +152,31 @@ func startAuthAPI(st *store.Store, handler http.Handler) (string, *http.Server, 
 	return ln.Addr().String(), srv, nil
 }
 
+// newLocalHandler picks the auth mode for the local control-API listener from
+// its bind address: loopback serves tokenless (the bind is the trust boundary),
+// while a non-loopback bind (the documented PIPER_API_ADDR=0.0.0.0:8088 LAN
+// flow) keeps requiring the bearer — otherwise that flow would expose an
+// unauthenticated control API to the whole LAN (#221).
+func newLocalHandler(st *store.Store, handler http.Handler, addr string) http.Handler {
+	if loopbackAddr(addr) {
+		return handler
+	}
+	return api.RequireToken(st, handler)
+}
+
+// loopbackAddr reports whether addr binds only the loopback interface.
+func loopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // newDialLocal maps relay tunnel stream kinds to local addresses. Control
 // streams go to the authenticated listener (authAddr) — never the tokenless
 // local one, or the relay path would silently lose its bearer gate (#221).
@@ -384,11 +409,12 @@ func main() {
 		}
 	}
 
-	// The local listener: tokenless. The loopback bind is the trust boundary —
-	// whoever can run the CLI on the box already owns the Docker socket piperd
-	// drives. Internet-originated (relay-proxied) requests never land here; they
-	// go to the authenticated listener above (#221).
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: apiHandler}
+	// The local listener: tokenless on a loopback bind — whoever can run the
+	// CLI on the box already owns the Docker socket piperd drives. A LAN bind
+	// keeps the bearer (see newLocalHandler). Internet-originated
+	// (relay-proxied) requests never land here; they go to the authenticated
+	// listener above (#221).
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: newLocalHandler(st, apiHandler, cfg.APIAddr)}
 	go func() {
 		log.Printf("piperd listening on %s (apps at *.%s)", cfg.APIAddr, cfg.BaseDomain)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
