@@ -1,7 +1,7 @@
 # Getting started
 
-The full journey, in order: install → drive `piperd` from your laptop →
-join the public relay → drive a box remotely → git deploys. Each section
+The full journey, in order: install → drive `piperd` (CLI or the interactive
+TUI) → join the public relay → drive a box remotely → git deploys. Each section
 builds on the previous one, but you can stop wherever your setup is complete —
 a LAN-only box never needs the relay sections.
 
@@ -84,6 +84,30 @@ Shell completions and a Homebrew tap are planned follow-ups.
 
 Prefer to build from source, run piperd in Docker via Compose, run the relay as
 a service, or wire your own automation? See [`manual-setup.md`](manual-setup.md).
+
+## The interactive TUI
+
+`piper` is dual-mode. Every subcommand stays scriptable and byte-for-byte
+unchanged, but bare `piper` in a terminal opens a full-screen TUI — a complete
+control surface, not just a dashboard:
+
+```bash
+piper            # opens the TUI against the current box
+```
+
+- **Apps table** (home) — NAME · STATUS · URL · LAST DEPLOY, refreshed every 2s.
+- **Drill down** — `↵` opens an app's detail, deployments, and logs (with live
+  follow).
+- **Actions** — deploy, new app, stop, delete, right from the TUI.
+- **Boxes** — `t` opens a box switcher and config editor to add/edit/remove
+  targets.
+- **Wizards** — login, `piper connect`, GitHub App setup, and repo linking run
+  interactively.
+
+Keys: `↵` open · `esc` back · `r` refresh · `t` boxes · `?` help · `q` quit.
+Run it on the box and it's authless (see below); point it at a remote box with
+`piper --remote <base-domain>`. Non-TTY invocation (scripts, pipes) is
+untouched — bare `piper` with no terminal still prints usage and exits 2.
 
 ## Drive piperd from another machine on the LAN
 
