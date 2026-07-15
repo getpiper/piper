@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -10,6 +14,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/store"
+	"github.com/getpiper/piper/internal/tunnel"
 	"github.com/getpiper/piper/internal/version"
 )
 
@@ -221,6 +226,155 @@ func TestProvisionRelayControlPushFailureUnwinds(t *testing.T) {
 	// The mint must be unwound so the marker doesn't block the next attempt.
 	if len(f.deleted) != 1 || f.deleted[0] != "relay:base.example.com" {
 		t.Fatalf("deleted = %v, want the just-minted label", f.deleted)
+	}
+}
+
+// Both control-API servers (local tokenless + authenticated) must go through
+// the same graceful drain; apiServers folds them into the one apiShutdowner
+// slot shutdown() already has. #221.
+func TestAPIServersShutdownCoversAll(t *testing.T) {
+	rec := &recorder{}
+	s := apiServers{&recServer{rec}, &recServer{rec}}
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := rec.snapshot()
+	want := []string{"api-shutdown", "api-shutdown", "api-close", "api-close"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+}
+
+// The authenticated listener is the relay tunnel's control-API entry point:
+// it must sit on loopback at an ephemeral port and enforce the bearer, while
+// the local listener (cfg.APIAddr) serves tokenless. #221.
+func TestStartAuthAPIRequiresToken(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "piper.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	tok, err := st.CreateToken("test", "admin")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	addr, srv, err := startAuthAPI(st, handler)
+	if err != nil {
+		t.Fatalf("startAuthAPI: %v", err)
+	}
+	defer srv.Close()
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("addr %q: %v", addr, err)
+	}
+	if host != "127.0.0.1" {
+		t.Errorf("host = %q, want 127.0.0.1", host)
+	}
+	if port == "0" || port == "" {
+		t.Errorf("port = %q, want a bound ephemeral port", port)
+	}
+
+	get := func(bearer string) int {
+		req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/apps", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := get(""); code != http.StatusUnauthorized {
+		t.Errorf("no bearer = %d, want 401", code)
+	}
+	if code := get("nope"); code != http.StatusUnauthorized {
+		t.Errorf("bad bearer = %d, want 401", code)
+	}
+	if code := get(tok); code != http.StatusOK {
+		t.Errorf("valid bearer = %d, want 200", code)
+	}
+}
+
+// The local listener is tokenless only while it binds loopback. A non-loopback
+// bind (the documented PIPER_API_ADDR=0.0.0.0:8088 LAN flow) keeps requiring
+// the bearer — otherwise that flow would expose an unauthenticated control API
+// to the whole LAN. #221.
+func TestNewLocalHandlerAuthFollowsBindAddress(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "piper.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	cases := []struct {
+		addr     string
+		wantCode int
+	}{
+		{"127.0.0.1:8088", http.StatusOK},
+		{"localhost:8088", http.StatusOK},
+		{"[::1]:8088", http.StatusOK},
+		{"0.0.0.0:8088", http.StatusUnauthorized},
+		{":8088", http.StatusUnauthorized},
+		{"192.168.1.50:8088", http.StatusUnauthorized},
+	}
+	for _, c := range cases {
+		t.Run(c.addr, func(t *testing.T) {
+			h := newLocalHandler(st, ok, c.addr)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apps", nil))
+			if rec.Code != c.wantCode {
+				t.Fatalf("tokenless request on bind %q = %d, want %d", c.addr, rec.Code, c.wantCode)
+			}
+		})
+	}
+}
+
+// Tunnel control streams must land on the authenticated listener, never the
+// tokenless local one — otherwise the relay path silently loses its bearer
+// gate. Pins the dial wiring for both relay modes. #221.
+func TestDialLocalControlGoesToAuthListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	accepted := make(chan struct{}, 2)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+			accepted <- struct{}{}
+		}
+	}()
+
+	for _, terminated := range []bool{true, false} {
+		dial := newDialLocal(terminated, ln.Addr().String())
+		conn, err := dial(tunnel.KindControlAPI)
+		if err != nil {
+			t.Fatalf("terminated=%v: dial control: %v", terminated, err)
+		}
+		conn.Close()
+		select {
+		case <-accepted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("terminated=%v: control stream did not reach the auth listener", terminated)
+		}
 	}
 }
 
