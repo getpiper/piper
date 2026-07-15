@@ -19,7 +19,8 @@ that kills most homelab hosting.
   own, safely.
 - **Lean** — built to run on a Raspberry Pi. SQLite state, embedded Caddy for
   TLS.
-- **Developer-first** — CLI-driven, Dockerfile-based builds.
+- **Developer-first** — a scriptable CLI *and* a full-screen TUI (bare
+  `piper`), Dockerfile-based builds. On the box itself the CLI needs no login.
 
 ## 60-second quick start
 
@@ -35,9 +36,11 @@ piper deploy blog --path .   # → https://<hash>-<you>.public.getpiper.dev
 ```
 
 That's a Dockerfile built, health-checked, and served on a public HTTPS URL —
-no port forwarding, no domain required. LAN-only use, driving a box from your
-laptop, and self-hosted relays are all covered in the full walkthrough:
-[`docs/getting-started.md`](docs/getting-started.md).
+no port forwarding, no domain required. Prefer to point and click? Run bare
+`piper` in a terminal for the full-screen TUI — monitor, deploy, logs,
+lifecycle, box switcher, and the login/GitHub wizards, all interactive. LAN-only
+use, driving a box from your laptop, and self-hosted relays are all covered in
+the full walkthrough: [`docs/getting-started.md`](docs/getting-started.md).
 
 ## How it works
 
@@ -86,7 +89,7 @@ tunnel as your traffic; nothing else on the box is exposed.
 
 | Doc | Covers |
 | --- | --- |
-| [Getting started](docs/getting-started.md) | install → LAN control → public relay → remote control → git deploys |
+| [Getting started](docs/getting-started.md) | install → TUI → LAN control → public relay → remote control → git deploys |
 | [Manual setup](docs/manual-setup.md) | build from source, piperd in Docker, run the relay as a service |
 | [Custom domains](docs/custom-domains.md) | BYO domain with end-to-end TLS |
 | [E2E runbook](docs/runbooks/git-deploy-e2e.md) | stand up relay + domain + GitHub App from scratch |
