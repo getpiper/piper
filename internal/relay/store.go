@@ -67,8 +67,9 @@ func (s *Store) maxAgentsOrDefault() int {
 func Open(path string) (*Store, error) {
 	// busy_timeout makes a second writer (e.g. an overlapping control API
 	// request) wait for the lock instead of failing immediately with
-	// SQLITE_BUSY.
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	// SQLITE_BUSY. _txlock=immediate serializes write transactions from the
+	// start, closing COUNT-then-INSERT races (e.g. EnrollForAccount cap check).
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}

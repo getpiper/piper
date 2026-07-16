@@ -105,6 +105,10 @@ func isUniqueViolation(err error) bool {
 // account has been disabled by the operator kill-switch.
 var ErrBadCredential = errors.New("bad credential")
 
+// ErrUnknownAccount is returned when an operation names an account that does
+// not exist in the store.
+var ErrUnknownAccount = errors.New("unknown account")
+
 // MintAccountCredential issues a fresh random credential for accountID and stores
 // only its hash. The plaintext is returned once, to the caller.
 func (s *Store) MintAccountCredential(accountID string) (string, error) {
@@ -153,7 +157,6 @@ func (s *Store) AuthenticateAccount(cred string) (Account, error) {
 		return Account{}, ErrBadCredential
 	}
 	acc.GithubLogin = gl.String
-	acc.Disabled = false
 	return acc, nil
 }
 
@@ -184,16 +187,24 @@ var ErrQuotaExceeded = errors.New("account agent quota exceeded")
 // EnrollForAccount mints an enrollment token for a new agent bound to accountID,
 // assigning it "<hash>-<username>.<apex>". Enforces the per-account agent cap.
 func (s *Store) EnrollForAccount(accountID string) (Enrollment, error) {
+	// The immediate transaction (see Open) serializes the cap check and insert
+	// so concurrent enrollments cannot overshoot the cap.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Enrollment{}, err
+	}
+	defer tx.Rollback()
+
 	var username string
-	if err := s.db.QueryRow(`SELECT username FROM accounts WHERE id=?`, accountID).Scan(&username); err != nil {
+	if err := tx.QueryRow(`SELECT username FROM accounts WHERE id=?`, accountID).Scan(&username); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Enrollment{}, ErrBadCredential
+			return Enrollment{}, ErrUnknownAccount
 		}
 		return Enrollment{}, err
 	}
 
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE account_id=?`, accountID).Scan(&count); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM agents WHERE account_id=?`, accountID).Scan(&count); err != nil {
 		return Enrollment{}, err
 	}
 	if count >= s.maxAgentsOrDefault() {
@@ -214,10 +225,13 @@ func (s *Store) EnrollForAccount(accountID string) (Enrollment, error) {
 		}
 		tok := hex.EncodeToString(raw)
 
-		_, err := s.db.Exec(
+		_, err := tx.Exec(
 			`INSERT INTO agents(name, token_hash, base_domain, account_id, created_at) VALUES(?,?,?,?,?)`,
 			base, hashToken(tok), base, accountID, now)
 		if err == nil {
+			if err := tx.Commit(); err != nil {
+				return Enrollment{}, err
+			}
 			return Enrollment{Token: tok, BaseDomain: base}, nil
 		}
 		if isUniqueViolation(err) {
