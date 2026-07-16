@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"testing"
+	"time"
 )
 
 // writeRecorder records everything written through it so the test can assert
@@ -54,6 +55,61 @@ func TestPeekALPN(t *testing.T) {
 				t.Fatalf("consumed %d bytes, client sent %d — replay would corrupt the stream", len(consumed), len(wr.buf))
 			}
 		})
+	}
+}
+
+// TestPeekALPNTimesOutOnStalledPeer exercises the stall path: a client that
+// writes a partial TLS record header (promising more bytes than it sends)
+// and then never sends the rest. PeekALPN must not hang past
+// alpnPeekTimeout, must report acme == false, and must return exactly the
+// bytes the client actually sent (so a subsequent replay isn't corrupted).
+func TestPeekALPNTimesOutOnStalledPeer(t *testing.T) {
+	old := alpnPeekTimeout
+	alpnPeekTimeout = 100 * time.Millisecond
+	defer func() { alpnPeekTimeout = old }()
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	// A handshake record header (0x16 = handshake, 0x0301 = legacy version)
+	// claiming a 0xffff-byte body — far more than actually sent — then stall
+	// without closing.
+	partial := []byte{0x16, 0x03, 0x01, 0xff, 0xff}
+	go func() {
+		_, _ = client.Write(partial)
+		// Deliberately no further writes and no Close: the peer stalls.
+	}()
+
+	done := make(chan struct{})
+	var acme bool
+	var consumed []byte
+	go func() {
+		acme, consumed = PeekALPN(server)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PeekALPN did not return within the timeout")
+	}
+
+	if acme {
+		t.Fatal("PeekALPN reported acme = true for a stalled, non-completing handshake")
+	}
+	if !bytes.Equal(consumed, partial) {
+		t.Fatalf("consumed = %v, want %v", consumed, partial)
+	}
+
+	// The read deadline should be cleared afterwards; a subsequent read on
+	// the pipe should now block indefinitely rather than fail immediately
+	// with a deadline-exceeded error, so poke it with a short local timeout.
+	_ = server.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	buf := make([]byte, 1)
+	_, err := server.Read(buf)
+	if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
+		t.Fatalf("read after PeekALPN returned = %v, want a fresh timeout (deadline was cleared)", err)
 	}
 }
 
