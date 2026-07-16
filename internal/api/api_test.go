@@ -537,6 +537,22 @@ func TestDeploymentLogsEndpoint(t *testing.T) {
 	if unknown.Code != http.StatusNotFound {
 		t.Errorf("unknown id status = %d, want 404", unknown.Code)
 	}
+
+	blank, err := s.CreateDeployment("blog", "img0", "c0", 40000, "failed", "")
+	if err != nil {
+		t.Fatalf("CreateDeployment blank logs: %v", err)
+	}
+	blankRec := httptest.NewRecorder()
+	h.ServeHTTP(blankRec, httptest.NewRequest(http.MethodGet, "/v1/apps/blog/deployments/"+blank.ID+"/logs", nil))
+	if blankRec.Code != http.StatusOK {
+		t.Fatalf("blank log status = %d, want 200", blankRec.Code)
+	}
+	if ct := blankRec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("blank log Content-Type = %q, want text/plain", ct)
+	}
+	if blankRec.Body.String() != "" {
+		t.Errorf("blank log body = %q, want empty", blankRec.Body.String())
+	}
 }
 
 type fakeDomainManager struct {

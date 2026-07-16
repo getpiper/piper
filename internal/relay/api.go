@@ -268,7 +268,7 @@ func (a *api) authAccount(w http.ResponseWriter, r *http.Request) (Account, bool
 		return Account{}, false
 	}
 	acc, err := a.st.AuthenticateAccount(cred)
-	if errors.Is(err, ErrBadCredential) {
+	if errors.Is(err, ErrBadCredential) || errors.Is(err, ErrUnknownAccount) {
 		http.Error(w, "bad credential", http.StatusUnauthorized)
 		return Account{}, false
 	}

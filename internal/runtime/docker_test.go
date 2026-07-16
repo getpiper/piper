@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 	dir := t.TempDir()
 	// busybox httpd stays foreground and listens on :8080 so WaitHealthy's
 	// TCP dial succeeds — no package install, minimal pull.
-	df := "FROM busybox:1.36\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/\"]\n"
+	df := "FROM busybox:1.36\nCMD [\"sh\", \"-c\", \"echo hello piper logs && exec httpd -f -p 8080 -h /\"]\n"
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +59,33 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 
 	if err := r.WaitHealthy(ctx, run.HostPort); err != nil {
 		t.Fatalf("WaitHealthy: %v", err)
+	}
+
+	// WaitHealthy gates on the TCP listener, not on stdout having traversed
+	// Docker's log pipeline — the echoed marker can lag behind under load, so
+	// poll the snapshot until it appears rather than reading once.
+	var logBytes []byte
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rc, err := r.Logs(ctx, run.ContainerID)
+		if err != nil {
+			t.Fatalf("Logs: %v", err)
+		}
+		logBytes, err = io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("read logs: %v", err)
+		}
+		if bytes.Contains(logBytes, []byte("hello piper logs")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("logs missing expected plain text after 10s, got:\n%s", string(logBytes))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if bytes.Contains(logBytes, []byte{0x01}) || bytes.Contains(logBytes, []byte{0x02}) {
+		t.Errorf("logs contain stdcopy stream prefix bytes:\n%x", logBytes)
 	}
 }
 
