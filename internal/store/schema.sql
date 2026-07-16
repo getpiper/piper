@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS domain_config (
 );
 CREATE TABLE IF NOT EXISTS app_domains (
     domain         TEXT PRIMARY KEY,
-    app            TEXT NOT NULL,
+    app            TEXT NOT NULL REFERENCES apps(name),
     status         TEXT NOT NULL DEFAULT '',
     error          TEXT NOT NULL DEFAULT '',
     cert_not_after TEXT NOT NULL DEFAULT '',

@@ -140,6 +140,9 @@ func (s *Store) DeleteApp(name string) error {
 	if _, err := tx.Exec(`DELETE FROM deployments WHERE app=?`, name); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM app_domains WHERE app=?`, name); err != nil {
+		return err
+	}
 	res, err := tx.Exec(`DELETE FROM apps WHERE name=?`, name)
 	if err != nil {
 		return err

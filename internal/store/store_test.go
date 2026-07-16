@@ -685,6 +685,30 @@ func TestDeleteAppUnknownIsNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteAppRemovesDomains(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddAppDomain("example.com", "blog"); err != nil {
+		t.Fatalf("AddAppDomain: %v", err)
+	}
+
+	if err := s.DeleteApp("blog"); err != nil {
+		t.Fatalf("DeleteApp: %v", err)
+	}
+	if _, err := s.GetAppDomain("example.com"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("domain row still present after DeleteApp: err = %v, want ErrNotFound", err)
+	}
+	// The domain must be reclaimable by another app.
+	if err := s.AddAppDomain("example.com", "api"); err != nil {
+		t.Fatalf("re-add domain after delete: %v", err)
+	}
+}
+
 // insertDeploymentAt writes a deployment row with an explicit created_at so
 // tie/ordering cases (identical or lexically-misordered timestamps) can be
 // forced deterministically.
@@ -745,6 +769,10 @@ func TestAppDomainRoundTrip(t *testing.T) {
 	}
 	if _, err := s.GetAppDomain("example.com"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("after delete: err = %v, want ErrNotFound", err)
+	}
+	// Deleting an absent domain is not an error.
+	if err := s.DeleteAppDomain("example.com"); err != nil {
+		t.Fatalf("DeleteAppDomain missing: %v", err)
 	}
 }
 
