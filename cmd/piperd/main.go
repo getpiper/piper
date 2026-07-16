@@ -329,6 +329,7 @@ func main() {
 	dep := deploy.New(st, rt, caddy.NewClient(cfg.CaddyAdmin), cfg.BaseDomain)
 
 	var domMgr *domain.Manager
+	var alpnSolver *certs.ALPNSolver
 	if cfg.RelayAddr != "" {
 		relayHost := cfg.RelayAddr
 		if h, _, err := net.SplitHostPort(cfg.RelayAddr); err == nil {
@@ -385,7 +386,7 @@ func main() {
 		// The TLS-ALPN-01 solver runs whenever relay mode is up: idle it is one
 		// dormant loopback listener. Issuance wiring lands with the per-domain
 		// lifecycle manager (#229); this guarantees the challenge is answerable.
-		alpnSolver, err := certs.NewALPNSolver("127.0.0.1:0")
+		alpnSolver, err = certs.NewALPNSolver("127.0.0.1:0")
 		if err != nil {
 			log.Fatalf("alpn solver: %v", err)
 		}
@@ -455,6 +456,9 @@ func main() {
 	var whLifecycle webhookLifecycle
 	if wh != nil {
 		whLifecycle = wh
+	}
+	if alpnSolver != nil {
+		_ = alpnSolver.Close()
 	}
 	shutdown(apiServers{srv, authSrv}, whLifecycle, mgrStop, st)
 	os.Exit(0)
