@@ -4,6 +4,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"testing"
 
@@ -75,5 +77,17 @@ func TestObtainTLSALPNAgainstPebble(t *testing.T) {
 	}
 	if len(certPEM) == 0 || len(keyPEM) == 0 {
 		t.Fatal("empty cert/key")
+	}
+
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("pem.Decode: no block found in certPEM")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+	if err := leaf.VerifyHostname("alice.example.com"); err != nil {
+		t.Fatalf("VerifyHostname(%q): %v (DNSNames = %v)", "alice.example.com", err, leaf.DNSNames)
 	}
 }
