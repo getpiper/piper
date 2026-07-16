@@ -155,3 +155,34 @@ func (s *Store) CustomDomains(baseDomain string) ([]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// ConfirmCustomDomain flips the agent's own claim to active: the box reports
+// it holds the issued cert (#229 sends this after TLS-ALPN-01 completes).
+// Pending age is deliberately not checked — eviction by a rival claim is the
+// only thing that kills a claim, so a slow issuance still confirms if nobody
+// contested the name. Idempotent on active rows.
+func (s *Store) ConfirmCustomDomain(baseDomain, domain string) error {
+	res, err := s.db.Exec(
+		`UPDATE custom_domains SET status='active' WHERE domain=? AND agent_base=?`,
+		domain, baseDomain)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrDomainNotFound
+	}
+	return nil
+}
+
+// RemoveCustomDomain drops the agent's own claim on domain. Idempotent —
+// removing a domain the agent does not hold is a no-op, so teardown retries
+// are safe.
+func (s *Store) RemoveCustomDomain(baseDomain, domain string) error {
+	_, err := s.db.Exec(
+		`DELETE FROM custom_domains WHERE domain=? AND agent_base=?`, domain, baseDomain)
+	return err
+}

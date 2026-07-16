@@ -176,3 +176,65 @@ func TestAddCustomDomainCap(t *testing.T) {
 		t.Fatalf("re-add at cap: %v", err)
 	}
 }
+
+func TestConfirmCustomDomain(t *testing.T) {
+	st := openDomainsStore(t)
+	now := time.Now()
+	st.nowFunc = func() time.Time { return now }
+	if err := st.AddCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatal(err)
+	}
+	// Only the holder may confirm.
+	if err := st.ConfirmCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainNotFound) {
+		t.Fatalf("rival confirm: err = %v, want ErrDomainNotFound", err)
+	}
+	if err := st.ConfirmCustomDomain("alice.example.com", "nope.dev"); !errors.Is(err, ErrDomainNotFound) {
+		t.Fatalf("missing row: err = %v, want ErrDomainNotFound", err)
+	}
+	// Confirm ignores pending age: eviction is the only claim-killer, so a
+	// slow issuance (>TTL) still confirms if nobody contested the name.
+	now = now.Add(pendingTTL + time.Minute)
+	if err := st.ConfirmCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatalf("confirm after TTL: %v", err)
+	}
+	// Active rows never expire from the list.
+	now = now.Add(24 * time.Hour)
+	if got, _ := st.CustomDomains("alice.example.com"); len(got) != 1 || got[0] != "shop.dev" {
+		t.Fatalf("active domain listed = %v", got)
+	}
+	// Idempotent on active.
+	if err := st.ConfirmCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatalf("re-confirm: %v", err)
+	}
+	// An active row blocks rivals forever.
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
+		t.Fatalf("rival vs active: %v", err)
+	}
+}
+
+func TestRemoveCustomDomain(t *testing.T) {
+	st := openDomainsStore(t)
+	if err := st.AddCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatal(err)
+	}
+	// Another agent's remove must not touch the row.
+	if err := st.RemoveCustomDomain("bob.example.com", "shop.dev"); err != nil {
+		t.Fatalf("rival remove errored: %v", err)
+	}
+	if got, _ := st.CustomDomains("alice.example.com"); len(got) != 1 {
+		t.Fatalf("rival remove deleted the row: %v", got)
+	}
+	if err := st.RemoveCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if got, _ := st.CustomDomains("alice.example.com"); len(got) != 0 {
+		t.Fatalf("still listed after remove: %v", got)
+	}
+	// Idempotent: removing again is a no-op, and the name is free for others.
+	if err := st.RemoveCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatalf("re-remove: %v", err)
+	}
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); err != nil {
+		t.Fatalf("claim after remove: %v", err)
+	}
+}
