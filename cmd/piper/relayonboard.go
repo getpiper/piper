@@ -92,6 +92,9 @@ type connectOpts struct {
 // into the service at start — so connect prints a plain-sudo upsert of the three
 // relay keys instead (the file may already hold ACME/DNS settings, so it must
 // not be clobbered).
+//
+// Run off-box — no piperd install of any flavor on the machine — connect fails
+// loudly instead of writing a relay.json nothing will read (#173).
 func connect(o connectOpts, stdout, stderr io.Writer) int {
 	cc, err := config.LoadClient()
 	if err != nil {
@@ -100,6 +103,14 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 	}
 	if cc.RelayAPI == "" || cc.AccountCredential == "" {
 		fmt.Fprintln(stderr, "error: not logged in to a relay; run `piper login` first")
+		return 1
+	}
+	// Fail loudly off-box before enrolling: the enrollment would land in a
+	// relay.json no piperd reads here, and the claim would still burn an
+	// account quota slot (#173).
+	if !config.SystemManaged() && !agentInstalled(o.dataDir) {
+		fmt.Fprintln(stderr, "error: no piperd installation found on this machine — `piper connect` must be run on the box where piperd is installed")
+		fmt.Fprintf(stderr, "(no systemd install, rootless user unit, launchd agent, or existing data dir %s found)\n", o.dataDir)
 		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -122,13 +133,14 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 	// start. Guide a plain-sudo upsert of the three relay keys (delete any prior
 	// or commented copies, then append) rather than clobbering admin edits.
 	if config.SystemManaged() {
-		fmt.Fprintf(stdout, "box claimed: %s\n\n", en.BaseDomain)
-		fmt.Fprintln(stdout, "piperd runs as a systemd DynamicUser; store the enrollment in its EnvironmentFile:")
+		fmt.Fprintf(stdout, "box claimed: %s\n", en.BaseDomain)
+		fmt.Fprintln(stdout, "\npiperd runs as a systemd DynamicUser; store the enrollment in its EnvironmentFile.")
+		fmt.Fprintln(stdout, "\nNext step:")
 		fmt.Fprintf(stdout, "\n    sudo sh -c 'f=%s; \\\n"+
 			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN|PIPER_RELAY_TERMINATED)=/d\" \"$f\"; \\\n"+
-			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; } >> \"$f\"'\n\n",
+			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; } >> \"$f\"'\n",
 			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
-		fmt.Fprintln(stdout, "then: sudo systemctl restart piperd")
+		fmt.Fprintln(stdout, "\nthen: sudo systemctl restart piperd")
 		return 0
 	}
 
@@ -143,4 +155,25 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "box claimed: %s\nrestart piperd to connect, e.g.:\n\n    sudo systemctl restart piperd\n", en.BaseDomain)
 	return 0
+}
+
+// agentInstalled reports whether any piperd install is detectable on this
+// machine for the relay.json path: the data dir already exists (piperd has run
+// here), a rootless systemd user unit is installed, or a macOS launchd agent
+// is. connect uses it to fail loudly off-box (#173).
+func agentInstalled(dataDir string) bool {
+	if fi, err := os.Stat(dataDir); err == nil && fi.IsDir() {
+		return true
+	}
+	if unit, err := userUnitPath(); err == nil {
+		if _, err := os.Stat(unit); err == nil {
+			return true
+		}
+	}
+	if plist, err := launchdPlistPath(); err == nil {
+		if _, err := os.Stat(plist); err == nil {
+			return true
+		}
+	}
+	return false
 }
