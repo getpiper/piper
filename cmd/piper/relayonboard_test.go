@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -181,6 +182,98 @@ func TestConnectQuotaExceeded(t *testing.T) {
 	}
 }
 
+func TestConnectOffBoxFailsLoudly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	// The enroll endpoint must NOT be hit: an off-box run fails before burning
+	// an account quota slot on an enrollment nothing would read (#173).
+	var enrolls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		enrolls++
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"enrollment_token": "enr-1", "base_domain": "ab12-alice.public.getpiper.co",
+			"tunnel_endpoint": "relay.getpiper.co:7000",
+		})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{
+		Addr: "http://127.0.0.1:8088", RelayAPI: srv.URL, AccountCredential: "cred-xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// No piperd install of any flavor: no /etc/piper, no rootless user unit or
+	// launchd agent (HOME is a fresh temp dir), and no existing data dir.
+	old := config.SystemEnvDir
+	config.SystemEnvDir = filepath.Join(t.TempDir(), "absent")
+	defer func() { config.SystemEnvDir = old }()
+	dataDir := filepath.Join(t.TempDir(), "absent")
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"connect", "--data-dir", dataDir}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1 (stdout = %s)", code, out.String())
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("on the box")) {
+		t.Fatalf("stderr = %q, want a must-run-on-the-box message", errb.String())
+	}
+	if enrolls != 0 {
+		t.Fatalf("enroll endpoint hit %d times off-box; want 0 (fail before burning quota)", enrolls)
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("data dir created off-box: stat err = %v", err)
+	}
+}
+
+// agentInstalled must recognize each install flavor individually — a false
+// negative for any one of them would lock that flavor's users (rootless
+// systemd, macOS launchd) out of `piper connect` (#173). The all-absent case
+// is also pinned end-to-end by TestConnectOffBoxFailsLoudly.
+func TestAgentInstalledDetectsEachFlavor(t *testing.T) {
+	cases := []struct {
+		name                 string
+		dataDir, unit, plist bool // whether each install marker exists
+		want                 bool
+	}{
+		{"existing data dir", true, false, false, true},
+		{"rootless user unit", false, true, false, true},
+		{"launchd agent", false, false, true, true},
+		{"no install of any flavor", false, false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), "absent")
+			if tc.dataDir {
+				dataDir = t.TempDir()
+			}
+			unit := filepath.Join(t.TempDir(), "absent.service")
+			if tc.unit {
+				unit = filepath.Join(t.TempDir(), "piperd.service")
+				if err := os.WriteFile(unit, []byte("[Unit]"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			plist := filepath.Join(t.TempDir(), "absent.plist")
+			if tc.plist {
+				plist = filepath.Join(t.TempDir(), "dev.getpiper.piperd.plist")
+				if err := os.WriteFile(plist, []byte("plist"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			oldUnit, oldPlist := userUnitPath, launchdPlistPath
+			userUnitPath = func() (string, error) { return unit, nil }
+			launchdPlistPath = func() (string, error) { return plist, nil }
+			defer func() { userUnitPath, launchdPlistPath = oldUnit, oldPlist }()
+
+			if got := agentInstalled(dataDir); got != tc.want {
+				t.Fatalf("agentInstalled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
@@ -219,6 +312,9 @@ func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 		t.Fatalf("relay.json written on a systemd-managed box; expected a guided env-file install")
 	}
 	for _, want := range []string{
+		// The sudo upsert must be framed unmistakably as the action to take (#173).
+		"Next step:",
+		"sudo sh -c",
 		"piperd.env",
 		"PIPER_RELAY_ADDR=relay.getpiper.co:7000",
 		"PIPER_RELAY_TOKEN=enr-1",

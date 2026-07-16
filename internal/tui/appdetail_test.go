@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -98,5 +99,27 @@ func TestAppDetailDKeyPushesDeploy(t *testing.T) {
 	}
 	if pm.view.title() != "deploy" {
 		t.Fatalf("want the deploy view, got title %q", pm.view.title())
+	}
+}
+
+func TestAppDetailErrorBannerKeepsLastRows(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app:  api.App{App: store.App{Name: "blog", Hostname: "blog.piper.localhost", Port: 8080, Repo: "me/blog", Branch: "main"}},
+		deps: fixtureDeps(),
+	})
+	m, _ = m.Update(errMsg{err: errors.New("connection refused")})
+	out := m.View()
+	if !strings.Contains(out, "⚠") || !strings.Contains(out, "connection refused") {
+		t.Fatalf("want error banner, got:\n%s", out)
+	}
+	if !strings.Contains(out, "dep-aaaaaaaa") {
+		t.Fatalf("stale rows dropped on error:\n%s", out)
+	}
+	m, _ = m.Update(appDetailLoadedMsg{
+		app:  api.App{App: store.App{Name: "blog", Hostname: "blog.piper.localhost", Port: 8080, Repo: "me/blog", Branch: "main"}},
+		deps: fixtureDeps(),
+	})
+	if out := m.View(); strings.Contains(out, "⚠") {
+		t.Fatalf("banner must clear on next successful poll:\n%s", out)
 	}
 }

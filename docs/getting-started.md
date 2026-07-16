@@ -161,6 +161,10 @@ Where `piper connect` installs the enrollment depends on the install:
   injects it into the service at start, so its `DynamicUser` never needs to read
   it). Run it, then `sudo systemctl restart piperd`.
 
+Run `connect` **on the box**: on a machine with no piperd install (no systemd
+install, rootless user unit, launchd agent, or existing data dir) it errors out
+instead of writing a `relay.json` nothing would read.
+
 Either way piperd picks up the enrollment at startup and dials the tunnel.
 
 `piper connect` claims the box in **terminated** mode: piperd holds no cert and

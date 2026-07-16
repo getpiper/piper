@@ -99,6 +99,36 @@ func TestLogsFKeyTogglesFollowAndIsNotForwarded(t *testing.T) {
 	}
 }
 
+func TestLogsResizePreservesScrollUnlessFollowing(t *testing.T) {
+	v := newLogsView("blog", "dep-123456789abc", "building")
+	// Height 9 → viewport height 3 (chromeHeight 6); 20 lines overflow it.
+	m, _ := v.Update(tea.WindowSizeMsg{Width: 80, Height: 9})
+	m, _ = m.Update(logsLoadedMsg{logs: strings.Repeat("line\n", 20), status: "building"})
+	// Scroll up away from the bottom so a later GotoBottom would be visible.
+	for i := 0; i < 5; i++ {
+		m, _ = m.Update(keyRunes('k'))
+	}
+	yAfterScroll := m.(logsView).vp.YOffset
+	if yAfterScroll == 0 {
+		t.Fatal("expected to scroll up away from bottom")
+	}
+
+	// follow=false: a resize must preserve the manual scroll position.
+	m, _ = m.Update(keyRunes('f'))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	if m.(logsView).vp.YOffset != yAfterScroll {
+		t.Fatalf("resize moved scroll when not following: %d → %d", yAfterScroll, m.(logsView).vp.YOffset)
+	}
+
+	// follow=true: a resize should jump to the bottom.
+	m, _ = m.Update(keyRunes('f'))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	// 20 trailing-newline lines render as 21 logical lines; viewport height 4 → bottom YOffset is 17.
+	if m.(logsView).vp.YOffset != 17 {
+		t.Fatalf("resize should jump to bottom when following, got YOffset %d", m.(logsView).vp.YOffset)
+	}
+}
+
 func TestLogsRefreshMatchesDeploymentStatus(t *testing.T) {
 	// refresh should report the status of THIS deployment id from Deployments()
 	v := newLogsView("blog", "dep-2", "building")
@@ -113,5 +143,30 @@ func TestLogsRefreshMatchesDeploymentStatus(t *testing.T) {
 	}
 	if lm.status != "running" {
 		t.Fatalf("want status running for dep-2, got %q", lm.status)
+	}
+}
+
+func TestLogsRefreshMissingDeploymentStopsFollow(t *testing.T) {
+	v := newLogsView("blog", "dep-2", "building")
+	f := fakeAPI{
+		logs: "building…\n",
+		deps: []store.Deployment{{ID: "dep-1", Status: "running"}},
+	}
+	m, _ := v.Update(logsLoadedMsg{logs: "line1\n", status: "building"})
+	msg := m.(logsView).refresh(f)()
+	lm, ok := msg.(logsLoadedMsg)
+	if !ok {
+		t.Fatalf("want logsLoadedMsg, got %T", msg)
+	}
+	if lm.status != "stopped" {
+		t.Fatalf("want stopped for missing deployment, got %q", lm.status)
+	}
+	m, _ = m.Update(lm)
+	lv := m.(logsView)
+	if lv.follow {
+		t.Fatal("follow must stop when deployment id is missing")
+	}
+	if lv.refresh(f) != nil {
+		t.Fatal("a loaded, non-following logs view must not poll")
 	}
 }
