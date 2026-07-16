@@ -191,20 +191,53 @@ func LoadClientFile() (ClientFile, error) {
 }
 
 // SaveClientFile writes cf to ~/.piper/piper/config.json with 0600 perms,
-// creating the directory if needed.
+// creating the directory if needed. The write is atomic: bytes are staged to a
+// temp file in the same directory, fsync'd, and renamed over the real path so a
+// crash mid-write cannot leave the config truncated or half-written.
 func SaveClientFile(cf ClientFile) error {
 	path, err := clientConfigPath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cf, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	// Stage the write in the destination directory so the rename stays within
+	// one filesystem and is atomic on POSIX. Use a restrictive mode because the
+	// file holds tokens and relay credentials.
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	// Remove the temp file if anything fails before the rename; after a
+	// successful rename this is a no-op.
+	defer os.Remove(tmp)
+
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// Sync before renaming so a crash after the rename finds the bytes on disk,
+	// not just in the page cache.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func clientConfigPath() (string, error) {
