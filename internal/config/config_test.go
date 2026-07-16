@@ -316,6 +316,76 @@ func TestSaveClientFileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveClientFileSetsRestrictedMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := SaveClientFile(ClientFile{
+		Boxes: []Box{{Name: "pi4", Addr: "http://192.168.1.6:8088", Token: "secret"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := clientConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Fatalf("config mode = %04o, want 0600", got)
+	}
+}
+
+func TestSaveClientFileLeavesNoTempFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := SaveClientFile(ClientFile{
+		Boxes: []Box{{Name: "pi4", Addr: "http://192.168.1.6:8088", Token: "secret"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(home, ".piper", "piper")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "config.json" {
+			t.Fatalf("unexpected leftover file in config dir: %s", e.Name())
+		}
+	}
+}
+
+func TestSaveClientFileOverwritesExisting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	old := ClientFile{
+		Boxes:   []Box{{Name: "old", Addr: "http://old:8088", Token: "oldtok"}},
+		Current: "old",
+	}
+	if err := SaveClientFile(old); err != nil {
+		t.Fatal(err)
+	}
+	newCfg := ClientFile{
+		Boxes:   []Box{{Name: "new", Addr: "http://new:8088", Token: "newtok"}},
+		Current: "new",
+	}
+	if err := SaveClientFile(newCfg); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := LoadClientFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(newCfg, out) {
+		t.Fatalf("overwrite mismatch:\nwant: %+v\n got: %+v", newCfg, out)
+	}
+}
+
 func TestCurrentBoxFallsBackToFirst(t *testing.T) {
 	cf := ClientFile{Boxes: []Box{{Name: "a"}, {Name: "b"}}, Current: "missing"}
 	b, ok := cf.CurrentBox()
