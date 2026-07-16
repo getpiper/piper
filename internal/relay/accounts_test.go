@@ -105,6 +105,15 @@ func TestDisabledAccountCredentialRejected(t *testing.T) {
 	}
 }
 
+func TestEnrollForAccountRejectsUnknownAccount(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+
+	if _, err := st.EnrollForAccount("no-such-account"); err != ErrUnknownAccount {
+		t.Fatalf("unknown account err = %v, want ErrUnknownAccount", err)
+	}
+}
+
 func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10)
