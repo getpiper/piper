@@ -71,14 +71,6 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE apps ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE deployments ADD COLUMN pr INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE deployments ADD COLUMN logs TEXT NOT NULL DEFAULT ''`,
-		`CREATE TABLE IF NOT EXISTS app_domains (
-		    domain         TEXT PRIMARY KEY,
-		    app            TEXT NOT NULL,
-		    status         TEXT NOT NULL DEFAULT '',
-		    error          TEXT NOT NULL DEFAULT '',
-		    cert_not_after TEXT NOT NULL DEFAULT '',
-		    updated_at     TEXT NOT NULL
-		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") {
