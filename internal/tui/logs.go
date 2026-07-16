@@ -71,7 +71,7 @@ func (v logsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.status != "building" {
 			v.follow = false // build finished: the log is static
 		}
-		if len(msg.logs) > len(v.logs) {
+		if len(msg.logs) > len(v.logs) || (len(msg.logs) == len(v.logs) && msg.logs != v.logs) {
 			v.logs = msg.logs
 			if v.ready {
 				v.vp.SetContent(v.logs)

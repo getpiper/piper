@@ -45,6 +45,24 @@ func TestLogsTailAppendAndAutoStop(t *testing.T) {
 	}
 }
 
+func TestLogsTailRotationSurfacesEqualLengthSnapshots(t *testing.T) {
+	const first = "[log truncated]\nold tail\n"
+	const second = "[log truncated]\nnew tail\n"
+	if len(first) != len(second) {
+		t.Fatal("test snapshots must have equal length")
+	}
+	v := newLogsView("blog", "dep-123456789abc", "building")
+	m, _ := v.Update(logsLoadedMsg{logs: first, status: "building"})
+	m, _ = m.Update(logsLoadedMsg{logs: second, status: "building"})
+	lv := m.(logsView)
+	if lv.logs != second {
+		t.Fatalf("rotated equal-length snapshot not adopted: got %q, want %q", lv.logs, second)
+	}
+	if !lv.follow {
+		t.Fatal("should still follow while building")
+	}
+}
+
 func TestLogsViewShowsContextAndFollowTag(t *testing.T) {
 	v := newLogsView("blog", "dep-123456789abc", "building")
 	m, _ := v.Update(logsLoadedMsg{logs: "hello\n", status: "building"})
