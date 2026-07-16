@@ -226,6 +226,54 @@ func TestConnectOffBoxFailsLoudly(t *testing.T) {
 	}
 }
 
+// agentInstalled must recognize each install flavor individually — a false
+// negative for any one of them would lock that flavor's users (rootless
+// systemd, macOS launchd) out of `piper connect` (#173). The all-absent case
+// is also pinned end-to-end by TestConnectOffBoxFailsLoudly.
+func TestAgentInstalledDetectsEachFlavor(t *testing.T) {
+	cases := []struct {
+		name                 string
+		dataDir, unit, plist bool // whether each install marker exists
+		want                 bool
+	}{
+		{"existing data dir", true, false, false, true},
+		{"rootless user unit", false, true, false, true},
+		{"launchd agent", false, false, true, true},
+		{"no install of any flavor", false, false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), "absent")
+			if tc.dataDir {
+				dataDir = t.TempDir()
+			}
+			unit := filepath.Join(t.TempDir(), "absent.service")
+			if tc.unit {
+				unit = filepath.Join(t.TempDir(), "piperd.service")
+				if err := os.WriteFile(unit, []byte("[Unit]"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			plist := filepath.Join(t.TempDir(), "absent.plist")
+			if tc.plist {
+				plist = filepath.Join(t.TempDir(), "dev.getpiper.piperd.plist")
+				if err := os.WriteFile(plist, []byte("plist"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			oldUnit, oldPlist := userUnitPath, launchdPlistPath
+			userUnitPath = func() (string, error) { return unit, nil }
+			launchdPlistPath = func() (string, error) { return plist, nil }
+			defer func() { userUnitPath, launchdPlistPath = oldUnit, oldPlist }()
+
+			if got := agentInstalled(dataDir); got != tc.want {
+				t.Fatalf("agentInstalled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
