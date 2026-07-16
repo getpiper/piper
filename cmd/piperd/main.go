@@ -183,8 +183,9 @@ func loopbackAddr(addr string) bool {
 // Terminated mode serves apps plaintext on :80; otherwise TLS on :443.
 // Passthrough streams whose ClientHello offers acme-tls/1 are TLS-ALPN-01
 // validations and are spliced to the in-process solver (alpnAddr) instead of
-// Caddy, with the peeked hello replayed into whichever backend is dialed (#226).
-func newDialLocal(terminated bool, authAddr, alpnAddr string) func(kind byte, stream net.Conn) (net.Conn, error) {
+// Caddy (caddyAddr), with the peeked hello replayed into whichever backend is
+// dialed (#226).
+func newDialLocal(terminated bool, authAddr, alpnAddr, caddyAddr string) func(kind byte, stream net.Conn) (net.Conn, error) {
 	return func(kind byte, stream net.Conn) (net.Conn, error) {
 		switch {
 		case kind == tunnel.KindControlAPI:
@@ -193,7 +194,7 @@ func newDialLocal(terminated bool, authAddr, alpnAddr string) func(kind byte, st
 			return net.Dial("tcp", "127.0.0.1:80")
 		default:
 			acme, consumed := agent.PeekALPN(stream)
-			addr := "127.0.0.1:443"
+			addr := caddyAddr
 			if acme && alpnAddr != "" {
 				addr = alpnAddr
 			}
@@ -388,7 +389,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("alpn solver: %v", err)
 		}
-		dialLocal := newDialLocal(cfg.Terminated, authAddr, alpnSolver.Addr())
+		dialLocal := newDialLocal(cfg.Terminated, authAddr, alpnSolver.Addr(), "127.0.0.1:443")
 		if !cfg.Terminated {
 			if cfg.TLSCertFile != "" {
 				certPEM, err := os.ReadFile(cfg.TLSCertFile)
