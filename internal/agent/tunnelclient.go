@@ -43,9 +43,11 @@ func (c *TunnelClient) current() *tunnel.Session {
 }
 
 // Run maintains the tunnel to relayAddr, registering baseDomain, and forwards
-// each relay-opened stream to dialLocal(kind). It reconnects with backoff until
-// ctx is cancelled. Blocks.
-func (c *TunnelClient) Run(ctx context.Context, relayAddr, token, baseDomain string, dialLocal func(kind byte) (net.Conn, error)) {
+// each relay-opened stream to dialLocal(kind, stream). dialLocal may peek
+// (read) bytes from stream before choosing a backend; it must replay whatever
+// it consumed into the returned conn. It reconnects with backoff until ctx is
+// cancelled. Blocks.
+func (c *TunnelClient) Run(ctx context.Context, relayAddr, token, baseDomain string, dialLocal func(kind byte, stream net.Conn) (net.Conn, error)) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		conn, err := net.Dial("tcp", relayAddr)
@@ -135,7 +137,7 @@ func (c *TunnelClient) control(req tunnel.ControlRequest) (string, error) {
 // the backoff growing so a misconfigured token doesn't busy-spin reconnects.
 const healthyThreshold = 10 * time.Second
 
-func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func(kind byte) (net.Conn, error)) {
+func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func(kind byte, stream net.Conn) (net.Conn, error)) {
 	defer sess.Close()
 	stopCancel := context.AfterFunc(ctx, func() { _ = sess.Close() })
 	defer stopCancel()
@@ -146,7 +148,7 @@ func serveStreams(ctx context.Context, sess *tunnel.Session, dialLocal func(kind
 		}
 		go func() {
 			defer stream.Close()
-			local, err := dialLocal(kind)
+			local, err := dialLocal(kind, stream)
 			if err != nil {
 				log.Printf("tunnel: dial local (kind %q): %v", kind, err)
 				return
