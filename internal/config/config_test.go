@@ -492,6 +492,44 @@ func TestSaveClientUpdatesOnlyCurrentBox(t *testing.T) {
 	}
 }
 
+func TestSaveClientRepairsStaleCurrentToCurrentBox(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := SaveClientFile(ClientFile{
+		Boxes: []Box{
+			{Name: "a", Addr: "http://a:8088", Token: "at"},
+			{Name: "b", Addr: "http://b:8088", Token: "bt"},
+		},
+		Current: "ghost",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveClient(ClientConfig{Addr: "http://a:8088", Token: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	cf, err := LoadClientFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cf.Boxes) != 2 {
+		t.Fatalf("want 2 boxes, got %+v", cf)
+	}
+	if cf.Current != "a" {
+		t.Fatalf("Current = %q, want repaired to a", cf.Current)
+	}
+	if cf.Boxes[0].Token != "new" {
+		t.Fatalf("fallback box a not updated: %+v", cf.Boxes[0])
+	}
+	if cf.Boxes[1].Token != "bt" {
+		t.Fatalf("sibling box mutated: %+v", cf.Boxes[1])
+	}
+	for _, b := range cf.Boxes {
+		if b.Name == "ghost" {
+			t.Fatalf("stale Current created a bogus ghost box: %+v", cf)
+		}
+	}
+}
+
 func TestSaveClientMigratesLegacyFlatFileToV2(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

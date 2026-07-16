@@ -291,6 +291,9 @@ func SaveClient(cc ClientConfig) error {
 	if name == "" {
 		name = "default"
 	}
+	if b, ok := cf.CurrentBox(); ok {
+		name = b.Name
+	}
 	updated := false
 	for i := range cf.Boxes {
 		if cf.Boxes[i].Name == name {
