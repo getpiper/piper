@@ -242,6 +242,32 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 			router.RegisterCustom(req.Domain, sess)
 		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "add-domain":
+		// Per-app custom domain claim (#227): pending, routable immediately —
+		// that is what lets the TLS-ALPN-01 challenge reach the box before any
+		// cert exists. RegisterCustom overwrites any evicted squatter's mapping
+		// (the router is keyed by domain), so its routing dies with the claim.
+		if err := st.AddCustomDomain(sess.BaseDomain, req.Domain); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		router.RegisterCustom(req.Domain, sess)
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "domain-active":
+		// The box reports it holds the issued cert; the claim becomes
+		// permanent. Routing is already live, so the router is untouched.
+		if err := st.ConfirmCustomDomain(sess.BaseDomain, req.Domain); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "remove-domain":
+		if err := st.RemoveCustomDomain(sess.BaseDomain, req.Domain); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		router.UnregisterCustom(req.Domain)
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	default:
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "unknown op"})
 	}
