@@ -153,6 +153,36 @@ func TestRelayFileRoundTripAndMissing(t *testing.T) {
 	}
 }
 
+func TestSaveRelayFileSetsRestrictedMode(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{RelayAddr: "relay:7000", RelayToken: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, "relay.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Fatalf("relay.json mode = %04o, want 0600", got)
+	}
+}
+
+func TestSaveRelayFileLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{RelayAddr: "relay:7000", RelayToken: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "relay.json" {
+			t.Fatalf("unexpected leftover file in data dir: %s", e.Name())
+		}
+	}
+}
+
 func TestLoadReadsRelayFileWhenEnvUnset(t *testing.T) {
 	dir := t.TempDir()
 	if err := SaveRelayFile(dir, RelayFile{
