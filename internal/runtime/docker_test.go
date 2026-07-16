@@ -61,17 +61,28 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 		t.Fatalf("WaitHealthy: %v", err)
 	}
 
-	rc, err := r.Logs(ctx, run.ContainerID)
-	if err != nil {
-		t.Fatalf("Logs: %v", err)
-	}
-	defer rc.Close()
-	logBytes, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("read logs: %v", err)
-	}
-	if !bytes.Contains(logBytes, []byte("hello piper logs")) {
-		t.Errorf("logs missing expected plain text, got:\n%s", string(logBytes))
+	// WaitHealthy gates on the TCP listener, not on stdout having traversed
+	// Docker's log pipeline — the echoed marker can lag behind under load, so
+	// poll the snapshot until it appears rather than reading once.
+	var logBytes []byte
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rc, err := r.Logs(ctx, run.ContainerID)
+		if err != nil {
+			t.Fatalf("Logs: %v", err)
+		}
+		logBytes, err = io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("read logs: %v", err)
+		}
+		if bytes.Contains(logBytes, []byte("hello piper logs")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("logs missing expected plain text after 10s, got:\n%s", string(logBytes))
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if bytes.Contains(logBytes, []byte{0x01}) || bytes.Contains(logBytes, []byte{0x02}) {
 		t.Errorf("logs contain stdcopy stream prefix bytes:\n%x", logBytes)

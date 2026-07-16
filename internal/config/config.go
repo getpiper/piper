@@ -199,15 +199,22 @@ func SaveClientFile(cf ClientFile) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cf, "", "  ")
 	if err != nil {
 		return err
 	}
+	return atomicWriteFile(path, data)
+}
 
+// atomicWriteFile writes data to path atomically: bytes are staged to a temp
+// file in the destination directory, fsync'd, and renamed over path. The temp
+// file is removed if any error occurs before the rename. The file is created
+// with 0600 permissions because callers store tokens and relay credentials.
+func atomicWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
 	// Stage the write in the destination directory so the rename stays within
 	// one filesystem and is atomic on POSIX. Use a restrictive mode because the
 	// file holds tokens and relay credentials.
@@ -284,6 +291,9 @@ func SaveClient(cc ClientConfig) error {
 	if name == "" {
 		name = "default"
 	}
+	if b, ok := cf.CurrentBox(); ok {
+		name = b.Name
+	}
 	updated := false
 	for i := range cf.Boxes {
 		if cf.Boxes[i].Name == name {
@@ -314,7 +324,8 @@ type RelayFile struct {
 func relayFilePath(dataDir string) string { return filepath.Join(dataDir, "relay.json") }
 
 // SaveRelayFile writes rf to <dataDir>/relay.json with 0600 perms, creating the
-// directory if needed.
+// directory if needed. The write is atomic: bytes are staged to a temp file in
+// the same directory, fsync'd, and renamed over the real path.
 func SaveRelayFile(dataDir string, rf RelayFile) error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
@@ -323,7 +334,7 @@ func SaveRelayFile(dataDir string, rf RelayFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(relayFilePath(dataDir), data, 0o600)
+	return atomicWriteFile(relayFilePath(dataDir), data)
 }
 
 // LoadRelayFile reads <dataDir>/relay.json. A missing file is not an error:
