@@ -245,20 +245,46 @@ func TestEnsureHTTPSServesTLSAlongsidePlaintext(t *testing.T) {
 	}
 
 	// Plaintext HTTP on the original listener still answers.
-	resp, err := http.Get("http://" + httpListen + "/")
-	if err != nil {
-		t.Fatalf("plaintext GET after EnsureHTTPS: %v", err)
-	}
-	resp.Body.Close()
+	retryBriefly(t, "plaintext GET after EnsureHTTPS", func() error {
+		resp, err := http.Get("http://" + httpListen + "/")
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		return nil
+	})
 
 	// TLS handshake on the new listener serves the loaded cert.
-	conn, err := tls.Dial("tcp", httpsListen, &tls.Config{
-		ServerName: "blog.shop.example.com", InsecureSkipVerify: true,
+	retryBriefly(t, "TLS dial piper-tls", func() error {
+		conn, err := tls.Dial("tcp", httpsListen, &tls.Config{
+			ServerName: "blog.shop.example.com", InsecureSkipVerify: true,
+		})
+		if err != nil {
+			return err
+		}
+		conn.Close()
+		return nil
 	})
-	if err != nil {
-		t.Fatalf("TLS dial piper-tls: %v", err)
+}
+
+// retryBriefly retries op until it succeeds or ~2s passes, then fails the
+// test with op's last error. Caddy's admin load returns before the previous
+// server's listener is fully torn down, so a request issued right after a
+// reload can land in the swap window and get reset (#251). A genuinely dead
+// listener still fails: it keeps erroring past the deadline.
+func retryBriefly(t *testing.T, desc string, op func() error) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := op()
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: %v", desc, err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	conn.Close()
 }
 
 func selfSignedPEM(t *testing.T, base string) (certPEM, keyPEM []byte) {
