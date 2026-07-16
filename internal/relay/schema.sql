@@ -47,3 +47,10 @@ CREATE TABLE IF NOT EXISTS org_invites (
     created_at   TEXT NOT NULL,
     PRIMARY KEY (org_id, github_login)
 );
+
+CREATE TABLE IF NOT EXISTS custom_domains (
+    domain      TEXT PRIMARY KEY,
+    agent_base  TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);

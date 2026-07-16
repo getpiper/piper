@@ -97,6 +97,25 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate agents: %w", err)
 	}
+	// #227: per-app custom domains live in custom_domains; fold the legacy
+	// single agents.custom_domain column in as an active row (those boxes
+	// proved ownership via DNS-01 under #102), then clear the column.
+	// Clearing is correctness, not tidiness: this copy re-runs on every
+	// Open, so a stale column value would resurrect a domain the agent has
+	// since removed. One-way; the column and its index stay, unused.
+	if _, err := db.Exec(
+		`INSERT OR IGNORE INTO custom_domains(domain, agent_base, status, created_at)
+		    SELECT custom_domain, base_domain, 'active', ?
+		    FROM agents WHERE custom_domain IS NOT NULL AND custom_domain != ''`,
+		time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate custom domains: %w", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE agents SET custom_domain='' WHERE custom_domain IS NOT NULL AND custom_domain != ''`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate custom domains: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
