@@ -56,6 +56,9 @@ func (v logsView) refresh(c API) tea.Cmd {
 					break
 				}
 			}
+			if status == "" {
+				status = "stopped"
+			}
 		}
 		return logsLoadedMsg{logs: logs, status: status}
 	}
@@ -97,7 +100,9 @@ func (v logsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.vp.Width, v.vp.Height = msg.Width, h
 		}
 		v.vp.SetContent(v.logs)
-		v.vp.GotoBottom()
+		if v.follow {
+			v.vp.GotoBottom()
+		}
 	}
 	if v.ready {
 		var cmd tea.Cmd
