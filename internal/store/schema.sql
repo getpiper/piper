@@ -40,3 +40,11 @@ CREATE TABLE IF NOT EXISTS domain_config (
     cert_not_after TEXT NOT NULL DEFAULT '',
     updated_at     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS app_domains (
+    domain         TEXT PRIMARY KEY,
+    app            TEXT NOT NULL REFERENCES apps(name),
+    status         TEXT NOT NULL DEFAULT '',
+    error          TEXT NOT NULL DEFAULT '',
+    cert_not_after TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL
+);

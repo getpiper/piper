@@ -685,6 +685,30 @@ func TestDeleteAppUnknownIsNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteAppRemovesDomains(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddAppDomain("example.com", "blog"); err != nil {
+		t.Fatalf("AddAppDomain: %v", err)
+	}
+
+	if err := s.DeleteApp("blog"); err != nil {
+		t.Fatalf("DeleteApp: %v", err)
+	}
+	if _, err := s.GetAppDomain("example.com"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("domain row still present after DeleteApp: err = %v, want ErrNotFound", err)
+	}
+	// The domain must be reclaimable by another app.
+	if err := s.AddAppDomain("example.com", "api"); err != nil {
+		t.Fatalf("re-add domain after delete: %v", err)
+	}
+}
+
 // insertDeploymentAt writes a deployment row with an explicit created_at so
 // tie/ordering cases (identical or lexically-misordered timestamps) can be
 // forced deterministically.
@@ -702,6 +726,177 @@ func insertDeploymentAt(t *testing.T, s *Store, app, id, containerID, status, cr
 // trailing zeros are dropped, so "12:00:00.1Z" (100ms) sorts lexically AFTER
 // "12:00:00.15Z" (150ms) even though it is earlier. Ordered queries must key on
 // rowid (insertion order) so the truly-newest row wins. See #109.
+func TestAppDomainRoundTrip(t *testing.T) {
+	s := openTemp(t)
+
+	if _, err := s.GetAppDomain("example.com"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetAppDomain on empty store: err = %v, want ErrNotFound", err)
+	}
+
+	if err := s.AddAppDomain("example.com", "blog"); err != nil {
+		t.Fatalf("AddAppDomain: %v", err)
+	}
+	d, err := s.GetAppDomain("example.com")
+	if err != nil {
+		t.Fatalf("GetAppDomain: %v", err)
+	}
+	if d.Domain != "example.com" || d.App != "blog" || d.Status != "" || d.Error != "" || !d.CertNotAfter.IsZero() {
+		t.Fatalf("fresh domain = %+v, want empty status/error/zero not-after", d)
+	}
+	if d.UpdatedAt.IsZero() {
+		t.Fatalf("UpdatedAt not set")
+	}
+
+	notAfter := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
+	if err := s.UpdateAppDomainStatus("example.com", "active", "", notAfter); err != nil {
+		t.Fatalf("UpdateAppDomainStatus: %v", err)
+	}
+	d, _ = s.GetAppDomain("example.com")
+	if d.Status != "active" || !d.CertNotAfter.Equal(notAfter) {
+		t.Fatalf("after update = %+v", d)
+	}
+
+	if err := s.UpdateAppDomainStatus("example.com", "failed", "acme: boom", time.Time{}); err != nil {
+		t.Fatalf("UpdateAppDomainStatus failed: %v", err)
+	}
+	d, _ = s.GetAppDomain("example.com")
+	if d.Status != "failed" || d.Error != "acme: boom" || !d.CertNotAfter.IsZero() {
+		t.Fatalf("failed update = %+v", d)
+	}
+
+	if err := s.DeleteAppDomain("example.com"); err != nil {
+		t.Fatalf("DeleteAppDomain: %v", err)
+	}
+	if _, err := s.GetAppDomain("example.com"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after delete: err = %v, want ErrNotFound", err)
+	}
+	// Deleting an absent domain is not an error.
+	if err := s.DeleteAppDomain("example.com"); err != nil {
+		t.Fatalf("DeleteAppDomain missing: %v", err)
+	}
+}
+
+func TestAddAppDomainDuplicateErrorsCleanly(t *testing.T) {
+	s := openTemp(t)
+	if err := s.AddAppDomain("example.com", "blog"); err != nil {
+		t.Fatalf("AddAppDomain: %v", err)
+	}
+	// Same domain under a different app must error cleanly, not panic.
+	if err := s.AddAppDomain("example.com", "api"); !errors.Is(err, ErrDomainExists) {
+		t.Fatalf("duplicate domain err = %v, want ErrDomainExists", err)
+	}
+}
+
+func TestUpdateAppDomainStatusMissingDomain(t *testing.T) {
+	s := openTemp(t)
+	if err := s.UpdateAppDomainStatus("example.com", "active", "", time.Time{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListAppDomainsFiltersByApp(t *testing.T) {
+	s := openTemp(t)
+	for _, d := range []struct{ domain, app string }{
+		{"blog1.dev", "blog"},
+		{"blog2.dev", "blog"},
+		{"api.dev", "api"},
+	} {
+		if err := s.AddAppDomain(d.domain, d.app); err != nil {
+			t.Fatalf("AddAppDomain(%q,%q): %v", d.domain, d.app, err)
+		}
+	}
+
+	blog, err := s.ListAppDomains("blog")
+	if err != nil {
+		t.Fatalf("ListAppDomains(blog): %v", err)
+	}
+	if len(blog) != 2 || blog[0].Domain != "blog1.dev" || blog[1].Domain != "blog2.dev" {
+		t.Fatalf("blog domains = %+v", blog)
+	}
+
+	api, err := s.ListAppDomains("api")
+	if err != nil {
+		t.Fatalf("ListAppDomains(api): %v", err)
+	}
+	if len(api) != 1 || api[0].Domain != "api.dev" {
+		t.Fatalf("api domains = %+v", api)
+	}
+
+	empty, err := s.ListAppDomains("none")
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("unknown app = %v (err %v), want empty, nil", empty, err)
+	}
+}
+
+func TestListActiveAppDomainsFiltersByStatus(t *testing.T) {
+	s := openTemp(t)
+	for _, d := range []struct{ domain, app, status string }{
+		{"active1.dev", "blog", "active"},
+		{"active2.dev", "api", "active"},
+		{"pending.dev", "blog", "pending"},
+		{"failed.dev", "api", "failed"},
+	} {
+		if err := s.AddAppDomain(d.domain, d.app); err != nil {
+			t.Fatalf("AddAppDomain(%q,%q): %v", d.domain, d.app, err)
+		}
+		if err := s.UpdateAppDomainStatus(d.domain, d.status, "", time.Time{}); err != nil {
+			t.Fatalf("UpdateAppDomainStatus: %v", err)
+		}
+	}
+
+	active, err := s.ListActiveAppDomains()
+	if err != nil {
+		t.Fatalf("ListActiveAppDomains: %v", err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("len = %d, want 2", len(active))
+	}
+	if active[0].Domain != "active1.dev" || active[1].Domain != "active2.dev" {
+		t.Fatalf("active domains = %+v", active)
+	}
+}
+
+func TestAppDomainsMigratedOnExistingDB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A pre-#225 database: no app_domains table.
+	if _, err := db.Exec(`
+		CREATE TABLE apps (name TEXT PRIMARY KEY, port INTEGER NOT NULL,
+			repo TEXT NOT NULL DEFAULT '', branch TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+		CREATE TABLE deployments (id TEXT PRIMARY KEY, app TEXT NOT NULL REFERENCES apps(name),
+			image_id TEXT NOT NULL, container_id TEXT NOT NULL, host_port INTEGER NOT NULL,
+			status TEXT NOT NULL, created_at TEXT NOT NULL, logs TEXT NOT NULL DEFAULT '', pr INTEGER NOT NULL DEFAULT 0);
+		CREATE TABLE github_app (id INTEGER PRIMARY KEY CHECK (id = 1), app_id INTEGER NOT NULL,
+			private_key TEXT NOT NULL, webhook_secret TEXT NOT NULL);
+		CREATE TABLE tokens (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL UNIQUE,
+			scope TEXT NOT NULL DEFAULT 'admin', created_at TEXT NOT NULL, revoked_at TEXT);
+		CREATE TABLE domain_config (id INTEGER PRIMARY KEY CHECK (id = 1), domain TEXT NOT NULL,
+			dns_provider TEXT NOT NULL, dns_token TEXT NOT NULL, status TEXT NOT NULL,
+			error TEXT NOT NULL DEFAULT '', cert_not_after TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open over old db: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if err := s.AddAppDomain("example.com", "blog"); err != nil {
+		t.Fatalf("AddAppDomain on migrated db: %v", err)
+	}
+	d, err := s.GetAppDomain("example.com")
+	if err != nil {
+		t.Fatalf("GetAppDomain: %v", err)
+	}
+	if d.App != "blog" {
+		t.Fatalf("round-trip = %+v", d)
+	}
+}
+
 func TestDeploymentOrderingTiebreaksOnRowid(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
