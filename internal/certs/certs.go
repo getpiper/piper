@@ -3,6 +3,7 @@ package certs
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"fmt"
 
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge"
@@ -10,17 +11,19 @@ import (
 	"github.com/go-acme/lego/v4/registration"
 )
 
-// Config configures ACME DNS-01 issuance. DNSProvider is any lego challenge
-// provider (e.g. providers/dns/cloudflare); AccountKey is the persisted ACME
-// account key.
+// Config configures ACME issuance. Exactly one challenge mode must be set:
+// DNSProvider (DNS-01, any lego challenge provider — needed for wildcard
+// certs, box-wide BYO) or ALPNSolver (TLS-ALPN-01 — tokenless exact-host
+// certs, per-app BYO). AccountKey is the persisted ACME account key.
 type Config struct {
 	Email       string
 	CADirURL    string
 	DNSProvider challenge.Provider
+	ALPNSolver  challenge.Provider
 	AccountKey  *ecdsa.PrivateKey
 }
 
-// Manager obtains certificates via ACME DNS-01.
+// Manager obtains certificates via ACME (DNS-01 or TLS-ALPN-01).
 type Manager struct {
 	client *lego.Client
 }
@@ -38,6 +41,9 @@ func (u *user) GetPrivateKey() crypto.PrivateKey        { return u.key }
 
 // New builds a Manager and registers the ACME account.
 func New(cfg Config) (*Manager, error) {
+	if (cfg.DNSProvider == nil) == (cfg.ALPNSolver == nil) {
+		return nil, fmt.Errorf("certs: exactly one of DNSProvider or ALPNSolver must be set")
+	}
 	u := &user{email: cfg.Email, key: cfg.AccountKey}
 	lc := lego.NewConfig(u)
 	if cfg.CADirURL != "" {
@@ -47,8 +53,14 @@ func New(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Challenge.SetDNS01Provider(cfg.DNSProvider); err != nil {
-		return nil, err
+	if cfg.DNSProvider != nil {
+		if err := client.Challenge.SetDNS01Provider(cfg.DNSProvider); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := client.Challenge.SetTLSALPN01Provider(cfg.ALPNSolver); err != nil {
+			return nil, err
+		}
 	}
 	reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
 	if err != nil {
