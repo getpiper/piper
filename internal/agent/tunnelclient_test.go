@@ -59,7 +59,7 @@ func TestTunnelClientForwardsToLocal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var c TunnelClient
-	go c.Run(ctx, addr, "tok", "alice.example.com", func(byte) (net.Conn, error) {
+	go c.Run(ctx, addr, "tok", "alice.example.com", func(byte, net.Conn) (net.Conn, error) {
 		return net.Dial("tcp", local.Addr().String())
 	})
 
@@ -103,7 +103,7 @@ func TestTunnelClientDialsByKind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var c TunnelClient
-	go c.Run(ctx, addr, "tok", "base.example.com", func(kind byte) (net.Conn, error) {
+	go c.Run(ctx, addr, "tok", "base.example.com", func(kind byte, _ net.Conn) (net.Conn, error) {
 		if kind == tunnel.KindHTTP {
 			return net.Dial("tcp", ln80.Addr().String())
 		}
@@ -130,7 +130,7 @@ func TestTunnelClientRegister(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var c TunnelClient
-	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
 		return net.Dial("tcp", "127.0.0.1:9") // unused in this test
 	})
 	relaySess := <-sessCh
@@ -182,7 +182,7 @@ func TestServeStreamsStopsOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		serveStreams(ctx, clientSession, func(byte) (net.Conn, error) {
+		serveStreams(ctx, clientSession, func(byte, net.Conn) (net.Conn, error) {
 			return nil, errors.New("unexpected local dial")
 		})
 		close(done)
@@ -223,7 +223,7 @@ func TestTunnelClientBacksOffOnImmediateSessionDeath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var c TunnelClient
-	go c.Run(ctx, ln.Addr().String(), "tok", "alice.example.com", func(byte) (net.Conn, error) {
+	go c.Run(ctx, ln.Addr().String(), "tok", "alice.example.com", func(byte, net.Conn) (net.Conn, error) {
 		return nil, io.EOF // never actually reached; session dies before Accept
 	})
 
@@ -240,7 +240,7 @@ func TestTunnelClientProvision(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var c TunnelClient
-	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
 		return nil, errors.New("no local dials expected")
 	})
 	relaySess := <-sessCh
@@ -283,7 +283,7 @@ func TestTunnelClientOnConnectFires(t *testing.T) {
 	fired := make(chan struct{}, 1)
 	var c TunnelClient
 	c.OnConnect = func() { fired <- struct{}{} }
-	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
 		return nil, errors.New("no local dials expected")
 	})
 	<-sessCh
@@ -299,7 +299,7 @@ func TestTunnelClientSetCustomDomain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var c TunnelClient
-	go c.Run(ctx, addr, "tok", "base.example.com", func(byte) (net.Conn, error) {
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
 		return nil, errors.New("no local dials expected")
 	})
 	relaySess := <-sessCh
