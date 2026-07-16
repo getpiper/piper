@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 	dir := t.TempDir()
 	// busybox httpd stays foreground and listens on :8080 so WaitHealthy's
 	// TCP dial succeeds — no package install, minimal pull.
-	df := "FROM busybox:1.36\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/\"]\n"
+	df := "FROM busybox:1.36\nCMD [\"sh\", \"-c\", \"echo hello piper logs && exec httpd -f -p 8080 -h /\"]\n"
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(df), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +59,22 @@ func TestDockerBuildRunHealthStop(t *testing.T) {
 
 	if err := r.WaitHealthy(ctx, run.HostPort); err != nil {
 		t.Fatalf("WaitHealthy: %v", err)
+	}
+
+	rc, err := r.Logs(ctx, run.ContainerID)
+	if err != nil {
+		t.Fatalf("Logs: %v", err)
+	}
+	defer rc.Close()
+	logBytes, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read logs: %v", err)
+	}
+	if !bytes.Contains(logBytes, []byte("hello piper logs")) {
+		t.Errorf("logs missing expected plain text, got:\n%s", string(logBytes))
+	}
+	if bytes.Contains(logBytes, []byte{0x01}) || bytes.Contains(logBytes, []byte{0x02}) {
+		t.Errorf("logs contain stdcopy stream prefix bytes:\n%x", logBytes)
 	}
 }
 

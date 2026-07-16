@@ -449,6 +449,32 @@ func TestDeployHealthFailureAppendsContainerOutput(t *testing.T) {
 	}
 }
 
+func TestDeployHealthFailureLogsErrDoesNotMaskHealthError(t *testing.T) {
+	s, _ := newStore(t)
+	healthErr := errors.New("unhealthy")
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1", Log: "build ok\n"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+		HealthErr:      healthErr,
+		LogsErr:        errors.New("container logs unavailable"),
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); !errors.Is(err, healthErr) {
+		t.Fatalf("Deploy error = %v, want health error", err)
+	}
+	logs := deploymentLog(t, s, "blog")
+	if !strings.Contains(logs, "build ok") {
+		t.Errorf("logs missing build output: %q", logs)
+	}
+	if strings.Contains(logs, "--- container output ---") {
+		t.Errorf("logs must not contain container output separator when Logs fails: %q", logs)
+	}
+	if !strings.Contains(logs, "unhealthy") {
+		t.Errorf("logs missing health error: %q", logs)
+	}
+}
+
 func TestDeployBuildFailureFromStageRecordsErrorInLog(t *testing.T) {
 	s, _ := newStore(t)
 	buildErr := errors.New(`The command '/bin/sh -c false' returned a non-zero code: 7`)
