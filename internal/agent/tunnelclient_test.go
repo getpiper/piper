@@ -333,3 +333,62 @@ func TestTunnelClientSetCustomDomain(t *testing.T) {
 		t.Fatalf("relay saw %+v, want op=set-domain domain=shop.example.com", req)
 	}
 }
+
+// The per-app domain ops (#227) are thin control-stream wrappers; assert each
+// sends the right op + domain and surfaces relay errors.
+func TestTunnelClientDomainOps(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
+		return nil, errors.New("no local dials expected")
+	})
+	relaySess := <-sessCh
+
+	got := make(chan tunnel.ControlRequest, 3)
+	go func() {
+		for {
+			kind, stream, err := relaySess.AcceptKind()
+			if err != nil {
+				return
+			}
+			if kind != tunnel.KindControl {
+				stream.Close()
+				continue
+			}
+			var req tunnel.ControlRequest
+			_ = tunnel.ReadMsg(stream, &req)
+			got <- req
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+			stream.Close()
+		}
+	}()
+
+	calls := []struct {
+		name   string
+		call   func(string) error
+		wantOp string
+	}{
+		{"AddCustomDomain", c.AddCustomDomain, "add-domain"},
+		{"ConfirmCustomDomain", c.ConfirmCustomDomain, "domain-active"},
+		{"RemoveCustomDomain", c.RemoveCustomDomain, "remove-domain"},
+	}
+	for _, tc := range calls {
+		var err error
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if err = tc.call("shop.example.com"); err == nil {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		req := <-got
+		if req.Op != tc.wantOp || req.Domain != "shop.example.com" {
+			t.Fatalf("%s sent %+v, want op=%s domain=shop.example.com", tc.name, req, tc.wantOp)
+		}
+	}
+}
