@@ -54,6 +54,11 @@ type api struct {
 
 	mu        sync.Mutex
 	webStates map[string]webState // state → pending browser flow
+
+	// Shared per-IP bucket for the two unauthenticated login endpoints (#106):
+	// one budget per IP, so hammering one endpoint can't dodge the limit by
+	// switching to the other.
+	loginLimit loginLimiter
 }
 
 // webState is a pending browser login: where to send the credential, and how
@@ -85,6 +90,10 @@ func (a *api) redirectAllowed(uri string) bool {
 // redirect_uri (server-side map + browser cookie), then hand the browser to
 // the IdP.
 func (a *api) loginWeb(w http.ResponseWriter, r *http.Request) {
+	if !a.loginLimit.allow(clientIP(r)) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 	if !a.webLoginEnabled() {
 		http.Error(w, "web login not configured", http.StatusServiceUnavailable)
 		return
@@ -168,6 +177,10 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 }
 
 func (a *api) loginDevice(w http.ResponseWriter, r *http.Request) {
+	if !a.loginLimit.allow(clientIP(r)) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 	handle, d, err := a.v.Start(r.Context())
 	if err != nil {
 		http.Error(w, "device flow start failed", http.StatusBadGateway)
