@@ -181,15 +181,31 @@ func loopbackAddr(addr string) bool {
 // streams go to the authenticated listener (authAddr) — never the tokenless
 // local one, or the relay path would silently lose its bearer gate (#221).
 // Terminated mode serves apps plaintext on :80; otherwise TLS on :443.
-func newDialLocal(terminated bool, authAddr string) func(kind byte) (net.Conn, error) {
-	return func(kind byte) (net.Conn, error) {
+// Passthrough streams whose ClientHello offers acme-tls/1 are TLS-ALPN-01
+// validations and are spliced to the in-process solver (alpnAddr) instead of
+// Caddy, with the peeked hello replayed into whichever backend is dialed (#226).
+func newDialLocal(terminated bool, authAddr, alpnAddr string) func(kind byte, stream net.Conn) (net.Conn, error) {
+	return func(kind byte, stream net.Conn) (net.Conn, error) {
 		switch {
 		case kind == tunnel.KindControlAPI:
 			return net.Dial("tcp", authAddr)
 		case terminated && kind == tunnel.KindHTTP:
 			return net.Dial("tcp", "127.0.0.1:80")
 		default:
-			return net.Dial("tcp", "127.0.0.1:443")
+			acme, consumed := agent.PeekALPN(stream)
+			addr := "127.0.0.1:443"
+			if acme && alpnAddr != "" {
+				addr = alpnAddr
+			}
+			conn, err := net.Dial("tcp", addr)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := conn.Write(consumed); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			return conn, nil
 		}
 	}
 }
@@ -365,7 +381,14 @@ func main() {
 	// cert, serves :443, and answers KindPassthrough streams. Control streams go
 	// to the authenticated listener — never the tokenless local one.
 	if cfg.RelayAddr != "" {
-		dialLocal := newDialLocal(cfg.Terminated, authAddr)
+		// The TLS-ALPN-01 solver runs whenever relay mode is up: idle it is one
+		// dormant loopback listener. Issuance wiring lands with the per-domain
+		// lifecycle manager (#229); this guarantees the challenge is answerable.
+		alpnSolver, err := certs.NewALPNSolver("127.0.0.1:0")
+		if err != nil {
+			log.Fatalf("alpn solver: %v", err)
+		}
+		dialLocal := newDialLocal(cfg.Terminated, authAddr, alpnSolver.Addr())
 		if !cfg.Terminated {
 			if cfg.TLSCertFile != "" {
 				certPEM, err := os.ReadFile(cfg.TLSCertFile)
