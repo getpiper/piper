@@ -107,7 +107,7 @@ func TestDisabledAccountCredentialRejected(t *testing.T) {
 
 func TestEnrollForAccountRejectsUnknownAccount(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 
 	if _, err := st.EnrollForAccount("no-such-account"); err != ErrUnknownAccount {
 		t.Fatalf("unknown account err = %v, want ErrUnknownAccount", err)
@@ -116,7 +116,7 @@ func TestEnrollForAccountRejectsUnknownAccount(t *testing.T) {
 
 func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, _ := st.UpsertAccount("sub-1", "erin")
 
 	en, err := st.EnrollForAccount(acc.ID)
@@ -141,7 +141,7 @@ func TestEnrollForAccountAssignsLabelAndBindsAccount(t *testing.T) {
 
 func TestEnrollForAccountEnforcesCap(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 2, 10)
+	st.Configure("public.getpiper.co", 2, 10, 5)
 	acc, _ := st.UpsertAccount("sub-1", "frank")
 
 	for i := 0; i < 2; i++ {
@@ -156,7 +156,7 @@ func TestEnrollForAccountEnforcesCap(t *testing.T) {
 
 func TestAuthenticateRejectsDisabledAccountAgent(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, _ := st.UpsertAccount("sub-1", "grace")
 	en, _ := st.EnrollForAccount(acc.ID)
 

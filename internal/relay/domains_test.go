@@ -1,8 +1,10 @@
 package relay
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Opening a store that predates custom_domains (#227) must fold the legacy
@@ -63,5 +65,114 @@ func TestOpenMigratesCustomDomainColumn(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("re-Open resurrected %d custom_domains rows, want 0", n)
+	}
+}
+
+func openDomainsStore(t *testing.T) *Store {
+	t.Helper()
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Enroll("bob", "bob.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestAddCustomDomainClaimAndList(t *testing.T) {
+	st := openDomainsStore(t)
+	if err := st.AddCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := st.AddCustomDomain("alice.example.com", "blog.dev"); err != nil {
+		t.Fatalf("second add: %v", err)
+	}
+	got, err := st.CustomDomains("alice.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "blog.dev" || got[1] != "shop.dev" {
+		t.Fatalf("CustomDomains = %v, want [blog.dev shop.dev]", got)
+	}
+	// FCFS: a live pending claim blocks a rival.
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
+		t.Fatalf("rival claim: err = %v, want ErrDomainTaken", err)
+	}
+	// Validation and identity errors mirror SetCustomDomain's.
+	if err := st.AddCustomDomain("alice.example.com", "Bad_Domain"); !errors.Is(err, ErrInvalidDomain) {
+		t.Fatalf("malformed: %v", err)
+	}
+	if err := st.AddCustomDomain("alice.example.com", "bob.example.com"); !errors.Is(err, ErrDomainReserved) {
+		t.Fatalf("relay namespace: %v", err)
+	}
+	if err := st.AddCustomDomain("nobody.example.com", "x.dev"); !errors.Is(err, ErrBadToken) {
+		t.Fatalf("unknown agent: %v", err)
+	}
+}
+
+// An expired pending claim is squat, not ownership: a rival claim evicts it.
+// Re-adding your own pending domain refreshes the window.
+func TestAddCustomDomainExpiryAndEviction(t *testing.T) {
+	st := openDomainsStore(t)
+	now := time.Now()
+	st.nowFunc = func() time.Time { return now }
+
+	if err := st.AddCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatal(err)
+	}
+	// Not yet expired: rival still blocked at TTL-1s.
+	now = now.Add(pendingTTL - time.Second)
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
+		t.Fatalf("rival before expiry: %v", err)
+	}
+	// Refresh resets alice's window.
+	if err := st.AddCustomDomain("alice.example.com", "shop.dev"); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	now = now.Add(pendingTTL - time.Second)
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
+		t.Fatalf("rival after refresh: %v", err)
+	}
+	// Past the (refreshed) TTL the claim is evictable.
+	now = now.Add(2 * time.Second)
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); err != nil {
+		t.Fatalf("evicting expired squat: %v", err)
+	}
+	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 1 || got[0] != "shop.dev" {
+		t.Fatalf("bob's domains = %v", got)
+	}
+	if got, _ := st.CustomDomains("alice.example.com"); len(got) != 0 {
+		t.Fatalf("alice still lists %v after eviction", got)
+	}
+	// Expired pending rows are filtered from the list (reconnect re-derive).
+	now = now.Add(pendingTTL + time.Second)
+	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 0 {
+		t.Fatalf("expired pending still listed: %v", got)
+	}
+}
+
+func TestAddCustomDomainCap(t *testing.T) {
+	st := openDomainsStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 2)
+	for i, d := range []string{"one.dev", "two.dev"} {
+		if err := st.AddCustomDomain("alice.example.com", d); err != nil {
+			t.Fatalf("add %d: %v", i, err)
+		}
+	}
+	if err := st.AddCustomDomain("alice.example.com", "three.dev"); !errors.Is(err, ErrQuotaExceeded) {
+		t.Fatalf("over cap: err = %v, want ErrQuotaExceeded", err)
+	}
+	// The cap is per agent, not global.
+	if err := st.AddCustomDomain("bob.example.com", "three.dev"); err != nil {
+		t.Fatalf("bob under cap: %v", err)
+	}
+	// Re-adding an existing domain is not a new claim and must not hit the cap.
+	if err := st.AddCustomDomain("alice.example.com", "one.dev"); err != nil {
+		t.Fatalf("re-add at cap: %v", err)
 	}
 }

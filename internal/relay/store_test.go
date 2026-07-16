@@ -65,7 +65,7 @@ func TestEnrollRejectsDuplicateBaseDomain(t *testing.T) {
 
 func TestControlTokenRoundTrip(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-ct", "ct")
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
 		t.Fatal(err)
 	}

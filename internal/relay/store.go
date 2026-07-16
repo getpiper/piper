@@ -29,18 +29,22 @@ type Agent struct {
 }
 
 type Store struct {
-	db        *sql.DB
-	apex      string
-	maxAgents int
-	maxApps   int
+	db         *sql.DB
+	apex       string
+	maxAgents  int
+	maxApps    int
+	maxDomains int
+	nowFunc    func() time.Time
 }
 
-// Configure sets the free-tier apex, the per-account agent cap (EnrollForAccount)
-// and the per-account app cap (RegisterHostname). Safe to call once after Open.
-func (s *Store) Configure(apex string, maxAgents, maxApps int) {
+// Configure sets the free-tier apex, the per-account agent cap (EnrollForAccount),
+// the per-account app cap (RegisterHostname), and the per-agent custom-domain
+// cap (AddCustomDomain). Safe to call once after Open.
+func (s *Store) Configure(apex string, maxAgents, maxApps, maxDomains int) {
 	s.apex = apex
 	s.maxAgents = maxAgents
 	s.maxApps = maxApps
+	s.maxDomains = maxDomains
 }
 
 func (s *Store) maxAppsOrDefault() int {
@@ -116,7 +120,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate custom domains: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, nowFunc: time.Now}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

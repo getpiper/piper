@@ -24,7 +24,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, _ := st.UpsertAccount("sub-1", "alice")
 	en, _ := st.EnrollForAccount(acc.ID)
 
