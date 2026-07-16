@@ -84,37 +84,89 @@ func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Ro
 	}
 }
 
+// disabledPollInterval is how often each live session's watchdog re-reads its
+// account's kill-switch flag from the store. It is a package var (cf. pollSleep
+// in cmd/piper) so tests can drive eviction with a short tick instead of the
+// production interval; production leaves it at 5s.
+var disabledPollInterval = 5 * time.Second
+
+// tunnelAuth is the relay's handshake authorizer: the presented token must
+// resolve to a live (non-disabled) agent whose enrolled base domain matches the
+// one it claims. A disabled account fails here (Authenticate returns ErrBadToken)
+// — this is the auth-layer rejection that turns a disabled account away at
+// reconnect, before any session or watchdog exists.
+func tunnelAuth(st *Store) tunnel.Auth {
+	return func(token, base string) error {
+		ag, err := st.Authenticate(token)
+		if err != nil {
+			return err
+		}
+		if ag.BaseDomain != base {
+			return ErrBadToken // token may only claim its enrolled base domain
+		}
+		return nil
+	}
+}
+
 func acceptTunnels(ln net.Listener, st *Store, router *Router) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go func() {
-			sess, err := tunnel.Serve(conn, func(token, base string) error {
-				ag, err := st.Authenticate(token)
-				if err != nil {
-					return err
-				}
-				if ag.BaseDomain != base {
-					return ErrBadToken // token may only claim its enrolled base domain
-				}
-				return nil
-			})
-			if err != nil {
-				conn.Close()
-				return
-			}
-			router.Register(sess)
-			if cd, err := st.CustomDomain(sess.BaseDomain); err == nil && cd != "" {
-				router.RegisterCustom(cd, sess)
-			}
-			log.Printf("agent registered: %s", sess.BaseDomain)
-			go serveControl(sess, st, router)
-			<-sess.CloseChan()
+		go serveTunnel(conn, st, router, st.AgentDisabled)
+	}
+}
+
+// serveTunnel authenticates one agent tunnel, registers it, and runs the
+// per-session kill-switch watchdog until the session ends. disabled reports
+// whether the session's account has been disabled; it is a parameter (defaulting
+// to st.AgentDisabled) so tests can inject store-read failures.
+func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string) (bool, error)) {
+	sess, err := tunnel.Serve(conn, tunnelAuth(st))
+	if err != nil {
+		conn.Close()
+		return
+	}
+	router.Register(sess)
+	if cd, err := st.CustomDomain(sess.BaseDomain); err == nil && cd != "" {
+		router.RegisterCustom(cd, sess)
+	}
+	// Post-register re-check closes the handshake race deterministically: auth
+	// may have passed before DisableAccount committed, landing Register after
+	// the flag flip. Evict only on an affirmative disabled read (a transient
+	// error leaves the fresh session up; the watchdog re-checks next tick).
+	if off, err := disabled(sess.BaseDomain); err == nil && off {
+		router.Unregister(sess)
+		sess.Close()
+		return
+	}
+	log.Printf("agent registered: %s", sess.BaseDomain)
+	go serveControl(sess, st, router)
+
+	ticker := time.NewTicker(disabledPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sess.CloseChan():
 			router.Unregister(sess)
 			log.Printf("agent gone: %s", sess.BaseDomain)
-		}()
+			return
+		case <-ticker.C:
+			// Evict only on an affirmative disabled=true read. A transient
+			// store error must not kill a healthy session — log and retry next
+			// tick. Close() drives normal teardown; CloseChan then fires and the
+			// next iteration unregisters, mirroring an agent-initiated close.
+			off, err := disabled(sess.BaseDomain)
+			if err != nil {
+				log.Printf("agent %s: disabled watchdog read failed: %v", sess.BaseDomain, err)
+				continue
+			}
+			if off {
+				log.Printf("agent disabled, evicting: %s", sess.BaseDomain)
+				sess.Close()
+			}
+		}
 	}
 }
 

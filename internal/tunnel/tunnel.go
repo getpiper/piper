@@ -42,6 +42,21 @@ func (s *Session) Accept() (net.Conn, error)  { return s.mux.Accept() }
 func (s *Session) CloseChan() <-chan struct{} { return s.mux.CloseChan() }
 func (s *Session) Close() error               { return s.mux.Close() }
 
+// Closed non-blockingly reports whether the session has been torn down. A
+// zero-value Session (no mux) reports false, so callers can probe a session
+// without racing its construction.
+func (s *Session) Closed() bool {
+	if s.mux == nil {
+		return false
+	}
+	select {
+	case <-s.mux.CloseChan():
+		return true
+	default:
+		return false
+	}
+}
+
 // writeFrame writes a uint16-length-prefixed payload. Length-prefixing (rather
 // than a json.Decoder) guarantees we consume exactly the handshake bytes and
 // leave the rest of the stream untouched for yamux.
