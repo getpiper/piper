@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -360,7 +361,11 @@ func TestTunnelClientDomainOps(t *testing.T) {
 			var req tunnel.ControlRequest
 			_ = tunnel.ReadMsg(stream, &req)
 			got <- req
-			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+			resp := tunnel.ControlResponse{}
+			if req.Domain == "taken.example.com" {
+				resp.Error = "domain already in use"
+			}
+			_ = tunnel.WriteMsg(stream, resp)
 			stream.Close()
 		}
 	}()
@@ -391,4 +396,10 @@ func TestTunnelClientDomainOps(t *testing.T) {
 			t.Fatalf("%s sent %+v, want op=%s domain=shop.example.com", tc.name, req, tc.wantOp)
 		}
 	}
+
+	err := c.AddCustomDomain("taken.example.com")
+	if err == nil || !strings.Contains(err.Error(), "domain already in use") {
+		t.Fatalf("AddCustomDomain(taken.example.com) = %v, want error containing %q", err, "domain already in use")
+	}
+	<-got
 }
