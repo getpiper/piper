@@ -249,8 +249,8 @@ func TestSetDomainControlOp(t *testing.T) {
 	if resp.Error != "" {
 		t.Fatalf("set-domain error: %s", resp.Error)
 	}
-	if got, _ := st.CustomDomain(base); got != "shop.dev" {
-		t.Fatalf("stored custom domain = %q", got)
+	if got, _ := st.CustomDomains(base); len(got) != 1 || got[0] != "shop.dev" {
+		t.Fatalf("stored custom domains = %v", got)
 	}
 }
 
@@ -287,8 +287,8 @@ func TestSetDomainControlOpRejectsHijack(t *testing.T) {
 			t.Errorf("set-domain %q accepted, want rejection", d)
 		}
 	}
-	if got, _ := st.CustomDomain(base); got != "" {
-		t.Fatalf("custom domain = %q after rejected claims, want none", got)
+	if got, _ := st.CustomDomains(base); len(got) != 0 {
+		t.Fatalf("custom domains = %v after rejected claims, want none", got)
 	}
 }
 

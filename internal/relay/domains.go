@@ -186,3 +186,88 @@ func (s *Store) RemoveCustomDomain(baseDomain, domain string) error {
 		`DELETE FROM custom_domains WHERE domain=? AND agent_base=?`, domain, baseDomain)
 	return err
 }
+
+// SetCustomDomain is the v0.1.0 box-wide BYO op (#102), kept as a compat
+// shim over custom_domains: the deployed public relay serves boxes that
+// re-arm their domain with set-domain on every reconnect. Old semantics
+// preserved exactly — replace ALL of the agent's rows with one active row
+// (those boxes proved ownership via DNS-01 before calling; empty domain
+// clears), returning the previous single domain so handleControl's
+// unregister-previous logic is unchanged. A mixed agent holding N per-app
+// rows and sending set-domain cannot occur in shipped combinations — nothing
+// calls the per-app ops until #229, and #229 removes this op's caller — so
+// replace-all is safe.
+func (s *Store) SetCustomDomain(baseDomain, domain string) (string, error) {
+	if domain != "" {
+		if !customDomainRE.MatchString(domain) {
+			return "", ErrInvalidDomain
+		}
+		if err := s.domainClaimable(domain); err != nil {
+			return "", err
+		}
+	}
+	// Refuse to (re-)route a custom domain for a disabled account, the check
+	// RegisterHostname already gets via AgentAccount. Only an affirmative
+	// disabled read rejects (ErrBadCredential); an unknown base (ErrBadToken)
+	// falls through to the base-existence check inside the tx below.
+	if off, err := s.AgentDisabled(baseDomain); err != nil {
+		if !errors.Is(err, ErrBadToken) {
+			return "", err
+		}
+	} else if off {
+		return "", ErrBadCredential
+	}
+	now := s.nowFunc().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var one int
+	if err := tx.QueryRow(`SELECT 1 FROM agents WHERE base_domain=?`, baseDomain).Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrBadToken
+		}
+		return "", err
+	}
+	if domain != "" {
+		var owner, status, created string
+		err := tx.QueryRow(
+			`SELECT agent_base, status, created_at FROM custom_domains WHERE domain=?`, domain).
+			Scan(&owner, &status, &created)
+		switch {
+		case err == nil && owner != baseDomain && liveAt(status, created, now):
+			return "", ErrDomainTaken
+		case err == nil && owner != baseDomain:
+			// Expired pending squat: evict.
+			if _, err := tx.Exec(`DELETE FROM custom_domains WHERE domain=?`, domain); err != nil {
+				return "", err
+			}
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return "", err
+		}
+	}
+	var prev sql.NullString
+	if err := tx.QueryRow(
+		`SELECT domain FROM custom_domains WHERE agent_base=? ORDER BY domain LIMIT 1`,
+		baseDomain).Scan(&prev); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if _, err := tx.Exec(`DELETE FROM custom_domains WHERE agent_base=?`, baseDomain); err != nil {
+		return "", err
+	}
+	if domain != "" {
+		if _, err := tx.Exec(
+			`INSERT INTO custom_domains(domain, agent_base, status, created_at) VALUES(?, ?, 'active', ?)`,
+			domain, baseDomain, now.Format(time.RFC3339Nano)); err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				return "", ErrDomainTaken
+			}
+			return "", err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return prev.String, nil
+}

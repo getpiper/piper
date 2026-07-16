@@ -129,8 +129,13 @@ func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string)
 		return
 	}
 	router.Register(sess)
-	if cd, err := st.CustomDomain(sess.BaseDomain); err == nil && cd != "" {
-		router.RegisterCustom(cd, sess)
+	// Re-derive every live custom domain (active + unexpired pending);
+	// expired pending squats are filtered by the store, so they also die
+	// here even if never contested by a rival claim (#227).
+	if domains, err := st.CustomDomains(sess.BaseDomain); err == nil {
+		for _, d := range domains {
+			router.RegisterCustom(d, sess)
+		}
 	}
 	// Post-register re-check closes the handshake race deterministically: auth
 	// may have passed before DisableAccount committed, landing Register after
