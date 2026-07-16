@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -364,8 +365,8 @@ func TestDialLocalControlGoesToAuthListener(t *testing.T) {
 	}()
 
 	for _, terminated := range []bool{true, false} {
-		dial := newDialLocal(terminated, ln.Addr().String())
-		conn, err := dial(tunnel.KindControlAPI)
+		dial := newDialLocal(terminated, ln.Addr().String(), "", "127.0.0.1:443")
+		conn, err := dial(tunnel.KindControlAPI, nil)
 		if err != nil {
 			t.Fatalf("terminated=%v: dial control: %v", terminated, err)
 		}
@@ -375,6 +376,122 @@ func TestDialLocalControlGoesToAuthListener(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("terminated=%v: control stream did not reach the auth listener", terminated)
 		}
+	}
+}
+
+// A passthrough stream whose ClientHello offers acme-tls/1 is a TLS-ALPN-01
+// validation: it must be spliced to the in-process solver — with the peeked
+// hello bytes replayed so the handshake isn't corrupted — instead of Caddy's
+// :443 (#226).
+func TestDialLocalPassthroughACMEGoesToSolver(t *testing.T) {
+	solver, err := net.Listen("tcp", "127.0.0.1:0") // stands in for the ALPN solver
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer solver.Close()
+	gotBytes := make(chan []byte, 1)
+	go func() {
+		c, err := solver.Accept()
+		if err != nil {
+			return
+		}
+		buf := make([]byte, 4096)
+		n, _ := c.Read(buf)
+		gotBytes <- buf[:n]
+		c.Close()
+	}()
+
+	client, server := net.Pipe()
+	defer client.Close()
+	go func() {
+		_ = tls.Client(client, &tls.Config{
+			ServerName:         "myshop.example.com",
+			NextProtos:         []string{"acme-tls/1"},
+			InsecureSkipVerify: true,
+		}).Handshake()
+	}()
+
+	dial := newDialLocal(false, "127.0.0.1:1", solver.Addr().String(), "127.0.0.1:443")
+	conn, err := dial(tunnel.KindPassthrough, server)
+	if err != nil {
+		t.Fatalf("dial passthrough: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case replayed := <-gotBytes:
+		// 0x16 = TLS handshake record: the consumed ClientHello was replayed.
+		if len(replayed) == 0 || replayed[0] != 0x16 {
+			t.Fatalf("solver received %d bytes (want a replayed TLS ClientHello)", len(replayed))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acme-tls/1 passthrough never reached the solver")
+	}
+}
+
+// A passthrough stream whose ClientHello does NOT offer acme-tls/1 (ordinary
+// HTTPS traffic) must reach Caddy (caddyAddr) with the peeked ClientHello
+// replayed, and must never be routed to the ALPN solver stand-in (#226).
+func TestDialLocalPassthroughNonACMEGoesToCaddy(t *testing.T) {
+	caddy, err := net.Listen("tcp", "127.0.0.1:0") // stands in for Caddy's :443
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer caddy.Close()
+	gotBytes := make(chan []byte, 1)
+	go func() {
+		c, err := caddy.Accept()
+		if err != nil {
+			return
+		}
+		buf := make([]byte, 4096)
+		n, _ := c.Read(buf)
+		gotBytes <- buf[:n]
+		c.Close()
+	}()
+
+	solver, err := net.Listen("tcp", "127.0.0.1:0") // must NOT be reached
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer solver.Close()
+	solverHit := make(chan struct{}, 1)
+	go func() {
+		c, err := solver.Accept()
+		if err != nil {
+			return
+		}
+		c.Close()
+		solverHit <- struct{}{}
+	}()
+
+	client, server := net.Pipe()
+	defer client.Close()
+	go func() {
+		_ = tls.Client(client, &tls.Config{
+			ServerName:         "myshop.example.com",
+			NextProtos:         []string{"h2", "http/1.1"},
+			InsecureSkipVerify: true,
+		}).Handshake()
+	}()
+
+	dial := newDialLocal(false, "127.0.0.1:1", solver.Addr().String(), caddy.Addr().String())
+	conn, err := dial(tunnel.KindPassthrough, server)
+	if err != nil {
+		t.Fatalf("dial passthrough: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case replayed := <-gotBytes:
+		// 0x16 = TLS handshake record: the consumed ClientHello was replayed.
+		if len(replayed) == 0 || replayed[0] != 0x16 {
+			t.Fatalf("caddy received %d bytes (want a replayed TLS ClientHello)", len(replayed))
+		}
+	case <-solverHit:
+		t.Fatal("non-acme passthrough reached the solver stand-in, want Caddy")
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-acme passthrough never reached caddy")
 	}
 }
 
