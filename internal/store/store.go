@@ -71,6 +71,14 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE apps ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE deployments ADD COLUMN pr INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE deployments ADD COLUMN logs TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS app_domains (
+		    domain         TEXT PRIMARY KEY,
+		    app            TEXT NOT NULL,
+		    status         TEXT NOT NULL DEFAULT '',
+		    error          TEXT NOT NULL DEFAULT '',
+		    cert_not_after TEXT NOT NULL DEFAULT '',
+		    updated_at     TEXT NOT NULL
+		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") {
@@ -567,5 +575,119 @@ func (s *Store) UpdateDomainStatus(domain, status, errMsg string, notAfter time.
 // config is not an error.
 func (s *Store) DeleteDomainConfig() error {
 	_, err := s.db.Exec(`DELETE FROM domain_config WHERE id=1`)
+	return err
+}
+
+// ErrDomainExists is returned when a domain is already registered to an app.
+var ErrDomainExists = errors.New("domain already exists")
+
+// AppDomain is a per-app custom domain. Domains are globally unique on the box
+// (one domain maps to exactly one app).
+type AppDomain struct {
+	Domain       string
+	App          string
+	Status       string // "" | "pending" | "issuing" | "active" | "failed"
+	Error        string
+	CertNotAfter time.Time
+	UpdatedAt    time.Time
+}
+
+// AddAppDomain registers domain for app. ErrDomainExists if the domain is
+// already held by any app (including the same one).
+func (s *Store) AddAppDomain(domain, app string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO app_domains(domain, app, status, error, cert_not_after, updated_at)
+		 VALUES(?,?,?,?,?,?)`,
+		domain, app, "", "", "", time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return ErrDomainExists
+	}
+	return err
+}
+
+// GetAppDomain returns the app-domain row, or ErrNotFound.
+func (s *Store) GetAppDomain(domain string) (AppDomain, error) {
+	var d AppDomain
+	var notAfter, updated string
+	err := s.db.QueryRow(
+		`SELECT domain, app, status, error, cert_not_after, updated_at FROM app_domains WHERE domain=?`, domain).
+		Scan(&d.Domain, &d.App, &d.Status, &d.Error, &notAfter, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AppDomain{}, ErrNotFound
+	}
+	if err != nil {
+		return AppDomain{}, err
+	}
+	if notAfter != "" {
+		d.CertNotAfter, _ = time.Parse(time.RFC3339Nano, notAfter)
+	}
+	d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	return d, nil
+}
+
+// ListAppDomains returns every domain registered for app, ordered by domain.
+func (s *Store) ListAppDomains(app string) ([]AppDomain, error) {
+	rows, err := s.db.Query(
+		`SELECT domain, app, status, error, cert_not_after, updated_at
+		 FROM app_domains WHERE app=? ORDER BY domain`, app)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanAppDomains(rows)
+}
+
+// ListActiveAppDomains returns every domain with status='active', ordered by domain.
+func (s *Store) ListActiveAppDomains() ([]AppDomain, error) {
+	rows, err := s.db.Query(
+		`SELECT domain, app, status, error, cert_not_after, updated_at
+		 FROM app_domains WHERE status='active' ORDER BY domain`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanAppDomains(rows)
+}
+
+func (s *Store) scanAppDomains(rows *sql.Rows) ([]AppDomain, error) {
+	var out []AppDomain
+	for rows.Next() {
+		var d AppDomain
+		var notAfter, updated string
+		if err := rows.Scan(&d.Domain, &d.App, &d.Status, &d.Error, &notAfter, &updated); err != nil {
+			return nil, err
+		}
+		if notAfter != "" {
+			d.CertNotAfter, _ = time.Parse(time.RFC3339Nano, notAfter)
+		}
+		d.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// UpdateAppDomainStatus records the outcome of an issuance/renewal step for
+// domain. ErrNotFound when no row matches. A zero notAfter stores the empty string.
+func (s *Store) UpdateAppDomainStatus(domain, status, errMsg string, notAfter time.Time) error {
+	na := ""
+	if !notAfter.IsZero() {
+		na = notAfter.UTC().Format(time.RFC3339Nano)
+	}
+	res, err := s.db.Exec(
+		`UPDATE app_domains SET status=?, error=?, cert_not_after=?, updated_at=? WHERE domain=?`,
+		status, errMsg, na, time.Now().UTC().Format(time.RFC3339Nano), domain)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteAppDomain removes a per-app custom domain. Deleting an absent domain
+// is not an error.
+func (s *Store) DeleteAppDomain(domain string) error {
+	_, err := s.db.Exec(`DELETE FROM app_domains WHERE domain=?`, domain)
 	return err
 }
