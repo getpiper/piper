@@ -61,6 +61,17 @@ func (s *ALPNSolver) serve() {
 }
 
 func (s *ALPNSolver) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	offered := false
+	for _, p := range hello.SupportedProtos {
+		if p == tlsalpn01.ACMETLS1Protocol {
+			offered = true
+			break
+		}
+	}
+	if !offered {
+		return nil, fmt.Errorf("alpn solver: client did not offer %s", tlsalpn01.ACMETLS1Protocol)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if crt, ok := s.certs[hello.ServerName]; ok {

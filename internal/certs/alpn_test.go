@@ -97,6 +97,34 @@ func TestALPNSolverConcurrentDomains(t *testing.T) {
 	}
 }
 
+// TestALPNSolverRejectsClientsWithoutACMEProto ensures the solver only
+// completes handshakes for clients that actually negotiate acme-tls/1. Go's
+// server-side ALPN completes a handshake for a client offering no ALPN
+// protocols at all (it only rejects a non-overlapping non-empty list), so
+// without this check any TLS client hitting the solver's SNI would get the
+// challenge cert served to it — not just the ACME validator.
+func TestALPNSolverRejectsClientsWithoutACMEProto(t *testing.T) {
+	s, err := NewALPNSolver("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("NewALPNSolver: %v", err)
+	}
+	defer s.Close()
+	const domain, keyAuth = "noproto.example.com", "token.account-thumbprint"
+	if err := s.Present(domain, "token", keyAuth); err != nil {
+		t.Fatalf("Present: %v", err)
+	}
+
+	conn, err := tls.Dial("tcp", s.Addr(), &tls.Config{
+		ServerName:         domain,
+		NextProtos:         nil,
+		InsecureSkipVerify: true,
+	})
+	if err == nil {
+		conn.Close()
+		t.Fatal("handshake succeeded for a client offering no ALPN protocols, want failure")
+	}
+}
+
 func TestALPNSolverCleanUp(t *testing.T) {
 	s, err := NewALPNSolver("127.0.0.1:0")
 	if err != nil {
