@@ -61,7 +61,7 @@ func fakeBox(sess *tunnel.Session) {
 func proxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router, aliceCred, malloryCred, base string) {
 	t.Helper()
 	st = openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	alice, err := st.UpsertAccount("sub-alice", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +313,7 @@ func TestControlProxyListAgents(t *testing.T) {
 func orgProxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router, bobCred, malloryCred, base string) {
 	t.Helper()
 	st = openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	alice, err := st.UpsertAccount("sub-alice", "alice")
 	if err != nil {
 		t.Fatal(err)

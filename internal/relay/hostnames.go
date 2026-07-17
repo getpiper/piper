@@ -46,6 +46,28 @@ func (s *Store) AgentAccount(baseDomain string) (accountID, username string, err
 	return accountID, username, nil
 }
 
+// AgentDisabled reports whether the account owning the agent whose base_domain
+// is baseDomain has been disabled by the operator kill-switch. It is the
+// narrowest read the relay's per-session watchdog needs: a store failure or an
+// unknown base domain comes back as an error (not a false), so the watchdog can
+// evict only on an affirmative disabled=true and leave healthy sessions running
+// on a transient read error. The LEFT JOIN mirrors Authenticate: an account-less
+// legacy agent has nothing to disable and reads as not-disabled, not missing.
+func (s *Store) AgentDisabled(baseDomain string) (bool, error) {
+	var disabled sql.NullInt64
+	err := s.db.QueryRow(
+		`SELECT acc.disabled
+		   FROM agents ag LEFT JOIN accounts acc ON acc.id = ag.account_id
+		  WHERE ag.base_domain = ?`, baseDomain).Scan(&disabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrBadToken
+	}
+	if err != nil {
+		return false, err
+	}
+	return disabled.Valid && disabled.Int64 != 0, nil
+}
+
 // RegisterHostname assigns (idempotently) the public hostname for app on the
 // account owning baseDomain, enforcing the per-account app cap. Returns the
 // assigned "<app-hash>-<username>.<apex>".

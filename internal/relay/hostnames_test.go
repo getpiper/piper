@@ -13,7 +13,7 @@ func newAccountAgent(t *testing.T) (*Store, string) {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("gh-1", "alice")
 	if err != nil {
 		t.Fatalf("UpsertAccount: %v", err)
@@ -49,7 +49,7 @@ func TestRegisterHostnameIdempotentAndDerived(t *testing.T) {
 
 func TestRegisterHostnameAppCap(t *testing.T) {
 	st, base := newAccountAgent(t)
-	st.Configure("public.getpiper.co", 3, 2) // cap 2 apps
+	st.Configure("public.getpiper.co", 3, 2, 5) // cap 2 apps
 	if _, err := st.RegisterHostname(base, "a"); err != nil {
 		t.Fatal(err)
 	}

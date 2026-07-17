@@ -86,7 +86,7 @@ func TestOrgStaysInertAsPrincipal(t *testing.T) {
 
 func TestOrgAgentQuotaIsIndependent(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 2, 10)
+	st.Configure("public.getpiper.co", 2, 10, 5)
 	alice, _ := st.UpsertAccount("gh-alice", "alice")
 	org, _ := st.CreateOrg(alice.ID, "acme")
 
@@ -313,7 +313,7 @@ func TestCanControlOwnerAndOrgMember(t *testing.T) {
 
 func TestAgentsVisibleToMergesPersonalAndOrg(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	alice, _ := st.UpsertAccount("gh-alice", "alice")
 	bob, _ := st.UpsertAccount("gh-bob", "bob")
 	org, _ := st.CreateOrg(alice.ID, "acme")
@@ -344,7 +344,7 @@ func TestAgentsVisibleToMergesPersonalAndOrg(t *testing.T) {
 
 func TestDeleteOrgRefusedWhileAgentsExist(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	alice, _ := st.UpsertAccount("gh-alice", "alice")
 	org, _ := st.CreateOrg(alice.ID, "acme")
 	st.CreateInvite(org.ID, "someone", alice.ID)
