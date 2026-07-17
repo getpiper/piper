@@ -262,11 +262,20 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	case "remove-domain":
-		if err := st.RemoveCustomDomain(sess.BaseDomain, req.Domain); err != nil {
+		// Idempotent at the store layer: a caller removing a domain it
+		// never held is a no-op there. But the router must not be touched
+		// in that case either — otherwise any authenticated agent could
+		// unroute another tenant's live domain by naming it (cross-tenant
+		// DoS). Only unroute when this session actually held the row that
+		// got deleted.
+		held, err := st.removeCustomDomainOwned(sess.BaseDomain, req.Domain)
+		if err != nil {
 			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
 			return
 		}
-		router.UnregisterCustom(req.Domain)
+		if held {
+			router.UnregisterCustom(req.Domain)
+		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	default:
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "unknown op"})

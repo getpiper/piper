@@ -182,9 +182,27 @@ func (s *Store) ConfirmCustomDomain(baseDomain, domain string) error {
 // removing a domain the agent does not hold is a no-op, so teardown retries
 // are safe.
 func (s *Store) RemoveCustomDomain(baseDomain, domain string) error {
-	_, err := s.db.Exec(
-		`DELETE FROM custom_domains WHERE domain=? AND agent_base=?`, domain, baseDomain)
+	_, err := s.removeCustomDomainOwned(baseDomain, domain)
 	return err
+}
+
+// removeCustomDomainOwned does the same delete as RemoveCustomDomain but also
+// reports whether a row was actually deleted. Callers need this to know
+// whether the requester ever held the domain: a rival's remove-domain for a
+// name they don't own must stay a no-op at the store layer (idempotency, kept
+// above) but must NOT cascade into unrouting another agent's live domain —
+// that would let any authenticated agent DoS a tenant it doesn't own.
+func (s *Store) removeCustomDomainOwned(baseDomain, domain string) (bool, error) {
+	res, err := s.db.Exec(
+		`DELETE FROM custom_domains WHERE domain=? AND agent_base=?`, domain, baseDomain)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // SetCustomDomain is the v0.1.0 box-wide BYO op (#102), kept as a compat

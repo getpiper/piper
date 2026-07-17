@@ -495,4 +495,13 @@ func TestReconnectRederivesCustomDomains(t *testing.T) {
 	defer sessB.Close()
 	controlOp(t, sessB, tunnel.ControlRequest{Op: "add-domain", Domain: "squat.dev"}, false)
 	waitRouted("squat.dev", sessB)
+
+	// Cross-tenant remove-domain: alice never held squat.dev (bob does), so
+	// her remove must be a no-op — idempotent success from her perspective,
+	// but it must not unroute bob's live domain (#227 cross-tenant DoS).
+	controlOp(t, sessA, tunnel.ControlRequest{Op: "remove-domain", Domain: "squat.dev"}, false)
+	waitRouted("squat.dev", sessB)
+	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 1 || got[0] != "squat.dev" {
+		t.Fatalf("bob's domains after alice's remove = %v, want [squat.dev]", got)
+	}
 }
