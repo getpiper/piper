@@ -190,7 +190,7 @@ func (f *fakeProvisionStore) DeleteToken(label string) error {
 func TestProvisionRelayControlFirstConnect(t *testing.T) {
 	f := &fakeProvisionStore{}
 	var pushed string
-	provisionRelayControl(f, func(tok string) error { pushed = tok; return nil }, "base.example.com")
+	provisionRelayControl(&sync.Mutex{}, f, func(tok string) error { pushed = tok; return nil }, "base.example.com")
 	if len(f.created) != 1 || f.created[0] != "relay:base.example.com/admin" {
 		t.Fatalf("created = %v", f.created)
 	}
@@ -204,7 +204,7 @@ func TestProvisionRelayControlFirstConnect(t *testing.T) {
 
 func TestProvisionRelayControlAlreadyProvisioned(t *testing.T) {
 	f := &fakeProvisionStore{tokens: []store.Token{{Label: "relay:base.example.com"}}}
-	provisionRelayControl(f, func(string) error { t.Fatal("must not push"); return nil }, "base.example.com")
+	provisionRelayControl(&sync.Mutex{}, f, func(string) error { t.Fatal("must not push"); return nil }, "base.example.com")
 	if len(f.created) != 0 {
 		t.Fatalf("re-minted: %v", f.created)
 	}
@@ -215,7 +215,7 @@ func TestProvisionRelayControlRevokedMeansNo(t *testing.T) {
 	// enrollment (spec: re-provisioning requires a new claim → new base domain).
 	rt := time.Now()
 	f := &fakeProvisionStore{tokens: []store.Token{{Label: "relay:base.example.com", RevokedAt: &rt}}}
-	provisionRelayControl(f, func(string) error { t.Fatal("must not push"); return nil }, "base.example.com")
+	provisionRelayControl(&sync.Mutex{}, f, func(string) error { t.Fatal("must not push"); return nil }, "base.example.com")
 	if len(f.created) != 0 {
 		t.Fatalf("re-minted after owner revoke: %v", f.created)
 	}
@@ -223,7 +223,7 @@ func TestProvisionRelayControlRevokedMeansNo(t *testing.T) {
 
 func TestProvisionRelayControlPushFailureUnwinds(t *testing.T) {
 	f := &fakeProvisionStore{}
-	provisionRelayControl(f, func(string) error { return errors.New("session died") }, "base.example.com")
+	provisionRelayControl(&sync.Mutex{}, f, func(string) error { return errors.New("session died") }, "base.example.com")
 	// The mint must be unwound so the marker doesn't block the next attempt.
 	if len(f.deleted) != 1 || f.deleted[0] != "relay:base.example.com" {
 		t.Fatalf("deleted = %v, want the just-minted label", f.deleted)
@@ -510,5 +510,72 @@ func TestVersionRequested(t *testing.T) {
 	}
 	if version.String() == "" {
 		t.Error("version.String() is empty")
+	}
+}
+
+// concurrentProvisionStore is a thread-safe relayTokenStore whose ListTokens
+// reflects prior CreateToken calls, so it exposes the list-then-mint TOCTOU.
+type concurrentProvisionStore struct {
+	mu      sync.Mutex
+	tokens  []store.Token
+	creates int
+}
+
+func (s *concurrentProvisionStore) ListTokens() ([]store.Token, error) {
+	s.mu.Lock()
+	snap := append([]store.Token(nil), s.tokens...)
+	s.mu.Unlock()
+	// Widen the read→mint window so that, without the provisioning mutex, every
+	// concurrent caller observes the same (empty) list before any mint commits —
+	// making the TOCTOU deterministic rather than scheduler-dependent. With the
+	// mutex, callers are serialized and only the first ever sees it empty.
+	time.Sleep(20 * time.Millisecond)
+	return snap, nil
+}
+
+func (s *concurrentProvisionStore) CreateToken(label, scope string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.creates++
+	s.tokens = append(s.tokens, store.Token{Label: label})
+	return "tok-" + label, nil
+}
+
+func (s *concurrentProvisionStore) DeleteToken(label string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.tokens[:0]
+	for _, tk := range s.tokens {
+		if tk.Label != label {
+			out = append(out, tk)
+		}
+	}
+	s.tokens = out
+	return nil
+}
+
+// TestProvisionRelayControlConcurrentSingleMint pins the item-5 fix: when the
+// first session flaps and multiple OnConnect callbacks run provisionRelayControl
+// at once, the shared mutex serializes the list-then-mint so exactly one
+// relay:<base> admin token is minted. Without the lock every goroutine reads an
+// empty token list first and each mints a duplicate.
+func TestProvisionRelayControlConcurrentSingleMint(t *testing.T) {
+	s := &concurrentProvisionStore{}
+	var mu sync.Mutex
+	const n = 20
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			provisionRelayControl(&mu, s, func(string) error { return nil }, "base.example.com")
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if s.creates != 1 {
+		t.Fatalf("minted %d relay tokens under concurrent OnConnect, want exactly 1", s.creates)
 	}
 }
