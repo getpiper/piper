@@ -292,12 +292,13 @@ func (a *api) authAccount(w http.ResponseWriter, r *http.Request) (Account, bool
 	return acc, true
 }
 
-// bearerToken extracts a "Bearer <tok>" Authorization header.
+// bearerToken extracts a "Bearer <tok>" Authorization header. The scheme is
+// matched case-insensitively (RFC 7235 auth-scheme tokens are case-insensitive);
+// the rest of the parse stays strict — exactly one space, and a non-empty token.
 func bearerToken(r *http.Request) (string, bool) {
-	const p = "Bearer "
-	h := r.Header.Get("Authorization")
-	if len(h) <= len(p) || h[:len(p)] != p {
+	scheme, tok, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || tok == "" || !strings.EqualFold(scheme, "Bearer") {
 		return "", false
 	}
-	return h[len(p):], true
+	return tok, true
 }

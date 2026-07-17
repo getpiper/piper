@@ -2,13 +2,89 @@ package relay
 
 import (
 	"context"
+	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"time"
 
 	"github.com/getpiper/piper/internal/tunnel"
 )
+
+// responseHeaderTimeout bounds how long the relay waits for a box to start
+// sending response headers after a control request is forwarded. A wedged box
+// must not hold a relay goroutine and the caller's connection indefinitely; the
+// caller sees a 502 instead. Only header arrival is bounded — a long-lived
+// response *body* (future SSE log streaming) is unaffected, since this timeout
+// stops once the headers are in hand. It is a package var (cf. disabledPollInterval
+// in server.go) so tests can drive the timeout with a short value; production
+// leaves it at 30s.
+var responseHeaderTimeout = 30 * time.Second
+
+// errNoTunnelSession is returned by the transport's dialer when the request
+// carries no tunnel session in its context — a programming error, never a
+// caller-triggered path.
+var errNoTunnelSession = errors.New("relay: control proxy request has no tunnel session")
+
+// proxyRoute carries the per-request forwarding target through the request
+// context, so a single ReverseProxy + Transport can be reused across every
+// request instead of rebuilt per call (the session, path tail, and box token
+// all vary per request but the wiring does not).
+type proxyRoute struct {
+	sess     *tunnel.Session
+	base     string
+	tail     string
+	boxToken string
+}
+
+type routeCtxKey struct{}
+
+func withRoute(ctx context.Context, rt *proxyRoute) context.Context {
+	return context.WithValue(ctx, routeCtxKey{}, rt)
+}
+
+func routeFromContext(ctx context.Context) *proxyRoute {
+	rt, _ := ctx.Value(routeCtxKey{}).(*proxyRoute)
+	return rt
+}
+
+// tunnelDialer opens a control-API stream on a live session. *tunnel.Session
+// satisfies it; tests inject a blocking opener to exercise dial cancellation.
+type tunnelDialer interface {
+	OpenKind(kind byte) (net.Conn, error)
+}
+
+// dialControlStream opens a KindControlAPI stream while honoring ctx: if the
+// caller disconnects (or otherwise cancels) while the open is still pending, it
+// returns ctx.Err() promptly rather than blocking on the tunnel, and any stream
+// the abandoned open later yields is closed so it can't leak.
+func dialControlStream(ctx context.Context, d tunnelDialer) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		conn, err := d.OpenKind(tunnel.KindControlAPI)
+		ch <- result{conn, err}
+	}()
+	select {
+	case <-ctx.Done():
+		go func() {
+			if r := <-ch; r.err == nil {
+				r.conn.Close()
+			}
+		}()
+		return nil, ctx.Err()
+	case r := <-ch:
+		return r.conn, r.err
+	}
+}
 
 // NewControlProxy serves /agents and /agents/<base-domain>/v1/*: it
 // authenticates the caller's relay account credential, authorizes that the
@@ -20,6 +96,52 @@ import (
 // 404 so existence is never leaked across tenants. Bare /agents lists the
 // caller's own enrolled agents with liveness (#98).
 func NewControlProxy(st *Store, router *Router) http.Handler {
+	// One Transport + ReverseProxy for the whole control proxy, reused across
+	// every request (the control proxy is built once per relay API / Router, so
+	// this is effectively a per-router singleton). The transport carries no
+	// per-request state — the target session, path tail, and box token all ride
+	// the request context via proxyRoute — so a single instance serves every
+	// caller. DisableKeepAlives keeps the one-stream-per-request invariant: a
+	// pooled stream must never outlive its session; reusing the Transport pools
+	// nothing because keep-alives stay off.
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			rt := routeFromContext(ctx)
+			if rt == nil {
+				return nil, errNoTunnelSession
+			}
+			return dialControlStream(ctx, rt.sess)
+		},
+		DisableKeepAlives:     true,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+	}
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			rt := routeFromContext(pr.Out.Context())
+			pr.Out.URL.Scheme = "http"
+			pr.Out.URL.Host = rt.base
+			pr.Out.URL.Path = "/" + rt.tail
+			// Never forward the caller's account credential to the box.
+			// Inject the box's own bearer; if the box never provisioned one,
+			// forward bare and let its auth gate answer 401.
+			pr.Out.Header.Del("Authorization")
+			if rt.boxToken != "" {
+				pr.Out.Header.Set("Authorization", "Bearer "+rt.boxToken)
+			}
+		},
+		Transport:     transport,
+		FlushInterval: -1,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Log the detail server-side; return a generic body so no transport
+			// internals leak to the caller.
+			base := "?"
+			if rt := routeFromContext(r.Context()); rt != nil {
+				base = rt.base
+			}
+			log.Printf("relay: control proxy to %s failed: %v", base, err)
+			http.Error(w, "box unreachable", http.StatusBadGateway)
+		},
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cred, ok := bearerToken(r)
 		if !ok {
@@ -97,32 +219,7 @@ func NewControlProxy(st *Store, router *Router) http.Handler {
 			return
 		}
 
-		rp := &httputil.ReverseProxy{
-			Rewrite: func(pr *httputil.ProxyRequest) {
-				pr.Out.URL.Scheme = "http"
-				pr.Out.URL.Host = base
-				pr.Out.URL.Path = "/" + tail
-				// Never forward the caller's account credential to the box.
-				// Inject the box's own bearer; if the box never provisioned one,
-				// forward bare and let its auth gate answer 401.
-				pr.Out.Header.Del("Authorization")
-				if boxToken != "" {
-					pr.Out.Header.Set("Authorization", "Bearer "+boxToken)
-				}
-			},
-			Transport: &http.Transport{
-				DialContext: func(context.Context, string, string) (net.Conn, error) {
-					return sess.OpenKind(tunnel.KindControlAPI)
-				},
-				// One tunnel stream per request: a pooled stream must never
-				// outlive its session.
-				DisableKeepAlives: true,
-			},
-			FlushInterval: -1,
-			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-				http.Error(w, "box unreachable: "+err.Error(), http.StatusBadGateway)
-			},
-		}
-		rp.ServeHTTP(w, r)
+		rt := &proxyRoute{sess: sess, base: base, tail: tail, boxToken: boxToken}
+		rp.ServeHTTP(w, r.WithContext(withRoute(r.Context(), rt)))
 	})
 }
