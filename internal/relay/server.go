@@ -84,37 +84,94 @@ func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Ro
 	}
 }
 
+// disabledPollInterval is how often each live session's watchdog re-reads its
+// account's kill-switch flag from the store. It is a package var (cf. pollSleep
+// in cmd/piper) so tests can drive eviction with a short tick instead of the
+// production interval; production leaves it at 5s.
+var disabledPollInterval = 5 * time.Second
+
+// tunnelAuth is the relay's handshake authorizer: the presented token must
+// resolve to a live (non-disabled) agent whose enrolled base domain matches the
+// one it claims. A disabled account fails here (Authenticate returns ErrBadToken)
+// — this is the auth-layer rejection that turns a disabled account away at
+// reconnect, before any session or watchdog exists.
+func tunnelAuth(st *Store) tunnel.Auth {
+	return func(token, base string) error {
+		ag, err := st.Authenticate(token)
+		if err != nil {
+			return err
+		}
+		if ag.BaseDomain != base {
+			return ErrBadToken // token may only claim its enrolled base domain
+		}
+		return nil
+	}
+}
+
 func acceptTunnels(ln net.Listener, st *Store, router *Router) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go func() {
-			sess, err := tunnel.Serve(conn, func(token, base string) error {
-				ag, err := st.Authenticate(token)
-				if err != nil {
-					return err
-				}
-				if ag.BaseDomain != base {
-					return ErrBadToken // token may only claim its enrolled base domain
-				}
-				return nil
-			})
-			if err != nil {
-				conn.Close()
-				return
-			}
-			router.Register(sess)
-			if cd, err := st.CustomDomain(sess.BaseDomain); err == nil && cd != "" {
-				router.RegisterCustom(cd, sess)
-			}
-			log.Printf("agent registered: %s", sess.BaseDomain)
-			go serveControl(sess, st, router)
-			<-sess.CloseChan()
+		go serveTunnel(conn, st, router, st.AgentDisabled)
+	}
+}
+
+// serveTunnel authenticates one agent tunnel, registers it, and runs the
+// per-session kill-switch watchdog until the session ends. disabled reports
+// whether the session's account has been disabled; it is a parameter (defaulting
+// to st.AgentDisabled) so tests can inject store-read failures.
+func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string) (bool, error)) {
+	sess, err := tunnel.Serve(conn, tunnelAuth(st))
+	if err != nil {
+		conn.Close()
+		return
+	}
+	router.Register(sess)
+	// Re-derive every live custom domain (active + unexpired pending);
+	// expired pending squats are filtered by the store, so they also die
+	// here even if never contested by a rival claim (#227).
+	if domains, err := st.CustomDomains(sess.BaseDomain); err == nil {
+		for _, d := range domains {
+			router.RegisterCustom(d, sess)
+		}
+	}
+	// Post-register re-check closes the handshake race deterministically: auth
+	// may have passed before DisableAccount committed, landing Register after
+	// the flag flip. Evict only on an affirmative disabled read (a transient
+	// error leaves the fresh session up; the watchdog re-checks next tick).
+	if off, err := disabled(sess.BaseDomain); err == nil && off {
+		router.Unregister(sess)
+		sess.Close()
+		return
+	}
+	log.Printf("agent registered: %s", sess.BaseDomain)
+	go serveControl(sess, st, router)
+
+	ticker := time.NewTicker(disabledPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sess.CloseChan():
 			router.Unregister(sess)
 			log.Printf("agent gone: %s", sess.BaseDomain)
-		}()
+			return
+		case <-ticker.C:
+			// Evict only on an affirmative disabled=true read. A transient
+			// store error must not kill a healthy session — log and retry next
+			// tick. Close() drives normal teardown; CloseChan then fires and the
+			// next iteration unregisters, mirroring an agent-initiated close.
+			off, err := disabled(sess.BaseDomain)
+			if err != nil {
+				log.Printf("agent %s: disabled watchdog read failed: %v", sess.BaseDomain, err)
+				continue
+			}
+			if off {
+				log.Printf("agent disabled, evicting: %s", sess.BaseDomain)
+				sess.Close()
+			}
+		}
 	}
 }
 
@@ -183,6 +240,41 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 		}
 		if req.Domain != "" {
 			router.RegisterCustom(req.Domain, sess)
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "add-domain":
+		// Per-app custom domain claim (#227): pending, routable immediately —
+		// that is what lets the TLS-ALPN-01 challenge reach the box before any
+		// cert exists. RegisterCustom overwrites any evicted squatter's mapping
+		// (the router is keyed by domain), so its routing dies with the claim.
+		if err := st.AddCustomDomain(sess.BaseDomain, req.Domain); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		router.RegisterCustom(req.Domain, sess)
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "domain-active":
+		// The box reports it holds the issued cert; the claim becomes
+		// permanent. Routing is already live, so the router is untouched.
+		if err := st.ConfirmCustomDomain(sess.BaseDomain, req.Domain); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "remove-domain":
+		// Idempotent at the store layer: a caller removing a domain it
+		// never held is a no-op there. But the router must not be touched
+		// in that case either — otherwise any authenticated agent could
+		// unroute another tenant's live domain by naming it (cross-tenant
+		// DoS). Only unroute when this session actually held the row that
+		// got deleted.
+		held, err := st.removeCustomDomainOwned(sess.BaseDomain, req.Domain)
+		if err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		if held {
+			router.UnregisterCustom(req.Domain)
 		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	default:

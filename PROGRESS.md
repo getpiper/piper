@@ -52,6 +52,7 @@ Goal: public HTTPS from behind NAT/CGNAT — `piperd` dials an outbound yamux tu
   - ✅ account agent list — `GET /agents` on the relay control API returns the caller's enrolled agents with liveness — [#98](https://github.com/getpiper/piper/issues/98)
   - ✅ domain-config API — BYO base domain + DNS creds settable remotely, live cert issuance + relay splice, shared-domain coexistence — [#102](https://github.com/getpiper/piper/issues/102)
   - ✅ TLS-ALPN-01 issuance path — tokenless exact-host certs; `acme-tls/1` passthrough spliced to an in-process solver — [#226](https://github.com/getpiper/piper/issues/226)
+  - ✅ relay 1:N custom domains — `custom_domains` table, pending→active lifecycle (routable while pending for TLS-ALPN-01, 1h TTL, lazy eviction, per-agent cap), add/remove/confirm control ops + `set-domain` compat shim — [#227](https://github.com/getpiper/piper/issues/227)
   - ✅ Organizations — org accounts, membership + invites, org-scoped control authz — [#104](https://github.com/getpiper/piper/issues/104)
   - ✅ surface the routed public host — persisted on the app row at deploy; in the deploy response + `piper deploy` URL and the apps API + `piper list` — [#93](https://github.com/getpiper/piper/issues/93) [#100](https://github.com/getpiper/piper/issues/100)
   - ⬜ LAN `login` load-mutate-save so it doesn't clobber stored relay creds — [#84](https://github.com/getpiper/piper/issues/84)

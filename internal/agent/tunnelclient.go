@@ -108,6 +108,27 @@ func (c *TunnelClient) SetCustomDomain(domain string) error {
 	return err
 }
 
+// AddCustomDomain claims domain on the relay as a pending per-app custom
+// domain (#227): routable immediately so the TLS-ALPN-01 challenge can reach
+// this box, evictable if not confirmed within the relay's pending TTL.
+func (c *TunnelClient) AddCustomDomain(domain string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "add-domain", Domain: domain})
+	return err
+}
+
+// RemoveCustomDomain drops this agent's claim on domain and its routing.
+func (c *TunnelClient) RemoveCustomDomain(domain string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "remove-domain", Domain: domain})
+	return err
+}
+
+// ConfirmCustomDomain reports that this box holds an issued cert for domain,
+// flipping the relay's pending claim to active (permanent, reconnect-safe).
+func (c *TunnelClient) ConfirmCustomDomain(domain string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "domain-active", Domain: domain})
+	return err
+}
+
 func (c *TunnelClient) control(req tunnel.ControlRequest) (string, error) {
 	sess := c.current()
 	if sess == nil {

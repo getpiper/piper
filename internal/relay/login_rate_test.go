@@ -87,7 +87,7 @@ func TestLoginRateLimitPerIPIndependent(t *testing.T) {
 // limiter's now func is the test seam.
 func TestLoginRateLimitRefills(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	a := &api{st: st, v: NewFakeVerifier(), webStates: map[string]webState{}}
 	fakeNow := time.Now()
 	a.loginLimit.now = func() time.Time { return fakeNow }
@@ -110,7 +110,7 @@ func TestLoginRateLimitRefills(t *testing.T) {
 // idle TTL, a stale entry is gone and the map holds only active IPs.
 func TestLoginRateLimitSweepsIdleBuckets(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	a := &api{st: st, v: NewFakeVerifier(), webStates: map[string]webState{}}
 	fakeNow := time.Now()
 	a.loginLimit.now = func() time.Time { return fakeNow }

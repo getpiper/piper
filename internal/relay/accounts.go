@@ -160,8 +160,12 @@ func (s *Store) AuthenticateAccount(cred string) (Account, error) {
 	return acc, nil
 }
 
-// DisableAccount flips the kill-switch for an account by username. Its
-// credentials stop authenticating and its agents stop connecting.
+// DisableAccount flips the kill-switch flag in the database for an account by
+// username. New connects are then rejected at auth (Authenticate and
+// AuthenticateAccount return a bad-credential error for a disabled account),
+// and live tunnel sessions are evicted by the relay's per-session watchdog
+// within one poll interval (see acceptTunnels). The operator trigger is the
+// admin CLI: `piper-relay admin disable <user>`.
 func (s *Store) DisableAccount(username string) error {
 	res, err := s.db.Exec(`UPDATE accounts SET disabled=1 WHERE username=?`, username)
 	if err != nil {
@@ -169,7 +173,7 @@ func (s *Store) DisableAccount(username string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return errors.New("no such account")
+		return ErrUnknownAccount
 	}
 	return nil
 }

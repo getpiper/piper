@@ -25,6 +25,9 @@ func NewRouter() *Router {
 func (r *Router) Register(sess *tunnel.Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if sess.Closed() {
+		return
+	}
 	r.byBase[sess.BaseDomain] = sess
 }
 
@@ -32,6 +35,9 @@ func (r *Router) Register(sess *tunnel.Session) {
 func (r *Router) RegisterHost(hostname string, sess *tunnel.Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if sess.Closed() {
+		return
+	}
 	r.byHost[hostname] = sess
 }
 
@@ -55,6 +61,9 @@ func (r *Router) LookupHost(hostname string) (*tunnel.Session, bool) {
 func (r *Router) RegisterCustom(domain string, sess *tunnel.Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if sess.Closed() {
+		return
+	}
 	r.byBase[domain] = sess
 }
 
@@ -79,6 +88,12 @@ func (r *Router) Unregister(sess *tunnel.Session) {
 		}
 	}
 }
+
+// The register calls above refuse a closed session (sess.Closed()) under r.mu:
+// because the session goroutine only calls Unregister after its session closes,
+// a late in-flight register either takes r.mu before that Unregister (and its
+// entry is swept by it) or observes the closed session here and no-ops — no
+// permanent stale entry survives in any interleaving.
 
 // Lookup returns the session for an SNI equal to, or a subdomain of, a
 // registered base domain.
