@@ -54,3 +54,5 @@ CREATE TABLE IF NOT EXISTS custom_domains (
     status      TEXT NOT NULL,
     created_at  TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS custom_domains_agent_base ON custom_domains(agent_base);

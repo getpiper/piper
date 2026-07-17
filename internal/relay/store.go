@@ -107,6 +107,9 @@ func Open(path string) (*Store, error) {
 	// Clearing is correctness, not tidiness: this copy re-runs on every
 	// Open, so a stale column value would resurrect a domain the agent has
 	// since removed. One-way; the column and its index stay, unused.
+	// If the relay is downgraded and a domain changes hands via set-domain
+	// before re-upgrading, the stale row here wins the INSERT OR IGNORE —
+	// accepted FCFS-backstop edge.
 	if _, err := db.Exec(
 		`INSERT OR IGNORE INTO custom_domains(domain, agent_base, status, created_at)
 		    SELECT custom_domain, base_domain, 'active', ?
