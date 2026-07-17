@@ -96,10 +96,10 @@ When a change would otherwise add a shim or migration, change the format directl
 
 ## Commits
 
-One commit per plan task step, conventional-commit style (`feat:`, `test:`, `chore:`). End commit messages with:
+One commit per plan task step, conventional-commit style (`feat:`, `test:`, `chore:`). End commit messages with a co-author trailer naming the current model, e.g.:
 
 ```
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ```
 
 ## Branch workflow
