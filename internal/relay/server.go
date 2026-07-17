@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/getpiper/piper/internal/tunnel"
@@ -16,8 +17,9 @@ import (
 // net.Listener so one http.Server can serve them all. handlePublic pushes each
 // terminated TLS conn; the server owns its lifetime from there.
 type connQueue struct {
-	ch   chan net.Conn
-	done chan struct{}
+	ch        chan net.Conn
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func newConnQueue() *connQueue {
@@ -33,12 +35,10 @@ func (q *connQueue) Accept() (net.Conn, error) {
 	}
 }
 
+// Close is safe under concurrent calls: sync.Once guarantees the done channel
+// is closed exactly once, so racing callers can never double-close it.
 func (q *connQueue) Close() error {
-	select {
-	case <-q.done:
-	default:
-		close(q.done)
-	}
+	q.closeOnce.Do(func() { close(q.done) })
 	return nil
 }
 
@@ -63,6 +63,12 @@ func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Ro
 		ctrlQ = newConnQueue()
 		srv := &http.Server{Handler: ctrl, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 		go func() { _ = srv.Serve(ctrlQ) }()
+		// Tie the control server's lifetime to Serve's: when Serve returns (a
+		// listener failed), stop the control server so its goroutine doesn't
+		// outlive us. srv.Close closes ctrlQ, which unblocks its Accept and ends
+		// srv.Serve. Latent while main log.Fatals on Serve's return, but correct
+		// the moment Serve is reused.
+		defer func() { _ = srv.Close() }()
 	}
 	ctrlHost := "api." + st.apexOrDefault()
 

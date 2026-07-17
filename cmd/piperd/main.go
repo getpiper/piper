@@ -83,7 +83,15 @@ type relayTokenStore interface {
 // owner cut the relay off" — never re-mint. A new `piper connect` creates a new
 // enrollment (new base domain) and so a fresh mint. If the push fails, the
 // just-minted row is deleted so the next connect retries.
-func provisionRelayControl(st relayTokenStore, push func(string) error, baseDomain string) {
+//
+// mu serializes the whole list-then-mint sequence across concurrent OnConnect
+// callbacks: without it, a session that flaps before the first push completes
+// could have two goroutines both read an empty token list and each mint a
+// duplicate relay:<base> admin token (the label has no unique constraint). One
+// shared mutex per box closes that TOCTOU.
+func provisionRelayControl(mu *sync.Mutex, st relayTokenStore, push func(string) error, baseDomain string) {
+	mu.Lock()
+	defer mu.Unlock()
 	label := "relay:" + baseDomain
 	toks, err := st.ListTokens()
 	if err != nil {
@@ -415,7 +423,10 @@ func main() {
 			}
 		}
 		tc := &agent.TunnelClient{}
-		tc.OnConnect = func() { provisionRelayControl(st, tc.Provision, cfg.BaseDomain) }
+		// One mutex shared by every OnConnect callback, so overlapping
+		// (re)connects can't race the list-then-mint and double-provision.
+		var provisionMu sync.Mutex
+		tc.OnConnect = func() { provisionRelayControl(&provisionMu, st, tc.Provision, cfg.BaseDomain) }
 		go tc.Run(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain, dialLocal)
 		if cfg.Terminated {
 			dep.SetHostnameRegistrar(tc)

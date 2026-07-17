@@ -124,6 +124,17 @@ revoked one, the forwarded request simply fails piperd's gate and the caller
 sees the box's `401` verbatim — accurate, since remote control was never or is
 no-longer granted. The relay does not special-case it.
 
+> **Old piperd + new relay is a `502`, not the `401` above.** The no-Token-B
+> narrative assumes a piperd new enough to *understand* the `KindControlAPI`
+> stream and pipe it to its control API (where the `401` is produced). A piperd
+> from before this feature has no `KindControlAPI` branch in `dialLocal`, so the
+> forwarded stream falls through to the default (passthrough) handling and is
+> piped as **plaintext HTTP into the box's `:443`**, which expects TLS. The box
+> never returns a clean `401`; the relay's reverse-proxy transport sees the
+> connection break and its `ErrorHandler` returns **`502` (Bad Gateway)**. Both
+> outcomes deny access — this is documented only so nobody chases the `401` the
+> narrative implies when they meet a `502` against a stale box.
+
 ## Testing
 
 - **Unit** (fakes / in-memory tunnel pairs, house style):
