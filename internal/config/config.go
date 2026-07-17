@@ -130,10 +130,8 @@ type Box struct {
 	AccountCredential string `json:"account_credential,omitempty"`
 }
 
-// ClientFile is the on-disk shape of ~/.piper/piper/config.json (schema v2):
-// named boxes plus the current selection. A legacy flat ClientConfig file
-// loads as a single box named "default"; the file itself is only rewritten
-// in v2 form by the next save.
+// ClientFile is the on-disk shape of ~/.piper/piper/config.json: named boxes
+// plus the current selection.
 type ClientFile struct {
 	Boxes   []Box  `json:"boxes"`
 	Current string `json:"current"`
@@ -152,8 +150,8 @@ func (cf ClientFile) CurrentBox() (Box, bool) {
 	return Box{}, false
 }
 
-// LoadClientFile reads ~/.piper/piper/config.json in v2 form, migrating a
-// legacy flat file in-memory. A missing file is not an error.
+// LoadClientFile reads ~/.piper/piper/config.json. A missing file is not an
+// error.
 func LoadClientFile() (ClientFile, error) {
 	var cf ClientFile
 	path, err := clientConfigPath()
@@ -168,25 +166,9 @@ func LoadClientFile() (ClientFile, error) {
 		return cf, err
 	}
 	_ = json.Unmarshal(data, &cf)
-	if len(cf.Boxes) > 0 {
-		if cf.Current == "" {
-			cf.Current = cf.Boxes[0].Name
-		}
-		return cf, nil
+	if len(cf.Boxes) > 0 && cf.Current == "" {
+		cf.Current = cf.Boxes[0].Name
 	}
-	var legacy ClientConfig
-	_ = json.Unmarshal(data, &legacy)
-	if legacy == (ClientConfig{}) {
-		return cf, nil
-	}
-	cf.Boxes = []Box{{
-		Name:              "default",
-		Addr:              legacy.Addr,
-		Token:             legacy.Token,
-		RelayAPI:          legacy.RelayAPI,
-		AccountCredential: legacy.AccountCredential,
-	}}
-	cf.Current = "default"
 	return cf, nil
 }
 
@@ -280,8 +262,7 @@ func LoadClient() (ClientConfig, error) {
 }
 
 // SaveClient writes cc into the current box of ~/.piper/piper/config.json
-// (creating a "default" box if none exists), preserving all other boxes and
-// rewriting a legacy flat file in v2 form.
+// (creating a "default" box if none exists), preserving all other boxes.
 func SaveClient(cc ClientConfig) error {
 	cf, err := LoadClientFile()
 	if err != nil {

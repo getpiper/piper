@@ -16,7 +16,7 @@ import (
 type Account struct {
 	ID          string
 	Username    string
-	GithubLogin string // raw GitHub login, refreshed at every login; "" pre-migration
+	GithubLogin string // raw GitHub login, refreshed at every login; "" for org accounts
 	Disabled    bool
 }
 

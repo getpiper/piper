@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -238,63 +237,6 @@ func TestSetCustomDomainRejectsDisabledAccount(t *testing.T) {
 	}
 	if _, err := st.SetCustomDomain(en.BaseDomain, "other.dev"); !errors.Is(err, ErrBadCredential) {
 		t.Fatalf("disabled account: err = %v, want ErrBadCredential", err)
-	}
-}
-
-// legacyAccountsDDL is the pre-#104 accounts shape: github_id NOT NULL, no
-// type/github_login. Used to prove Open migrates old DBs in place.
-const legacyAccountsDDL = `
-CREATE TABLE accounts (
-    id          TEXT PRIMARY KEY,
-    github_id   TEXT NOT NULL UNIQUE,
-    username    TEXT NOT NULL UNIQUE,
-    disabled    INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL
-);`
-
-func TestOpenMigratesLegacyAccountsTable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "relay.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(legacyAccountsDDL); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(
-		`INSERT INTO accounts(id, github_id, username, disabled, created_at)
-		 VALUES('acc-1','583231','alice',0,'2026-01-01T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-
-	st, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open on legacy DB: %v", err)
-	}
-	defer st.Close()
-
-	// Existing row survives the rebuild and re-login resolves the same account.
-	acc, err := st.UpsertAccount("583231", "alice")
-	if err != nil {
-		t.Fatalf("UpsertAccount after migration: %v", err)
-	}
-	if acc.ID != "acc-1" {
-		t.Fatalf("account id = %q, want acc-1 (migration must preserve rows)", acc.ID)
-	}
-	// Migrated rows are type 'user'.
-	var typ string
-	if err := st.db.QueryRow(`SELECT type FROM accounts WHERE id='acc-1'`).Scan(&typ); err != nil {
-		t.Fatalf("type column missing after migration: %v", err)
-	}
-	if typ != "user" {
-		t.Fatalf("migrated type = %q, want user", typ)
-	}
-	// github_id is nullable now: an org-shaped row inserts cleanly.
-	if _, err := st.db.Exec(
-		`INSERT INTO accounts(id, username, type, created_at)
-		 VALUES('org-1','someorg','org','2026-01-01T00:00:00Z')`); err != nil {
-		t.Fatalf("insert NULL-github_id row: %v", err)
 	}
 }
 

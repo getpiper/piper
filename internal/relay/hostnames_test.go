@@ -77,11 +77,11 @@ func TestRegisterHostnameDisabledAccount(t *testing.T) {
 }
 
 // TestAgentDisabledOutcomes pins the three-way read the watchdog's transient-vs-
-// permanent split depends on, plus the LEFT-JOIN contract for legacy agents:
+// permanent split depends on, plus the LEFT-JOIN contract for account-less agents:
 //   - known + enabled       -> (false, nil)
 //   - known + disabled      -> (true, nil)
 //   - unknown base           -> (false, ErrUnknownAccount)
-//   - account-less legacy    -> (false, nil)  (agent row exists, acc.disabled NULL)
+//   - account-less           -> (false, nil)  (agent row exists, acc.disabled NULL)
 func TestAgentDisabledOutcomes(t *testing.T) {
 	st, base := newAccountAgent(t) // account-owned agent "alice"
 
@@ -103,7 +103,7 @@ func TestAgentDisabledOutcomes(t *testing.T) {
 		t.Fatalf("unknown base: got (%v, %v), want (false, ErrUnknownAccount)", off, err)
 	}
 
-	// account-less legacy agent (no account_id): the LEFT JOIN yields NULL
+	// account-less operator-enrolled agent (no account_id): the LEFT JOIN yields NULL
 	// acc.disabled, which must read as not-disabled, not as unknown.
 	if _, err := st.Enroll("legacy", "legacy.example.com"); err != nil {
 		t.Fatal(err)
