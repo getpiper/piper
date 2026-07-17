@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -288,15 +287,17 @@ func TestRelayFileTerminatedRoundTripAndLoad(t *testing.T) {
 	}
 }
 
-func TestLoadClientFileMigratesLegacyFlat(t *testing.T) {
+// A config.json that isn't in the boxes shape (e.g. the pre-v2 flat form)
+// loads as empty, same as a missing file — there is no migration pre-1.0.
+func TestLoadClientFileIgnoresNonV2File(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, ".piper", "piper")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"addr":"http://192.168.1.6:8088","token":"tok","relay_api":"https://api.relay","account_credential":"cred"}`
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(legacy), 0o600); err != nil {
+	flat := `{"addr":"http://192.168.1.6:8088","token":"tok","relay_api":"https://api.relay","account_credential":"cred"}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(flat), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,13 +305,8 @@ func TestLoadClientFileMigratesLegacyFlat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cf.Boxes) != 1 || cf.Current != "default" {
-		t.Fatalf("want 1 box current=default, got %+v", cf)
-	}
-	b := cf.Boxes[0]
-	if b.Name != "default" || b.Addr != "http://192.168.1.6:8088" || b.Token != "tok" ||
-		b.RelayAPI != "https://api.relay" || b.AccountCredential != "cred" {
-		t.Fatalf("migrated box wrong: %+v", b)
+	if len(cf.Boxes) != 0 || cf.Current != "" {
+		t.Fatalf("want empty ClientFile, got %+v", cf)
 	}
 }
 
@@ -527,30 +523,6 @@ func TestSaveClientRepairsStaleCurrentToCurrentBox(t *testing.T) {
 		if b.Name == "ghost" {
 			t.Fatalf("stale Current created a bogus ghost box: %+v", cf)
 		}
-	}
-}
-
-func TestSaveClientMigratesLegacyFlatFileToV2(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	dir := filepath.Join(home, ".piper", "piper")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	legacy := `{"addr":"http://127.0.0.1:8088","token":"old"}`
-	path := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveClient(ClientConfig{Addr: "http://127.0.0.1:8088", Token: "new"}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"boxes"`) || !strings.Contains(string(data), `"default"`) {
-		t.Fatalf("file not rewritten in v2 form: %s", data)
 	}
 }
 
