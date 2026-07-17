@@ -55,29 +55,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := migrate(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
-	}
 	return &Store{db: db}, nil
-}
-
-// migrate applies additive column changes idempotently (pre-1.0, no migration
-// framework). ALTER ... ADD COLUMN errors if the column exists; we ignore that.
-func migrate(db *sql.DB) error {
-	for _, stmt := range []string{
-		`ALTER TABLE apps ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE apps ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE apps ADD COLUMN hostname TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE deployments ADD COLUMN pr INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE deployments ADD COLUMN logs TEXT NOT NULL DEFAULT ''`,
-	} {
-		if _, err := db.Exec(stmt); err != nil &&
-			!strings.Contains(err.Error(), "duplicate column") {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

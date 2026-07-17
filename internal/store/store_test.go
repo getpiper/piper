@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -448,40 +447,6 @@ func TestDeploymentLogRetentionPrunesTo20PerApp(t *testing.T) {
 	}
 }
 
-func TestMigrateAddsLogsColumnToExistingDB(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A pre-#101 database: deployments table without the logs column.
-	if _, err := db.Exec(`
-		CREATE TABLE apps (name TEXT PRIMARY KEY, port INTEGER NOT NULL,
-			repo TEXT NOT NULL DEFAULT '', branch TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
-		CREATE TABLE deployments (id TEXT PRIMARY KEY, app TEXT NOT NULL REFERENCES apps(name),
-			image_id TEXT NOT NULL, container_id TEXT NOT NULL, host_port INTEGER NOT NULL,
-			status TEXT NOT NULL, created_at TEXT NOT NULL, pr INTEGER NOT NULL DEFAULT 0);`); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open over old db: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	if _, err := s.CreateApp("blog", 8080); err != nil {
-		t.Fatal(err)
-	}
-	d, err := s.CreateDeployment("blog", "img", "c", 40001, "failed", "migrated log")
-	if err != nil {
-		t.Fatalf("CreateDeployment on migrated db: %v", err)
-	}
-	if logs, err := s.DeploymentLogs("blog", d.ID); err != nil || logs != "migrated log" {
-		t.Errorf("logs = %q (err %v), want migrated log", logs, err)
-	}
-}
-
 func TestDomainConfigRoundTrip(t *testing.T) {
 	s := openTemp(t)
 
@@ -853,47 +818,6 @@ func TestListActiveAppDomainsFiltersByStatus(t *testing.T) {
 	}
 	if active[0].Domain != "active1.dev" || active[1].Domain != "active2.dev" {
 		t.Fatalf("active domains = %+v", active)
-	}
-}
-
-func TestAppDomainsMigratedOnExistingDB(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A pre-#225 database: no app_domains table.
-	if _, err := db.Exec(`
-		CREATE TABLE apps (name TEXT PRIMARY KEY, port INTEGER NOT NULL,
-			repo TEXT NOT NULL DEFAULT '', branch TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
-		CREATE TABLE deployments (id TEXT PRIMARY KEY, app TEXT NOT NULL REFERENCES apps(name),
-			image_id TEXT NOT NULL, container_id TEXT NOT NULL, host_port INTEGER NOT NULL,
-			status TEXT NOT NULL, created_at TEXT NOT NULL, logs TEXT NOT NULL DEFAULT '', pr INTEGER NOT NULL DEFAULT 0);
-		CREATE TABLE github_app (id INTEGER PRIMARY KEY CHECK (id = 1), app_id INTEGER NOT NULL,
-			private_key TEXT NOT NULL, webhook_secret TEXT NOT NULL);
-		CREATE TABLE tokens (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL UNIQUE,
-			scope TEXT NOT NULL DEFAULT 'admin', created_at TEXT NOT NULL, revoked_at TEXT);
-		CREATE TABLE domain_config (id INTEGER PRIMARY KEY CHECK (id = 1), domain TEXT NOT NULL,
-			dns_provider TEXT NOT NULL, dns_token TEXT NOT NULL, status TEXT NOT NULL,
-			error TEXT NOT NULL DEFAULT '', cert_not_after TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);`); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open over old db: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	if err := s.AddAppDomain("example.com", "blog"); err != nil {
-		t.Fatalf("AddAppDomain on migrated db: %v", err)
-	}
-	d, err := s.GetAppDomain("example.com")
-	if err != nil {
-		t.Fatalf("GetAppDomain: %v", err)
-	}
-	if d.App != "blog" {
-		t.Fatalf("round-trip = %+v", d)
 	}
 }
 
