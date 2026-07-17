@@ -84,7 +84,18 @@ func (p *Provider) latestDeploymentID(ctx context.Context, token string, ev sour
 	var out []struct {
 		ID int64 `json:"id"`
 	}
-	err := p.do(ctx, http.MethodGet, p.apiBase+"/repos/"+ev.Repo+"/deployments?sha="+ev.SHA, token, nil, &out)
+	// One SHA can carry both a pr-<N> and a production deployment (a PR-preview
+	// SHA and its post-merge production deploy). Filtering on ?sha alone could
+	// post a status to whichever the API lists first, so scope both PR and
+	// non-PR events to their own environment (mirrors createDeployment's
+	// pr-<N>/production split).
+	url := p.apiBase + "/repos/" + ev.Repo + "/deployments?sha=" + ev.SHA
+	if ev.PR > 0 {
+		url += fmt.Sprintf("&environment=pr-%d", ev.PR)
+	} else {
+		url += "&environment=production"
+	}
+	err := p.do(ctx, http.MethodGet, url, token, nil, &out)
 	if err != nil {
 		return 0, err
 	}
