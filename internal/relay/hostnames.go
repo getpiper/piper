@@ -57,9 +57,9 @@ func (s *Store) AgentAccount(baseDomain string) (accountID, username string, err
 // A store failure comes back as its raw (transient) error, so the watchdog
 // leaves healthy sessions running on a blip and evicts only on the two
 // affirmative reads (disabled=true or ErrUnknownAccount). The LEFT JOIN mirrors
-// Authenticate: an account-less legacy agent still has an agents row, so its
-// NULL acc.disabled reads as not-disabled — only a *missing agent row* is
-// unknown.
+// Authenticate: an account-less agent (operator-enrolled via `piper-relay
+// enroll`) still has an agents row, so its NULL acc.disabled reads as
+// not-disabled — only a *missing agent row* is unknown.
 func (s *Store) AgentDisabled(baseDomain string) (bool, error) {
 	var disabled sql.NullInt64
 	err := s.db.QueryRow(

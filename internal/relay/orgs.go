@@ -280,8 +280,8 @@ func (s *Store) RevokeInvite(orgID, githubLogin string) error {
 }
 
 // InvitesForAccount lists the org slugs holding a pending invite for the
-// account's current GitHub login. An account with no stored login (pre-org
-// migration, hasn't re-logged in) has no matchable invites.
+// account's current GitHub login. An account with no stored login has no
+// matchable invites.
 func (s *Store) InvitesForAccount(accountID string) ([]string, error) {
 	var login sql.NullString
 	if err := s.db.QueryRow(

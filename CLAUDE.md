@@ -84,12 +84,22 @@ Always run `make verify` before claiming work is done or pushing — it catches 
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - Defaults: control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, base domain `piper.localhost`, app container port `8080`.
 
+## Compatibility policy (pre-1.x)
+
+Until release **1.x.x** we are **not at a user-facing release**: nobody but us runs Piper, and our own boxes are freely re-provisionable. Therefore:
+
+- **Break freely.** SQLite schemas, the agent↔relay wire protocol, token/config file formats, CLI flags, and API shapes change in place — no compat shims, no deprecation cycles, no version negotiation.
+- **No migrations.** Each `schema.sql` is always the complete current shape; a schema change edits the `CREATE TABLE` directly. Old databases are unsupported — deployed boxes get a fresh DB and re-enroll.
+- **No legacy readers.** Never keep code that parses an older file or wire format.
+
+When a change would otherwise add a shim or migration, change the format directly instead (precedent: #260). This section is revoked at v1.0.0.
+
 ## Commits
 
-One commit per plan task step, conventional-commit style (`feat:`, `test:`, `chore:`). End commit messages with:
+One commit per plan task step, conventional-commit style (`feat:`, `test:`, `chore:`). End commit messages with a co-author trailer naming the current model, e.g.:
 
 ```
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ```
 
 ## Branch workflow
