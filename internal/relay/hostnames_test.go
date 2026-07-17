@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,6 +73,43 @@ func TestRegisterHostnameDisabledAccount(t *testing.T) {
 	}
 	if _, err := st.RegisterHostname(base, "blog"); err != ErrBadCredential {
 		t.Fatalf("disabled-account register err = %v, want ErrBadCredential", err)
+	}
+}
+
+// TestAgentDisabledOutcomes pins the three-way read the watchdog's transient-vs-
+// permanent split depends on, plus the LEFT-JOIN contract for legacy agents:
+//   - known + enabled       -> (false, nil)
+//   - known + disabled      -> (true, nil)
+//   - unknown base           -> (false, ErrUnknownAccount)
+//   - account-less legacy    -> (false, nil)  (agent row exists, acc.disabled NULL)
+func TestAgentDisabledOutcomes(t *testing.T) {
+	st, base := newAccountAgent(t) // account-owned agent "alice"
+
+	// known + enabled
+	if off, err := st.AgentDisabled(base); off || err != nil {
+		t.Fatalf("enabled agent: got (%v, %v), want (false, nil)", off, err)
+	}
+
+	// known + disabled
+	if err := st.DisableAccount("alice"); err != nil {
+		t.Fatal(err)
+	}
+	if off, err := st.AgentDisabled(base); !off || err != nil {
+		t.Fatalf("disabled agent: got (%v, %v), want (true, nil)", off, err)
+	}
+
+	// unknown base
+	if off, err := st.AgentDisabled("nope.example.com"); off || !errors.Is(err, ErrUnknownAccount) {
+		t.Fatalf("unknown base: got (%v, %v), want (false, ErrUnknownAccount)", off, err)
+	}
+
+	// account-less legacy agent (no account_id): the LEFT JOIN yields NULL
+	// acc.disabled, which must read as not-disabled, not as unknown.
+	if _, err := st.Enroll("legacy", "legacy.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if off, err := st.AgentDisabled("legacy.example.com"); off || err != nil {
+		t.Fatalf("legacy account-less agent: got (%v, %v), want (false, nil)", off, err)
 	}
 }
 
