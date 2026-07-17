@@ -13,7 +13,7 @@ import (
 func orgAPIFixture(t *testing.T) (api http.Handler, st *Store, aliceCred, bobCred string) {
 	t.Helper()
 	st = openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	alice, err := st.UpsertAccount("sub-alice", "alice")
 	if err != nil {
 		t.Fatal(err)

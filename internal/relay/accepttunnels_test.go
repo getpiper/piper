@@ -15,7 +15,7 @@ func TestAcceptTunnelsRebindsCustomDomainOnReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 
 	acc, err := st.UpsertAccount("sub-1", "alice")
 	if err != nil {

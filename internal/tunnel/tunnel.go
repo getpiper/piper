@@ -137,7 +137,7 @@ func (s *Session) AcceptKind() (byte, net.Conn, error) {
 
 // ControlRequest is an agent→relay control message on a KindControl stream.
 type ControlRequest struct {
-	Op       string `json:"op"` // "register" | "deregister" | "provision" | "set-domain"
+	Op       string `json:"op"` // "register" | "deregister" | "provision" | "set-domain" | "add-domain" | "remove-domain" | "domain-active"
 	App      string `json:"app,omitempty"`
 	Hostname string `json:"hostname,omitempty"`
 	Token    string `json:"token,omitempty"`  // "provision": the box's control-API bearer for the relay to inject

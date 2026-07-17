@@ -150,6 +150,7 @@ func main() {
 		env("PIPER_RELAY_APEX", "public.getpiper.dev"),
 		atoiOr(env("PIPER_RELAY_MAX_AGENTS", "3"), 3),
 		atoiOr(env("PIPER_RELAY_MAX_APPS", "10"), 10),
+		atoiOr(env("PIPER_RELAY_MAX_DOMAINS", "5"), 5),
 	)
 
 	tlsAddr := env("PIPER_RELAY_TLS_ADDR", ":443")

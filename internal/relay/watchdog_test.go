@@ -65,7 +65,7 @@ func dialAgent(t *testing.T, addr, token, base string) *tunnel.Session {
 // and tear the client session down.
 func TestDisabledWatchdogEvictsLiveSession(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-1", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func TestDisabledWatchdogEvictsLiveSession(t *testing.T) {
 // TestDisabledWatchdogEvictsLiveSession, deleting the row straight in the store.
 func TestDeletedAgentWatchdogEvictsLiveSession(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-1", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func serveHandshake(t *testing.T, auth tunnel.Auth, token, base string) error {
 // established here, the watchdog cannot mask a broken Store.Authenticate check.
 func TestPostDisableRedialRejected(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-1", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestPostDisableRedialRejected(t *testing.T) {
 // reports disabled=true does the next tick evict.
 func TestWatchdogTransientReadErrorKeepsSession(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-1", "alice")
 	if err != nil {
 		t.Fatal(err)
