@@ -48,14 +48,18 @@ func TestRequireTokenRejectsAndAccepts(t *testing.T) {
 func TestDeploymentEndpointsRequireToken(t *testing.T) {
 	s := newTestStore(t)
 	h := RequireToken(s, New(s, &fakeDeployer{}, "piper.localhost", "", nil, nil))
-	for _, path := range []string{
-		"/v1/apps/blog/deployments",
-		"/v1/apps/blog/deployments/dep1/logs",
+	for _, ep := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/apps/blog/deployments"},
+		{http.MethodGet, "/v1/apps/blog/deployments/dep1/logs"},
+		// Destructive endpoints: assert 401 explicitly, not just via the
+		// mux-wide RequireToken wrap.
+		{http.MethodPost, "/v1/apps/blog/stop"},
+		{http.MethodDelete, "/v1/apps/blog"},
 	} {
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		h.ServeHTTP(rr, httptest.NewRequest(ep.method, ep.path, nil))
 		if rr.Code != http.StatusUnauthorized {
-			t.Errorf("%s without token = %d, want 401", path, rr.Code)
+			t.Errorf("%s %s without token = %d, want 401", ep.method, ep.path, rr.Code)
 		}
 	}
 }

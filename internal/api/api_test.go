@@ -701,6 +701,29 @@ func TestDeleteAppEndpointUnknownApp(t *testing.T) {
 	}
 }
 
+// A non-ErrNotFound deployer error maps to 500 (not 404): the stop handler must
+// distinguish "unknown app" from a real backend failure.
+func TestStopEndpointServerError(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s, stopErr: errors.New("stop failed")}, "piper.localhost", "", nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/stop", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// The delete handler's 500 path: a non-ErrNotFound deployer error is not a 404.
+func TestDeleteAppEndpointServerError(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s, deleteErr: errors.New("delete failed")}, "piper.localhost", "", nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
 // A 500 must not echo the raw internal error (container IDs, Caddy admin URLs,
 // file paths) to the caller — the control API is reachable remotely through the
 // relay proxy. #122.
