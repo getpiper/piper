@@ -13,7 +13,7 @@ import (
 func newTestAPI(t *testing.T) (http.Handler, *Store, *FakeVerifier) {
 	t.Helper()
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	fv := NewFakeVerifier()
 	return NewAPI(st, fv), st, fv
 }
@@ -78,7 +78,7 @@ func TestLoginPollUnknownHandle(t *testing.T) {
 
 func TestEnrollWithAccountCredential(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil)
 
 	acc, _ := st.UpsertAccount("sub-1", "judy")
@@ -112,7 +112,7 @@ func TestEnrollWithAccountCredential(t *testing.T) {
 
 func TestEnrollRejectsBadCredential(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
@@ -126,7 +126,7 @@ func TestEnrollRejectsBadCredential(t *testing.T) {
 
 func TestEnrollOverCapReturns429(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 1, 10)
+	st.Configure("public.getpiper.co", 1, 10, 5)
 	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil)
 	acc, _ := st.UpsertAccount("sub-1", "ken")
 	cred, _ := st.MintAccountCredential(acc.ID)
@@ -182,7 +182,7 @@ func startWebLogin(t *testing.T, api http.Handler, redirectURI string) (state st
 func newWebTestAPI(t *testing.T) (http.Handler, *FakeVerifier) {
 	t.Helper()
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	fv := NewFakeVerifier()
 	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"})
 	return api, fv
@@ -311,7 +311,7 @@ func TestWebLoginCallbackExchangeFailure(t *testing.T) {
 
 func TestWebLoginSweepsExpiredStates(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	a := &api{st: st, v: NewFakeVerifier(), webv: NewFakeVerifier(),
 		webRedirects: []string{"https://dash.getpiper.co/"}, webStates: map[string]webState{}}
 	a.webStates["stale"] = webState{redirectURI: "https://dash.getpiper.co/x", expires: time.Now().Add(-time.Minute)}
@@ -334,7 +334,7 @@ func TestWebLoginSweepsExpiredStates(t *testing.T) {
 
 func TestWebLoginNotConfigured(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	api := NewAPI(st, NewFakeVerifier()) // no webRedirects
 
 	rr := httptest.NewRecorder()

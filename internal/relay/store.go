@@ -29,18 +29,22 @@ type Agent struct {
 }
 
 type Store struct {
-	db        *sql.DB
-	apex      string
-	maxAgents int
-	maxApps   int
+	db         *sql.DB
+	apex       string
+	maxAgents  int
+	maxApps    int
+	maxDomains int
+	nowFunc    func() time.Time
 }
 
-// Configure sets the free-tier apex, the per-account agent cap (EnrollForAccount)
-// and the per-account app cap (RegisterHostname). Safe to call once after Open.
-func (s *Store) Configure(apex string, maxAgents, maxApps int) {
+// Configure sets the free-tier apex, the per-account agent cap (EnrollForAccount),
+// the per-account app cap (RegisterHostname), and the per-agent custom-domain
+// cap (AddCustomDomain). Safe to call once after Open.
+func (s *Store) Configure(apex string, maxAgents, maxApps, maxDomains int) {
 	s.apex = apex
 	s.maxAgents = maxAgents
 	s.maxApps = maxApps
+	s.maxDomains = maxDomains
 }
 
 func (s *Store) maxAppsOrDefault() int {
@@ -97,7 +101,29 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate agents: %w", err)
 	}
-	return &Store{db: db}, nil
+	// #227: per-app custom domains live in custom_domains; fold the legacy
+	// single agents.custom_domain column in as an active row (those boxes
+	// proved ownership via DNS-01 under #102), then clear the column.
+	// Clearing is correctness, not tidiness: this copy re-runs on every
+	// Open, so a stale column value would resurrect a domain the agent has
+	// since removed. One-way; the column and its index stay, unused.
+	// If the relay is downgraded and a domain changes hands via set-domain
+	// before re-upgrading, the stale row here wins the INSERT OR IGNORE —
+	// accepted FCFS-backstop edge.
+	if _, err := db.Exec(
+		`INSERT OR IGNORE INTO custom_domains(domain, agent_base, status, created_at)
+		    SELECT custom_domain, base_domain, 'active', ?
+		    FROM agents WHERE custom_domain IS NOT NULL AND custom_domain != ''`,
+		time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate custom domains: %w", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE agents SET custom_domain='' WHERE custom_domain IS NOT NULL AND custom_domain != ''`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate custom domains: %w", err)
+	}
+	return &Store{db: db, nowFunc: time.Now}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -221,85 +247,6 @@ func (s *Store) domainClaimable(domain string) error {
 		}
 	}
 	return rows.Err()
-}
-
-// SetCustomDomain records domain as the BYO custom domain for the agent
-// enrolled at baseDomain and returns the previous value. Empty domain clears.
-// The domain must be a well-formed DNS name outside the relay's own namespace
-// (ErrInvalidDomain / ErrDomainReserved) and is first-come-first-served
-// across agents (ErrDomainTaken, backstopped by a unique index); the real
-// ownership proof is the DNS-01 cert the box obtained before asking.
-func (s *Store) SetCustomDomain(baseDomain, domain string) (string, error) {
-	if domain != "" {
-		if !customDomainRE.MatchString(domain) {
-			return "", ErrInvalidDomain
-		}
-		if err := s.domainClaimable(domain); err != nil {
-			return "", err
-		}
-	}
-	// Refuse to (re-)route a custom domain for a disabled account, the check
-	// RegisterHostname already gets via AgentAccount. Only an affirmative
-	// disabled read rejects (ErrBadCredential); an unknown base (ErrBadToken)
-	// falls through to the base-existence check inside the tx below.
-	if off, err := s.AgentDisabled(baseDomain); err != nil {
-		if !errors.Is(err, ErrBadToken) {
-			return "", err
-		}
-	} else if off {
-		return "", ErrBadCredential
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	if domain != "" {
-		var other string
-		err := tx.QueryRow(
-			`SELECT base_domain FROM agents WHERE custom_domain=? AND base_domain!=?`,
-			domain, baseDomain).Scan(&other)
-		if err == nil {
-			return "", ErrDomainTaken
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return "", err
-		}
-	}
-	var prev sql.NullString
-	err = tx.QueryRow(`SELECT custom_domain FROM agents WHERE base_domain=?`, baseDomain).Scan(&prev)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrBadToken
-	}
-	if err != nil {
-		return "", err
-	}
-	if _, err := tx.Exec(`UPDATE agents SET custom_domain=? WHERE base_domain=?`, domain, baseDomain); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return "", ErrDomainTaken // index backstop: lost the FCFS race
-		}
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return "", ErrDomainTaken
-		}
-		return "", err
-	}
-	return prev.String, nil
-}
-
-// CustomDomain returns the agent's BYO custom domain, "" if none is set.
-func (s *Store) CustomDomain(baseDomain string) (string, error) {
-	var d sql.NullString
-	err := s.db.QueryRow(`SELECT custom_domain FROM agents WHERE base_domain=?`, baseDomain).Scan(&d)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrBadToken
-	}
-	if err != nil {
-		return "", err
-	}
-	return d.String, nil
 }
 
 // ensureAgentColumn adds a column to agents if an older DB predates it.

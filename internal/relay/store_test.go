@@ -65,7 +65,7 @@ func TestEnrollRejectsDuplicateBaseDomain(t *testing.T) {
 
 func TestControlTokenRoundTrip(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-ct", "ct")
 	if err != nil {
 		t.Fatal(err)
@@ -118,9 +118,9 @@ func TestSetCustomDomain(t *testing.T) {
 	if err != nil || prev != "" {
 		t.Fatalf("first set = %q, %v", prev, err)
 	}
-	got, err := st.CustomDomain("alice.example.com")
-	if err != nil || got != "shop.dev" {
-		t.Fatalf("CustomDomain = %q, %v", got, err)
+	got, err := st.CustomDomains("alice.example.com")
+	if err != nil || len(got) != 1 || got[0] != "shop.dev" {
+		t.Fatalf("CustomDomains = %v, %v", got, err)
 	}
 
 	// Uniqueness: bob may not claim alice's domain.
@@ -142,6 +142,24 @@ func TestSetCustomDomain(t *testing.T) {
 	if _, err := st.SetCustomDomain("nobody.example.com", "x.dev"); !errors.Is(err, ErrBadToken) {
 		t.Fatalf("unknown agent: err = %v, want ErrBadToken", err)
 	}
+
+	// The shim replaces ALL rows: per-app claims vanish when set-domain lands.
+	if err := st.AddCustomDomain("alice.example.com", "extra.dev"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetCustomDomain("alice.example.com", "final.dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.CustomDomains("alice.example.com"); len(got) != 1 || got[0] != "final.dev" {
+		t.Fatalf("after shim replace-all: %v", got)
+	}
+	// Shim rows are active immediately (DNS-01 proof predates the call): a
+	// rival cannot evict them even after the pending TTL.
+	var status string
+	if err := st.db.QueryRow(
+		`SELECT status FROM custom_domains WHERE domain='final.dev'`).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("shim row status = %q, %v, want active", status, err)
+	}
 }
 
 // A modified agent must not be able to claim relay-managed names as its
@@ -153,7 +171,7 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -185,8 +203,8 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 		}
 	}
 	// Nothing above may have stuck.
-	if got, _ := st.CustomDomain("bob.example.com"); got != "" {
-		t.Fatalf("custom domain = %q, want none", got)
+	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 0 {
+		t.Fatalf("custom domains = %v after rejected claims, want none", got)
 	}
 	// A legitimate unrelated domain still works.
 	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); err != nil {
@@ -201,7 +219,7 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 
 func TestSetCustomDomainRejectsDisabledAccount(t *testing.T) {
 	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, err := st.UpsertAccount("sub-1", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -287,38 +305,5 @@ func TestOpenCreatesOrgTables(t *testing.T) {
 		if err := st.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
 			t.Fatalf("table %s missing: %v", table, err)
 		}
-	}
-}
-
-// The partial unique index closes the SELECT-then-UPDATE FCFS race at the
-// schema level: even a write that skips the pre-check cannot duplicate a
-// custom domain. Cleared rows (” / NULL) stay unconstrained.
-func TestCustomDomainUniqueIndex(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Enroll("bob", "bob.example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.SetCustomDomain("alice.example.com", "shop.dev"); err != nil {
-		t.Fatal(err)
-	}
-	// Bypass the pre-check: the index itself must refuse the duplicate.
-	if _, err := st.db.Exec(
-		`UPDATE agents SET custom_domain='shop.dev' WHERE base_domain='bob.example.com'`); err == nil {
-		t.Fatal("duplicate custom_domain accepted; unique index missing")
-	}
-	// Two cleared agents may coexist.
-	if _, err := st.SetCustomDomain("alice.example.com", ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.db.Exec(
-		`UPDATE agents SET custom_domain='' WHERE base_domain='bob.example.com'`); err != nil {
-		t.Fatalf("empty custom_domain must not collide: %v", err)
 	}
 }

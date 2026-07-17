@@ -24,7 +24,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	st.Configure("public.getpiper.co", 3, 10)
+	st.Configure("public.getpiper.co", 3, 10, 5)
 	acc, _ := st.UpsertAccount("sub-1", "alice")
 	en, _ := st.EnrollForAccount(acc.ID)
 
@@ -249,8 +249,8 @@ func TestSetDomainControlOp(t *testing.T) {
 	if resp.Error != "" {
 		t.Fatalf("set-domain error: %s", resp.Error)
 	}
-	if got, _ := st.CustomDomain(base); got != "shop.dev" {
-		t.Fatalf("stored custom domain = %q", got)
+	if got, _ := st.CustomDomains(base); len(got) != 1 || got[0] != "shop.dev" {
+		t.Fatalf("stored custom domains = %v", got)
 	}
 }
 
@@ -287,8 +287,8 @@ func TestSetDomainControlOpRejectsHijack(t *testing.T) {
 			t.Errorf("set-domain %q accepted, want rejection", d)
 		}
 	}
-	if got, _ := st.CustomDomain(base); got != "" {
-		t.Fatalf("custom domain = %q after rejected claims, want none", got)
+	if got, _ := st.CustomDomains(base); len(got) != 0 {
+		t.Fatalf("custom domains = %v after rejected claims, want none", got)
 	}
 }
 
@@ -313,5 +313,195 @@ func TestControlPlaneSNIDispatch(t *testing.T) {
 	b, _ := io.ReadAll(c)
 	if !contains(string(b), "ctrl-ok /ping") {
 		t.Fatalf("control dispatch response = %q", b)
+	}
+}
+
+// controlOp sends one control request over sess and returns the response,
+// failing the test on transport errors or an unexpected error-ness.
+func controlOp(t *testing.T, sess *tunnel.Session, req tunnel.ControlRequest, wantErr bool) tunnel.ControlResponse {
+	t.Helper()
+	cs, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if err := tunnel.WriteMsg(cs, req); err != nil {
+		t.Fatal(err)
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if wantErr && resp.Error == "" {
+		t.Fatalf("%s %q accepted, want rejection", req.Op, req.Domain)
+	}
+	if !wantErr && resp.Error != "" {
+		t.Fatalf("%s %q: %s", req.Op, req.Domain, resp.Error)
+	}
+	return resp
+}
+
+// A pending claim must route immediately: that is what lets the TLS-ALPN-01
+// challenge reach the box before any cert exists (#227).
+func TestAddDomainRoutesWhilePending(t *testing.T) {
+	sess, tlsAddr, _, st := startTestRelay(t, nil, nil)
+
+	got := make(chan byte, 1)
+	go func() {
+		for {
+			kind, stream, err := sess.AcceptKind()
+			if err != nil {
+				return
+			}
+			if kind != tunnel.KindPassthrough {
+				stream.Close()
+				continue
+			}
+			buf := make([]byte, 1)
+			if _, err := io.ReadFull(stream, buf); err == nil {
+				got <- buf[0]
+			}
+			stream.Close()
+			return
+		}
+	}()
+
+	controlOp(t, sess, tunnel.ControlRequest{Op: "add-domain", Domain: "shop.dev"}, false)
+	if domains, _ := st.CustomDomains(sess.BaseDomain); len(domains) != 1 || domains[0] != "shop.dev" {
+		t.Fatalf("stored domains = %v", domains)
+	}
+
+	conn, err := net.Dial("tcp", tlsAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	tc := tls.Client(conn, &tls.Config{ServerName: "shop.dev", InsecureSkipVerify: true})
+	go tc.Handshake() // never completes — only the ClientHello needs to travel
+	select {
+	case b := <-got:
+		if b != 0x16 {
+			t.Fatalf("first passthrough byte = %#x, want TLS record type 0x16", b)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no passthrough stream reached the agent for a pending domain")
+	}
+}
+
+func TestDomainLifecycleControlOps(t *testing.T) {
+	sess, _, base, st := startTestRelay(t, nil, nil)
+
+	controlOp(t, sess, tunnel.ControlRequest{Op: "add-domain", Domain: "shop.dev"}, false)
+	controlOp(t, sess, tunnel.ControlRequest{Op: "domain-active", Domain: "shop.dev"}, false)
+	var status string
+	if err := st.db.QueryRow(
+		`SELECT status FROM custom_domains WHERE domain='shop.dev'`).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("status = %q, %v, want active", status, err)
+	}
+	// Confirming a domain you don't hold is rejected.
+	controlOp(t, sess, tunnel.ControlRequest{Op: "domain-active", Domain: "other.dev"}, true)
+	// Malformed and relay-namespace domains are rejected on add.
+	controlOp(t, sess, tunnel.ControlRequest{Op: "add-domain", Domain: "Bad_Domain"}, true)
+	controlOp(t, sess, tunnel.ControlRequest{Op: "add-domain", Domain: base}, true)
+
+	controlOp(t, sess, tunnel.ControlRequest{Op: "remove-domain", Domain: "shop.dev"}, false)
+	if got, _ := st.CustomDomains(base); len(got) != 0 {
+		t.Fatalf("domains after remove = %v", got)
+	}
+}
+
+// Reconnect re-derives live domains (active + unexpired pending) and drops
+// expired pending squats; a rival claim over an expired squat overwrites the
+// router mapping in place.
+func TestReconnectRederivesCustomDomains(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	now := time.Now()
+	st.nowFunc = func() time.Time { return now }
+	tokA, err := st.Enroll("alice", "alice.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokB, err := st.Enroll("bob", "bob.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed: one active, one fresh pending, one expired pending.
+	if err := st.AddCustomDomain("alice.example.com", "active.dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConfirmCustomDomain("alice.example.com", "active.dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddCustomDomain("alice.example.com", "squat.dev"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(pendingTTL + time.Second) // squat.dev expires
+	if err := st.AddCustomDomain("alice.example.com", "fresh.dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	router := NewRouter()
+	tunLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tunLn.Close()
+	go acceptTunnels(tunLn, st, router)
+
+	dial := func(tok, base string) *tunnel.Session {
+		t.Helper()
+		conn, err := net.Dial("tcp", tunLn.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		sess, err := tunnel.Dial(conn, tok, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sess
+	}
+	sessA := dial(tokA, "alice.example.com")
+	defer sessA.Close()
+
+	waitRouted := func(domain string, want *tunnel.Session) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			// want is the client-side Session from tunnel.Dial; router.Lookup
+			// returns the server-side Session from tunnel.Serve inside
+			// acceptTunnels — always a distinct object, so compare by the
+			// identity that matters here: which agent owns the route.
+			if s, ok := router.Lookup(domain); ok && s.BaseDomain == want.BaseDomain {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%s not routed to the expected session", domain)
+	}
+	waitRouted("active.dev", sessA)
+	waitRouted("fresh.dev", sessA)
+	if _, ok := router.Lookup("squat.dev"); ok {
+		t.Fatal("expired pending domain routed after reconnect")
+	}
+
+	// Rival claim over the expired squat: bob's registration overwrites in place.
+	sessB := dial(tokB, "bob.example.com")
+	defer sessB.Close()
+	controlOp(t, sessB, tunnel.ControlRequest{Op: "add-domain", Domain: "squat.dev"}, false)
+	waitRouted("squat.dev", sessB)
+
+	// Cross-tenant remove-domain: alice never held squat.dev (bob does), so
+	// her remove must be a no-op — idempotent success from her perspective,
+	// but it must not unroute bob's live domain (#227 cross-tenant DoS).
+	controlOp(t, sessA, tunnel.ControlRequest{Op: "remove-domain", Domain: "squat.dev"}, false)
+	waitRouted("squat.dev", sessB)
+	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 1 || got[0] != "squat.dev" {
+		t.Fatalf("bob's domains after alice's remove = %v, want [squat.dev]", got)
 	}
 }
