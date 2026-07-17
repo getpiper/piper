@@ -48,11 +48,18 @@ func (s *Store) AgentAccount(baseDomain string) (accountID, username string, err
 
 // AgentDisabled reports whether the account owning the agent whose base_domain
 // is baseDomain has been disabled by the operator kill-switch. It is the
-// narrowest read the relay's per-session watchdog needs: a store failure or an
-// unknown base domain comes back as an error (not a false), so the watchdog can
-// evict only on an affirmative disabled=true and leave healthy sessions running
-// on a transient read error. The LEFT JOIN mirrors Authenticate: an account-less
-// legacy agent has nothing to disable and reads as not-disabled, not missing.
+// narrowest read the relay's per-session watchdog needs, and it distinguishes
+// three outcomes so the watchdog can tell transient from permanent:
+//   - (false, nil)              the agent is live and enabled;
+//   - (true, nil)               the owning account is disabled;
+//   - (false, ErrUnknownAccount) there is no such agent row — the base is gone.
+//
+// A store failure comes back as its raw (transient) error, so the watchdog
+// leaves healthy sessions running on a blip and evicts only on the two
+// affirmative reads (disabled=true or ErrUnknownAccount). The LEFT JOIN mirrors
+// Authenticate: an account-less legacy agent still has an agents row, so its
+// NULL acc.disabled reads as not-disabled — only a *missing agent row* is
+// unknown.
 func (s *Store) AgentDisabled(baseDomain string) (bool, error) {
 	var disabled sql.NullInt64
 	err := s.db.QueryRow(
@@ -60,7 +67,7 @@ func (s *Store) AgentDisabled(baseDomain string) (bool, error) {
 		   FROM agents ag LEFT JOIN accounts acc ON acc.id = ag.account_id
 		  WHERE ag.base_domain = ?`, baseDomain).Scan(&disabled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrBadToken
+		return false, ErrUnknownAccount
 	}
 	if err != nil {
 		return false, err

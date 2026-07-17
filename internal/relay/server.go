@@ -2,6 +2,7 @@ package relay
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -134,9 +135,10 @@ func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string)
 	}
 	// Post-register re-check closes the handshake race deterministically: auth
 	// may have passed before DisableAccount committed, landing Register after
-	// the flag flip. Evict only on an affirmative disabled read (a transient
-	// error leaves the fresh session up; the watchdog re-checks next tick).
-	if off, err := disabled(sess.BaseDomain); err == nil && off {
+	// the flag flip. Evict on an affirmative kill read — disabled=true, or
+	// ErrUnknownAccount (the agent row is gone). A transient store error leaves
+	// the fresh session up; the watchdog re-checks next tick.
+	if off, err := disabled(sess.BaseDomain); (err == nil && off) || errors.Is(err, ErrUnknownAccount) {
 		router.Unregister(sess)
 		sess.Close()
 		return
@@ -153,17 +155,24 @@ func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string)
 			log.Printf("agent gone: %s", sess.BaseDomain)
 			return
 		case <-ticker.C:
-			// Evict only on an affirmative disabled=true read. A transient
-			// store error must not kill a healthy session — log and retry next
-			// tick. Close() drives normal teardown; CloseChan then fires and the
-			// next iteration unregisters, mirroring an agent-initiated close.
+			// Transient vs. permanent split. The read has three outcomes:
+			//   - a bare store error is TRANSIENT — a DB blip must not kill a
+			//     healthy session, so log and retry next tick;
+			//   - disabled=true (operator kill-switch) and ErrUnknownAccount
+			//     (the agent's row is gone — e.g. a future account-deletion
+			//     path) are PERMANENT kill signals. Both are affirmative reads
+			//     that the account can no longer serve; a gone row is at least
+			//     as strong a signal as disabled=true, so it evicts too rather
+			//     than retrying forever.
+			// Close() drives normal teardown; CloseChan then fires and the next
+			// iteration unregisters, mirroring an agent-initiated close.
 			off, err := disabled(sess.BaseDomain)
-			if err != nil {
+			if err != nil && !errors.Is(err, ErrUnknownAccount) {
 				log.Printf("agent %s: disabled watchdog read failed: %v", sess.BaseDomain, err)
 				continue
 			}
-			if off {
-				log.Printf("agent disabled, evicting: %s", sess.BaseDomain)
+			if off || errors.Is(err, ErrUnknownAccount) {
+				log.Printf("agent gone or disabled, evicting: %s", sess.BaseDomain)
 				sess.Close()
 			}
 		}

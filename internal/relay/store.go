@@ -240,10 +240,12 @@ func (s *Store) SetCustomDomain(baseDomain, domain string) (string, error) {
 	}
 	// Refuse to (re-)route a custom domain for a disabled account, the check
 	// RegisterHostname already gets via AgentAccount. Only an affirmative
-	// disabled read rejects (ErrBadCredential); an unknown base (ErrBadToken)
-	// falls through to the base-existence check inside the tx below.
+	// disabled read rejects (ErrBadCredential); an unknown base
+	// (ErrUnknownAccount) falls through to the base-existence check inside the
+	// tx below, which reports it as ErrBadToken — the same rejection this path
+	// has always produced for a missing agent.
 	if off, err := s.AgentDisabled(baseDomain); err != nil {
-		if !errors.Is(err, ErrBadToken) {
+		if !errors.Is(err, ErrUnknownAccount) {
 			return "", err
 		}
 	} else if off {

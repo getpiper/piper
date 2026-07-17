@@ -104,6 +104,55 @@ func TestDisabledWatchdogEvictsLiveSession(t *testing.T) {
 	})
 }
 
+// TestDeletedAgentWatchdogEvictsLiveSession drives the other affirmative kill
+// read: a live session whose agent row is deleted out from under it (a future
+// account-deletion path) must be evicted, not retried forever. AgentDisabled
+// returns ErrUnknownAccount for the now-missing base, and the watchdog treats
+// that as a permanent signal — the same eviction the operator kill-switch gets,
+// distinct from a transient store error which keeps the session up. Mirrors
+// TestDisabledWatchdogEvictsLiveSession, deleting the row straight in the store.
+func TestDeletedAgentWatchdogEvictsLiveSession(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	acc, err := st.UpsertAccount("sub-1", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	router := NewRouter()
+	go acceptTunnels(ln, st, router)
+
+	sess := dialAgent(t, ln.Addr().String(), en.Token, en.BaseDomain)
+	defer sess.Close()
+
+	waitCond(t, 2*time.Second, "session registered", func() bool {
+		_, ok := router.Lookup(en.BaseDomain)
+		return ok
+	})
+
+	// Delete the agent row mid-session: AgentDisabled now reads ErrUnknownAccount.
+	if _, err := st.db.Exec(`DELETE FROM agents WHERE base_domain=?`, en.BaseDomain); err != nil {
+		t.Fatal(err)
+	}
+
+	waitCond(t, 2*time.Second, "base stops routing", func() bool {
+		_, ok := router.Lookup(en.BaseDomain)
+		return !ok
+	})
+	waitCond(t, 2*time.Second, "client session torn down", func() bool {
+		return sess.Closed()
+	})
+}
+
 // serveHandshake runs one tunnel handshake and returns the server-side Serve
 // result: nil means auth authorized the connection, non-nil means it was
 // rejected at the handshake (before any yamux session or watchdog exists). It
