@@ -199,6 +199,30 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 	}
 }
 
+func TestSetCustomDomainRejectsDisabledAccount(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10)
+	acc, err := st.UpsertAccount("sub-1", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A healthy account may set its custom domain.
+	if _, err := st.SetCustomDomain(en.BaseDomain, "shop.dev"); err != nil {
+		t.Fatalf("healthy account rejected: %v", err)
+	}
+	// Once disabled, it may not re-route to a new domain.
+	if err := st.DisableAccount(acc.Username); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetCustomDomain(en.BaseDomain, "other.dev"); !errors.Is(err, ErrBadCredential) {
+		t.Fatalf("disabled account: err = %v, want ErrBadCredential", err)
+	}
+}
+
 // legacyAccountsDDL is the pre-#104 accounts shape: github_id NOT NULL, no
 // type/github_login. Used to prove Open migrates old DBs in place.
 const legacyAccountsDDL = `

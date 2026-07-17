@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"net"
 	"testing"
+	"time"
 
 	"github.com/getpiper/piper/internal/tunnel"
 )
@@ -49,6 +51,63 @@ func TestRouterByHost(t *testing.T) {
 	}
 	if _, ok := r.LookupHost("api-bob.public.getpiper.co"); !ok {
 		t.Fatal("s2 host must survive s1 teardown")
+	}
+}
+
+// newSessionPair returns a live server/client tunnel session pair over an
+// in-memory pipe, so a test can close the server side and exercise the router's
+// refuse-closed-session guard against a genuinely torn-down session.
+func newSessionPair(t *testing.T) (server, client *tunnel.Session) {
+	t.Helper()
+	c1, c2 := net.Pipe()
+	type result struct {
+		sess *tunnel.Session
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		s, err := tunnel.Serve(c1, func(string, string) error { return nil })
+		ch <- result{s, err}
+	}()
+	client, err := tunnel.Dial(c2, "tok", "closed.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := <-ch
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	return r.sess, client
+}
+
+// TestRegisterRefusesClosedSession pins the stale-entry fix: a register that
+// arrives for an already-closed session must no-op under the router lock, so no
+// permanent byBase/byHost/custom entry can outlive the session's Unregister.
+func TestRegisterRefusesClosedSession(t *testing.T) {
+	r := NewRouter()
+	server, client := newSessionPair(t)
+	defer client.Close()
+
+	server.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for !server.Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("server session did not close")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	r.Register(server)
+	if _, ok := r.Lookup(server.BaseDomain); ok {
+		t.Fatal("Register must refuse a closed session")
+	}
+	r.RegisterHost("host.example.com", server)
+	if _, ok := r.LookupHost("host.example.com"); ok {
+		t.Fatal("RegisterHost must refuse a closed session")
+	}
+	r.RegisterCustom("custom.example.com", server)
+	if _, ok := r.Lookup("custom.example.com"); ok {
+		t.Fatal("RegisterCustom must refuse a closed session")
 	}
 }
 
