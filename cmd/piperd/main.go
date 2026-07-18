@@ -452,7 +452,12 @@ func main() {
 		// One mutex shared by every OnConnect callback, so overlapping
 		// (re)connects can't race the list-then-mint and double-provision.
 		var provisionMu sync.Mutex
-		tc.OnConnect = func() { provisionRelayControl(&provisionMu, st, tc.Provision, cfg.BaseDomain) }
+		tc.OnConnect = func() {
+			provisionRelayControl(&provisionMu, st, tc.Provision, cfg.BaseDomain)
+			if cfg.Terminated {
+				domMgr.OnRelayConnect() // gated like Resume: box-wide API configs exist only here
+			}
+		}
 		go tc.Run(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain, dialLocal)
 		if cfg.Terminated {
 			dep.SetHostnameRegistrar(tc)

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getpiper/piper/internal/agent"
 	"github.com/getpiper/piper/internal/caddy"
 	"github.com/getpiper/piper/internal/store"
 )
@@ -237,6 +238,25 @@ func waitStatus(t *testing.T, st *store.Store, status string) store.DomainConfig
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("status never reached %q (last: %+v, err %v)", status, dc, err)
+	return dc
+}
+
+// waitError polls the store until the config carries a non-empty error — the
+// first failed issuance attempt has recorded its outcome (2s cap). The status
+// alone can't mark the moment: a fresh Set already reads "issuing".
+func waitError(t *testing.T, st *store.Store) store.DomainConfig {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var dc store.DomainConfig
+	var err error
+	for time.Now().Before(deadline) {
+		dc, err = st.GetDomainConfig()
+		if err == nil && dc.Error != "" {
+			return dc
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("no failure recorded (last: %+v, err %v)", dc, err)
 	return dc
 }
 
@@ -794,6 +814,100 @@ func TestIssueLoopExitsWhenSuperseded(t *testing.T) {
 	time.Sleep(60 * time.Millisecond)
 	if b := iss.obtainCalls(); b != a {
 		t.Fatalf("superseded loop kept issuing: %d -> %d obtains", a, b)
+	}
+}
+
+// A relay push that fails with ErrNotConnected (the tunnel isn't up yet) is a
+// wait, not an issuance failure: the row must stay "issuing" so a restart
+// never reports "failed" solely because the relay wasn't connected. #166.
+func TestNotConnectedKeepsIssuing(t *testing.T) {
+	m, st, _, relay, _ := newTestManager(t, &fakeIssuer{})
+	relay.failAdd = agent.ErrNotConnected
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	dc := waitError(t, st)
+	if dc.Status != StatusIssuing {
+		t.Fatalf("status = %q, want %q for a not-connected relay (error %q)", dc.Status, StatusIssuing, dc.Error)
+	}
+	if !strings.Contains(dc.Error, "waiting for relay connection") {
+		t.Fatalf("error = %q, want it to name the relay wait", dc.Error)
+	}
+}
+
+// The not-connected carve-out is errors.Is-based, not string-based: any other
+// error — even one carrying ErrNotConnected's text — still records "failed"
+// with its message intact.
+func TestGenericRelayErrorStillFails(t *testing.T) {
+	m, st, _, relay, _ := newTestManager(t, &fakeIssuer{})
+	relay.failAdd = errors.New("relay tunnel not connected") // same text, not the sentinel
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	dc := waitError(t, st)
+	if dc.Status != StatusFailed {
+		t.Fatalf("status = %q, want %q (error %q)", dc.Status, StatusFailed, dc.Error)
+	}
+	if dc.Error != "relay tunnel not connected" {
+		t.Fatalf("error = %q, want the original message preserved", dc.Error)
+	}
+}
+
+// A tunnel (re)connect re-kicks a waiting config immediately: the connect
+// event, not the retry timer, drives the retry. The hour-long retryDelay seam
+// proves only a fresh loop from the kick could activate inside the poll
+// window — and the generation bump supersedes the sleeping one. #166.
+func TestOnRelayConnectKicksIssuance(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, _, relay, _ := newTestManager(t, iss)
+	m.retryDelay = func(int) time.Duration { return time.Hour } // the sleeping loop's timer can never fire in-test
+	relay.failAdd = agent.ErrNotConnected
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	dc := waitError(t, st) // first attempt hit the not-connected wait and is now asleep
+	if dc.Status != StatusIssuing {
+		t.Fatalf("pre-kick status = %q, want %q", dc.Status, StatusIssuing)
+	}
+	gen := m.currentGen()
+
+	relay.mu.Lock()
+	relay.failAdd = nil
+	relay.mu.Unlock()
+	m.OnRelayConnect()
+
+	waitStatus(t, st, StatusActive)
+	if got := m.currentGen(); got != gen+1 {
+		t.Fatalf("gen = %d, want %d: the kick must supersede the sleeping loop", got, gen+1)
+	}
+	if got := iss.obtainCalls(); got != 1 {
+		t.Fatalf("obtains = %d, want exactly 1 (the kicked loop's)", got)
+	}
+}
+
+// An active config is arm-only on reconnect — the relay re-derives the mapping
+// at session registration — so the kick must not start a new issuance run.
+func TestOnRelayConnectSkipsActive(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, _, relay, _ := newTestManager(t, iss)
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusActive)
+	obtains, pushes, gen := iss.obtainCalls(), len(relay.pushes()), m.currentGen()
+
+	m.OnRelayConnect()
+
+	// Give a misbehaving kick time to run before asserting nothing happened.
+	time.Sleep(60 * time.Millisecond)
+	if got := iss.obtainCalls(); got != obtains {
+		t.Fatalf("obtains grew %d -> %d: active config re-issued on connect", obtains, got)
+	}
+	if got := len(relay.pushes()); got != pushes {
+		t.Fatalf("relay pushes grew %d -> %d: active config re-pushed on connect", pushes, got)
+	}
+	if got := m.currentGen(); got != gen {
+		t.Fatalf("gen bumped %d -> %d: kick started a loop for an active config", gen, got)
 	}
 }
 

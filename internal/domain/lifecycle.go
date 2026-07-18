@@ -40,6 +40,24 @@ func (m *Manager) Resume() {
 	go m.issueLoop(dc.Domain, m.nextGen())
 }
 
+// OnRelayConnect re-kicks issuance for a non-active box-wide config when the
+// tunnel (re)connects, so a restart's not-connected wait retries on the
+// connect event instead of waiting out its backoff (#166); wired from the
+// tunnel client's OnConnect in cmd/piperd.
+func (m *Manager) OnRelayConnect() {
+	if m.envDomain != "" {
+		return
+	}
+	dc, err := m.st.GetDomainConfig()
+	if err != nil {
+		return
+	}
+	if dc.Status == StatusActive {
+		return // arm-only: the relay re-derives the mapping at session registration
+	}
+	go m.issueLoop(dc.Domain, m.nextGen())
+}
+
 // setEnvStatus records the env-managed (PIPER_BASE_DOMAIN) path's real state so
 // GET /v1/domain reflects issued/failed + expiry instead of a constant "active"
 // (#116). No-op fields are zeroed by the caller (e.g. notAfter on failure).
