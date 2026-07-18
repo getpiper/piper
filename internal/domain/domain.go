@@ -1,7 +1,11 @@
-// Package domain manages the box's BYO custom domain: cert issuance via ACME
-// DNS-01, live activation in Caddy, relay routing, renewal, and teardown. It
-// orchestrates certs/caddy/tunnel through interfaces (the deploy pattern) so
-// it unit-tests with fakes. See docs/superpowers/specs/2026-07-10-domain-config-api-design.md.
+// Package domain manages the box's BYO custom domains — one lifecycle per
+// domain: relay claim, cert issuance via ACME (DNS-01 wildcard for the
+// box-wide domain, TLS-ALPN-01 exact-host for per-app domains), live
+// activation in Caddy, renewal, and teardown. It orchestrates
+// certs/caddy/deploy/tunnel through interfaces (the deploy pattern) so it
+// unit-tests with fakes. See
+// docs/superpowers/specs/2026-07-10-domain-config-api-design.md and the
+// per-app epic (#224).
 package domain
 
 import (
@@ -216,6 +220,14 @@ func (m *Manager) setCert(key string, certPEM, keyPEM []byte) error {
 	defer m.certMu.Unlock()
 	m.loaded[key] = caddy.CertPair{CertPEM: string(certPEM), KeyPEM: string(keyPEM)}
 	return m.proxy.ReplaceCerts(m.loadedPairsLocked())
+}
+
+// LoadStaticCert loads an operator-provided box-wide cert (piperd's
+// TLSCertFile config) into the shared cert set. Routing it through the set —
+// rather than appending straight to Caddy — keeps a later per-app domain sync
+// from clobbering it.
+func (m *Manager) LoadStaticCert(certPEM, keyPEM []byte) error {
+	return m.setCert(boxWideKey, certPEM, keyPEM)
 }
 
 // unloadCert drops key's cert from Caddy. A key that was never loaded is a
