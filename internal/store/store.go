@@ -610,6 +610,19 @@ func (s *Store) ListAppDomains(app string) ([]AppDomain, error) {
 	return s.scanAppDomains(rows)
 }
 
+// AllAppDomains returns every per-app custom domain regardless of status,
+// ordered by domain — the domain manager's restart-resume sweep.
+func (s *Store) AllAppDomains() ([]AppDomain, error) {
+	rows, err := s.db.Query(
+		`SELECT domain, app, status, error, cert_not_after, updated_at
+		 FROM app_domains ORDER BY domain`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanAppDomains(rows)
+}
+
 // ListActiveAppDomains returns every domain with status='active', ordered by domain.
 func (s *Store) ListActiveAppDomains() ([]AppDomain, error) {
 	rows, err := s.db.Query(
