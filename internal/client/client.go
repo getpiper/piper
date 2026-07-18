@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -256,6 +257,58 @@ func (c *Client) DeleteApp(name string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		return responseError("delete", resp)
+	}
+	return nil
+}
+
+// AppDomains lists the per-app custom domains attached to app (#232).
+func (c *Client) AppDomains(app string) ([]domain.AppDomainStatus, error) {
+	resp, err := c.do(http.MethodGet, "/v1/apps/"+app+"/domains", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, responseError("list domains", resp)
+	}
+	var ds []domain.AppDomainStatus
+	if err := json.NewDecoder(resp.Body).Decode(&ds); err != nil {
+		return nil, err
+	}
+	return ds, nil
+}
+
+// AddAppDomain attaches dom to app and returns its initial status, including
+// the CNAME record to create.
+func (c *Client) AddAppDomain(app, dom string) (domain.AppDomainStatus, error) {
+	body, err := json.Marshal(map[string]string{"domain": dom})
+	if err != nil {
+		return domain.AppDomainStatus{}, err
+	}
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+app+"/domains", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return domain.AppDomainStatus{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return domain.AppDomainStatus{}, responseError("add domain", resp)
+	}
+	var st domain.AppDomainStatus
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return domain.AppDomainStatus{}, err
+	}
+	return st, nil
+}
+
+// RemoveAppDomain detaches dom from app.
+func (c *Client) RemoveAppDomain(app, dom string) error {
+	resp, err := c.do(http.MethodDelete, "/v1/apps/"+app+"/domains/"+dom, "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("remove domain", resp)
 	}
 	return nil
 }
