@@ -1,8 +1,17 @@
 # Custom domains (BYO)
 
+Two kinds:
+
+- a **box-wide base domain** — every app served as `<app>.<yourdomain>` under
+  one wildcard cert (needs a DNS-provider API token for DNS-01);
+- **per-app domains** — `myshop.com` pointed at one specific app, tokenless
+  (see [Per-app domains](#per-app-domains-piper-domains--no-dns-token) below).
+
+## Box-wide base domain
+
 A box serves apps on a base domain. Two ways to configure it:
 
-## Via the control API (dashboard / `curl`) — relay free-tier boxes
+### Via the control API (dashboard / `curl`) — relay free-tier boxes
 
     PUT /v1/domain          {"domain":"example.com","dns_provider":"cloudflare","dns_token":"<token>"}
     GET /v1/domain          → status, DNS records to create, dns_ok, cert_not_after
@@ -21,15 +30,52 @@ Secrets never leave the box: the DNS token is write-only (`dns_token_set`
 signals presence), and the cert's private key and ACME account key live in
 piperd's data dir with 0600 permissions.
 
-## Via environment variables — self-managed boxes
+### Via environment variables — self-managed boxes
 
 `PIPER_BASE_DOMAIN` + `PIPER_DNS_PROVIDER` (creds via the provider's own env
 vars, e.g. `CLOUDFLARE_DNS_API_TOKEN`), or a static `PIPER_TLS_CERT_FILE` /
 `PIPER_TLS_KEY_FILE` pair. Unchanged from before.
 
-## Precedence
+### Precedence
 
 **env > API > none.** A box whose base domain comes from the environment
 (non-terminated relay mode) reports `"source":"env"` on `GET /v1/domain` and
 answers `409` to `PUT`/`DELETE` — unset the env config to manage the domain
 remotely. LAN-only boxes (no relay) answer `409` to all `/v1/domain` calls.
+
+## Per-app domains (`piper domains`) — no DNS token
+
+Attach a domain you own to **one specific app**. Unlike the box-wide domain
+this needs no DNS-provider API token: per-app domains are exact hosts, so the
+box issues each cert via ACME **TLS-ALPN-01** — the challenge rides the same
+relay splice as your traffic.
+
+    piper domains add myshop.com --app shop   # prints the CNAME to create
+    piper domains list [--app shop]           # domain, app, status, cert expiry, dns_ok
+    piper domains remove myshop.com
+
+Create the record `add` prints at your DNS host:
+
+    myshop.com  CNAME  public.getpiper.dev
+
+Unlike DNS-01 above, issuance **waits for DNS**: the cert can only issue once
+the name resolves to the relay (the same trade Vercel/Netlify make).
+`piper domains list` shows `dns=ok` when it does, and the status walks
+`pending → issuing → active`. Once active, both `https://myshop.com` and
+`http://myshop.com` reach the app, and the shared-domain URL keeps working
+alongside. Renewal is automatic.
+
+Notes:
+
+- **Apex domains** need a DNS host that supports CNAME at the apex
+  (Cloudflare, or ALIAS/ANAME on others). Otherwise use a subdomain
+  (`www.myshop.com`), or point an A/AAAA record at the relay's current
+  address — accepting it may change.
+- `www.myshop.com` is its own domain — attach it separately if you want both.
+- A domain claim on the relay expires if the cert never issues, so a domain
+  you don't control can't be squatted durably.
+- TLS stays **end-to-end**: the box holds the key; the relay only splices
+  bytes by SNI.
+- Same surface for dashboards: `GET`/`POST /v1/apps/<app>/domains`,
+  `DELETE /v1/apps/<app>/domains/<domain>`.
+- Deleting the app detaches its domains and releases the relay claims.
