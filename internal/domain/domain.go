@@ -14,19 +14,27 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/getpiper/piper/internal/caddy"
 	"github.com/getpiper/piper/internal/certs"
 	"github.com/getpiper/piper/internal/store"
 )
 
 const (
+	StatusPending = "pending"
 	StatusIssuing = "issuing"
 	StatusActive  = "active"
 	StatusFailed  = "failed"
 )
+
+// boxWideKey is the box-wide domain's slot in the keyed maps (loop generations,
+// loaded certs). "*" cannot collide with a stored domain (domainRE rejects it)
+// and reads as what the instance is: the wildcard-shaped one.
+const boxWideKey = "*"
 
 var (
 	ErrEnvManaged          = errors.New("domain config is env-managed (PIPER_BASE_DOMAIN); unset it to manage via the API")
@@ -53,15 +61,25 @@ type IssuerFactory func(provider, token string) (Issuer, error)
 // Proxy is the caddy slice the Manager drives. *caddy.Client satisfies it.
 type Proxy interface {
 	EnsureHTTPS(listen string) error
-	ReplaceCert(certPEM, keyPEM string) error
+	ReplaceCerts(pairs []caddy.CertPair) error
 	UpsertRouteTLS(host string, upstreamHostPort int) error
 	RemoveRoute(host string) error
 }
 
-// RelayNotifier pushes the custom domain to the relay over the tunnel.
-// *agent.TunnelClient satisfies it.
+// RelayNotifier drives the relay's per-domain claim lifecycle over the tunnel
+// (#227): add-domain claims a routable pending mapping, domain-active confirms
+// it durable, remove-domain drops it. *agent.TunnelClient satisfies it.
 type RelayNotifier interface {
-	SetCustomDomain(domain string) error
+	AddCustomDomain(domain string) error
+	ConfirmCustomDomain(domain string) error
+	RemoveCustomDomain(domain string) error
+}
+
+// AppRouter is the deploy slice the Manager calls at per-app domain activation
+// to backfill the exact-host route for an already-running app (#230); deploys
+// otherwise own routes. *deploy.Deployer satisfies it.
+type AppRouter interface {
+	RouteAppDomain(appName, domain string) error
 }
 
 // Options wires a Manager. EnvDomain non-empty means domain config is
@@ -70,19 +88,27 @@ type RelayNotifier interface {
 type Options struct {
 	Store       *store.Store
 	Issuer      IssuerFactory
+	AppIssuer   func() (Issuer, error) // TLS-ALPN-01 issuer for per-app domains
 	Proxy       Proxy
+	Router      AppRouter // per-app route backfill; nil tolerated (tests)
 	DataDir     string
 	RelayHost   string // host part of the relay address; the DNS-record target
 	HTTPSListen string // e.g. ":443"
 	EnvDomain   string
 }
 
-// Manager owns the custom-domain lifecycle: issuing → active/failed,
-// persisted in the store so the dashboard can poll it and restarts resume it.
+// Manager owns the custom-domain lifecycles — one state machine per domain,
+// keyed by domain, each persisted in the store so the dashboard can poll it and
+// restarts resume it. The box-wide BYO domain (#102) is the one wildcard-shaped
+// instance (DNS-01, token, routes for all apps, domain_config row); per-app BYO
+// domains (#224) are exact-host instances (TLS-ALPN-01, tokenless, one route,
+// app_domains rows).
 type Manager struct {
 	st          *store.Store
 	newIssuer   IssuerFactory
+	appIssuer   func() (Issuer, error)
 	proxy       Proxy
+	router      AppRouter
 	dataDir     string
 	relayHost   string
 	httpsListen string
@@ -91,10 +117,16 @@ type Manager struct {
 	relayMu sync.Mutex
 	relay   RelayNotifier
 
-	issueMu sync.Mutex // serializes issuance/renewal runs
+	issueMu sync.Mutex // serializes the box-wide instance's issuance/renewal runs
 
-	loopMu  sync.Mutex // guards loopGen
-	loopGen int        // bumped per Set/Resume; a loop exits when superseded
+	appMuMu sync.Mutex             // guards appMu
+	appMu   map[string]*sync.Mutex // per-app-domain run locks: one domain's ACME never blocks another's
+
+	genMu sync.Mutex     // guards gens
+	gens  map[string]int // per-domain loop generations; a loop exits when superseded
+
+	certMu sync.Mutex                // guards loaded and serializes cert syncs to Caddy
+	loaded map[string]caddy.CertPair // certs currently loaded, keyed like gens
 
 	dnsMu    sync.Mutex // guards dnsCache
 	dnsCache map[string]dnsCacheEntry
@@ -106,6 +138,7 @@ type Manager struct {
 
 	// test seams
 	retryDelay func(attempt int) time.Duration
+	dnsWait    time.Duration // pending poll while waiting for the user's DNS
 	resolve    func(ctx context.Context, host string) ([]net.IP, error)
 	now        func() time.Time
 }
@@ -126,12 +159,17 @@ func New(o Options) *Manager {
 		envStatus = StatusIssuing // pending until RunEnv reports its outcome
 	}
 	return &Manager{
-		st: o.Store, newIssuer: o.Issuer, proxy: o.Proxy,
+		st: o.Store, newIssuer: o.Issuer, appIssuer: o.AppIssuer,
+		proxy: o.Proxy, router: o.Router,
 		dataDir: o.DataDir, relayHost: o.RelayHost,
 		httpsListen: o.HTTPSListen, envDomain: o.EnvDomain,
+		appMu:      map[string]*sync.Mutex{},
+		gens:       map[string]int{},
+		loaded:     map[string]caddy.CertPair{},
 		dnsCache:   map[string]dnsCacheEntry{},
 		envStatus:  envStatus,
 		retryDelay: defaultRetryDelay,
+		dnsWait:    defaultDNSWait,
 		resolve: func(ctx context.Context, host string) ([]net.IP, error) {
 			return net.DefaultResolver.LookupIP(ctx, "ip", host)
 		},
@@ -139,19 +177,73 @@ func New(o Options) *Manager {
 	}
 }
 
-// nextGen bumps the loop generation and returns it; the goroutine started with
-// this value drives issuance until a later Set/Resume supersedes it.
-func (m *Manager) nextGen() int {
-	m.loopMu.Lock()
-	defer m.loopMu.Unlock()
-	m.loopGen++
-	return m.loopGen
+// nextGenFor bumps key's loop generation and returns it; the goroutine started
+// with this value drives issuance until a later start for the same key
+// supersedes it.
+func (m *Manager) nextGenFor(key string) int {
+	m.genMu.Lock()
+	defer m.genMu.Unlock()
+	m.gens[key]++
+	return m.gens[key]
 }
 
-func (m *Manager) currentGen() int {
-	m.loopMu.Lock()
-	defer m.loopMu.Unlock()
-	return m.loopGen
+func (m *Manager) currentGenFor(key string) int {
+	m.genMu.Lock()
+	defer m.genMu.Unlock()
+	return m.gens[key]
+}
+
+// nextGen / currentGen are the box-wide instance's generation slot.
+func (m *Manager) nextGen() int    { return m.nextGenFor(boxWideKey) }
+func (m *Manager) currentGen() int { return m.currentGenFor(boxWideKey) }
+
+// appLock returns the named domain's run lock, creating it on first use.
+func (m *Manager) appLock(domain string) *sync.Mutex {
+	m.appMuMu.Lock()
+	defer m.appMuMu.Unlock()
+	if m.appMu[domain] == nil {
+		m.appMu[domain] = &sync.Mutex{}
+	}
+	return m.appMu[domain]
+}
+
+// setCert loads (or refreshes) key's cert in Caddy by re-syncing the complete
+// load_pem set: with one wildcard cert and N exact-host certs live at once, a
+// whole-set replace is the only shape that can never strand or duplicate an
+// entry. certMu spans the sync so a concurrent change can't land a stale set.
+func (m *Manager) setCert(key string, certPEM, keyPEM []byte) error {
+	m.certMu.Lock()
+	defer m.certMu.Unlock()
+	m.loaded[key] = caddy.CertPair{CertPEM: string(certPEM), KeyPEM: string(keyPEM)}
+	return m.proxy.ReplaceCerts(m.loadedPairsLocked())
+}
+
+// unloadCert drops key's cert from Caddy. A key that was never loaded is a
+// no-op — teardown paths run before activation too, when the tls app may not
+// even exist yet.
+func (m *Manager) unloadCert(key string) error {
+	m.certMu.Lock()
+	defer m.certMu.Unlock()
+	if _, ok := m.loaded[key]; !ok {
+		return nil
+	}
+	delete(m.loaded, key)
+	return m.proxy.ReplaceCerts(m.loadedPairsLocked())
+}
+
+// loadedPairsLocked snapshots the cert set in stable (sorted-key) order.
+// Caller holds certMu.
+func (m *Manager) loadedPairsLocked() []caddy.CertPair {
+	keys := make([]string, 0, len(m.loaded))
+	for k := range m.loaded {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([]caddy.CertPair, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, m.loaded[k])
+	}
+	return pairs
 }
 
 // SetRelay injects the tunnel client once relay mode is up (piperd creates the
@@ -232,6 +324,11 @@ func (m *Manager) issueLoop(domain string, gen int) {
 	}
 }
 
+// defaultDNSWait is how often a pending per-app domain re-checks that the
+// user's DNS record points at the relay before attempting issuance. A flat
+// poll, not a backoff: the wait is on the user, not on a failing dependency.
+const defaultDNSWait = 15 * time.Second
+
 // defaultRetryDelay backs off 5s, then 1m, 2m, 4m, … capped at ~1h. The short
 // first retry keeps a restart-mid-issuance from flapping to "failed" for a full
 // minute: the common cause is the tunnel not being connected yet at Resume, and
@@ -247,17 +344,28 @@ func defaultRetryDelay(attempt int) time.Duration {
 	return time.Minute << uint(shift)
 }
 
-// issueOnce obtains (or reuses) the cert, arms Caddy, then tells the relay.
-// The disk-cert reuse keeps retries and restarts inside LE rate limits: a
-// relay hiccup must not burn a fresh certificate. snap is the caller's config
-// snapshot; the run re-reads under issueMu and aborts with errStaleConfig if
-// the stored domain has moved on (Set-replace/Remove won the race).
+// issueOnce claims the relay mapping, obtains (or reuses) the cert, arms
+// Caddy, then confirms the claim — the epic's uniform per-domain ordering
+// (#224). For this DNS-01 wildcard shape the early claim is not load-bearing
+// the way it is for ALPN, but it lets the relay's FCFS reject a contested name
+// before an ACME order is burned. The disk-cert reuse keeps retries and
+// restarts inside LE rate limits: a relay hiccup must not burn a fresh
+// certificate. snap is the caller's config snapshot; the run re-reads under
+// issueMu and aborts with errStaleConfig if the stored domain has moved on
+// (Set-replace/Remove won the race).
 func (m *Manager) issueOnce(snap store.DomainConfig) error {
 	m.issueMu.Lock()
 	defer m.issueMu.Unlock()
 	dc, err := m.st.GetDomainConfig()
 	if err != nil || dc.Domain != snap.Domain {
 		return errStaleConfig
+	}
+	// Nil notifier tolerated (LAN/tests): activation then skips the relay.
+	r := m.notifier()
+	if r != nil {
+		if err := r.AddCustomDomain(dc.Domain); err != nil {
+			return err
+		}
 	}
 	certPEM, keyPEM, err := m.readCert()
 	if err != nil || !certCovers(certPEM, dc.Domain, time.Now()) {
@@ -282,8 +390,8 @@ func (m *Manager) issueOnce(snap store.DomainConfig) error {
 	if err := m.arm(dc, certPEM, keyPEM); err != nil {
 		return err
 	}
-	if r := m.notifier(); r != nil {
-		if err := r.SetCustomDomain(dc.Domain); err != nil {
+	if r != nil {
+		if err := r.ConfirmCustomDomain(dc.Domain); err != nil {
 			return err
 		}
 	}
@@ -300,7 +408,7 @@ func (m *Manager) arm(dc store.DomainConfig, certPEM, keyPEM []byte) error {
 	if err := m.proxy.EnsureHTTPS(m.httpsListen); err != nil {
 		return err
 	}
-	if err := m.proxy.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+	if err := m.setCert(boxWideKey, certPEM, keyPEM); err != nil {
 		return err
 	}
 	apps, err := m.st.ListApps()
@@ -319,24 +427,28 @@ func (m *Manager) arm(dc store.DomainConfig, certPEM, keyPEM []byte) error {
 	return nil
 }
 
-// teardown reverses activation: relay mapping first, then routes, then files.
-// The relay clear is best-effort here (Set-replace only): the subsequent
-// set-domain push for the new domain makes the relay unregister the old one,
-// so a missed clear self-heals. Caller must hold issueMu.
+// teardown reverses activation: relay claim first, then routes, then certs.
+// The relay removal is best-effort here (Set-replace only): a missed removal
+// leaves a stale claim on the relay that still points at this same agent —
+// harmless routing-wise, bounded by the relay's per-agent domain cap. Remove,
+// the user-facing teardown, requires the relay removal to succeed. Caller must
+// hold issueMu.
 func (m *Manager) teardown(dc store.DomainConfig) {
 	if r := m.notifier(); r != nil {
-		_ = r.SetCustomDomain("")
+		_ = r.RemoveCustomDomain(dc.Domain)
 	}
 	m.removeRoutesAndCert(dc)
 }
 
-// removeRoutesAndCert drops the domain's Caddy routes and the on-disk cert.
+// removeRoutesAndCert drops the domain's Caddy routes, its loaded cert, and
+// the on-disk cert.
 func (m *Manager) removeRoutesAndCert(dc store.DomainConfig) {
 	if apps, err := m.st.ListApps(); err == nil {
 		for _, a := range apps {
 			_ = m.proxy.RemoveRoute(a.Name + "." + dc.Domain)
 		}
 	}
+	_ = m.unloadCert(boxWideKey)
 	_ = os.RemoveAll(filepath.Join(m.dataDir, "domain"))
 }
 
@@ -367,8 +479,14 @@ func (m *Manager) readCert() (certPEM, keyPEM []byte, err error) {
 }
 
 // certCovers reports whether the leaf in certPEM is valid for hosts under
-// domain and not expiring within 24h — the disk-cert reuse test.
+// domain and not expiring within 24h — the wildcard disk-cert reuse test.
 func certCovers(certPEM []byte, domain string, now time.Time) bool {
+	return certValidFor(certPEM, "piper-probe."+domain, now)
+}
+
+// certValidFor reports whether the leaf in certPEM is valid for host and not
+// expiring within 24h.
+func certValidFor(certPEM []byte, host string, now time.Time) bool {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
 		return false
@@ -377,7 +495,7 @@ func certCovers(certPEM []byte, domain string, now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	if crt.VerifyHostname("piper-probe."+domain) != nil {
+	if crt.VerifyHostname(host) != nil {
 		return false
 	}
 	return now.Add(24 * time.Hour).Before(crt.NotAfter)
@@ -473,13 +591,19 @@ func (m *Manager) cachedDNSOK(domain string) bool {
 // resolve to an address the relay host also resolves to. Traffic readiness —
 // independent of issuance, which needs only the DNS API token.
 func (m *Manager) dnsOK(domain string) bool {
+	return m.dnsPointsAt(m.relayHost, "piper-probe."+domain)
+}
+
+// dnsPointsAt reports whether host resolves to an address target also
+// resolves to.
+func (m *Manager) dnsPointsAt(target, host string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	probe, err := m.resolve(ctx, "piper-probe."+domain)
+	probe, err := m.resolve(ctx, host)
 	if err != nil {
 		return false
 	}
-	relay, err := m.resolve(ctx, m.relayHost)
+	relay, err := m.resolve(ctx, target)
 	if err != nil {
 		return false
 	}
@@ -513,7 +637,7 @@ func (m *Manager) Remove() error {
 		return err
 	}
 	if r := m.notifier(); r != nil {
-		if err := r.SetCustomDomain(""); err != nil {
+		if err := r.RemoveCustomDomain(dc.Domain); err != nil {
 			return fmt.Errorf("clear relay domain mapping: %w", err)
 		}
 	}

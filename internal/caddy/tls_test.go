@@ -61,7 +61,7 @@ func TestLoadCert(t *testing.T) {
 	}
 }
 
-func TestReplaceCert(t *testing.T) {
+func TestReplaceCerts(t *testing.T) {
 	var gotMethod, gotPath, gotBody string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
@@ -73,8 +73,12 @@ func TestReplaceCert(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(ts.URL)
-	if err := c.ReplaceCert("CERTPEM", "KEYPEM"); err != nil {
-		t.Fatalf("ReplaceCert: %v", err)
+	pairs := []CertPair{
+		{CertPEM: "CERT1", KeyPEM: "KEY1"},
+		{CertPEM: "CERT2", KeyPEM: "KEY2"},
+	}
+	if err := c.ReplaceCerts(pairs); err != nil {
+		t.Fatalf("ReplaceCerts: %v", err)
 	}
 	if gotMethod != http.MethodPatch {
 		t.Fatalf("method = %q, want PATCH", gotMethod)
@@ -86,7 +90,16 @@ func TestReplaceCert(t *testing.T) {
 	if err := json.Unmarshal([]byte(gotBody), &got); err != nil {
 		t.Fatalf("body not a JSON array: %v (%s)", err, gotBody)
 	}
-	if len(got) != 1 || got[0]["certificate"] != "CERTPEM" || got[0]["key"] != "KEYPEM" {
+	if len(got) != 2 || got[0]["certificate"] != "CERT1" || got[0]["key"] != "KEY1" ||
+		got[1]["certificate"] != "CERT2" || got[1]["key"] != "KEY2" {
 		t.Fatalf("bad replacement body: %s", gotBody)
+	}
+
+	// The empty set is a valid replacement (last cert unloaded), sent as [].
+	if err := c.ReplaceCerts(nil); err != nil {
+		t.Fatalf("ReplaceCerts(nil): %v", err)
+	}
+	if gotBody != "[]" {
+		t.Fatalf("empty replacement body = %s, want []", gotBody)
 	}
 }

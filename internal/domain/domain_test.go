@@ -13,11 +13,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/getpiper/piper/internal/caddy"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -90,6 +92,7 @@ type fakeProxy struct {
 	mu       sync.Mutex
 	ensured  []string
 	replaced int
+	certs    []caddy.CertPair // the last full set synced
 	routes   map[string]int
 	removed  []string
 }
@@ -100,11 +103,17 @@ func (f *fakeProxy) EnsureHTTPS(listen string) error {
 	f.ensured = append(f.ensured, listen)
 	return nil
 }
-func (f *fakeProxy) ReplaceCert(cert, key string) error {
+func (f *fakeProxy) ReplaceCerts(pairs []caddy.CertPair) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.replaced++
+	f.certs = append([]caddy.CertPair(nil), pairs...)
 	return nil
+}
+func (f *fakeProxy) certCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.certs)
 }
 func (f *fakeProxy) UpsertRouteTLS(host string, port int) error {
 	f.mu.Lock()
@@ -128,21 +137,32 @@ func (f *fakeProxy) route(host string) (int, bool) {
 	return p, ok
 }
 
+// fakeNotifier records the relay claim ops as "add:<d>" / "confirm:<d>" /
+// "remove:<d>". fail rejects every op; failAdd/failConfirm/failRemove reject
+// one op kind.
 type fakeNotifier struct {
-	mu   sync.Mutex
-	got  []string
-	fail error
+	mu                            sync.Mutex
+	got                           []string
+	fail                          error
+	failAdd, failConfirm, failRem error
 }
 
-func (f *fakeNotifier) SetCustomDomain(d string) error {
+func (f *fakeNotifier) op(kind, d string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fail != nil {
 		return f.fail
 	}
-	f.got = append(f.got, d)
+	kindFail := map[string]error{"add": f.failAdd, "confirm": f.failConfirm, "remove": f.failRem}[kind]
+	if kindFail != nil {
+		return kindFail
+	}
+	f.got = append(f.got, kind+":"+d)
 	return nil
 }
+func (f *fakeNotifier) AddCustomDomain(d string) error     { return f.op("add", d) }
+func (f *fakeNotifier) ConfirmCustomDomain(d string) error { return f.op("confirm", d) }
+func (f *fakeNotifier) RemoveCustomDomain(d string) error  { return f.op("remove", d) }
 func (f *fakeNotifier) last() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -241,8 +261,9 @@ func TestSetIssuesAndActivates(t *testing.T) {
 	if dc.CertNotAfter.IsZero() {
 		t.Fatal("active config has zero cert_not_after")
 	}
-	if got := relay.last(); got != "example.com" {
-		t.Fatalf("relay notified with %q", got)
+	// Claim first, confirm after activation — the epic's per-domain ordering.
+	if got := relay.pushes(); len(got) != 2 || got[0] != "add:example.com" || got[1] != "confirm:example.com" {
+		t.Fatalf("relay ops = %v, want [add:example.com confirm:example.com]", got)
 	}
 	if p, ok := proxy.route("blog.example.com"); !ok || p != 40001 {
 		t.Fatalf("blog route = %d,%v; want 40001 on blog.example.com", p, ok)
@@ -295,7 +316,7 @@ func TestIssueFailureRecordsFailedThenRetriesToActive(t *testing.T) {
 func TestRelayRejectionSurfacesAsFailed(t *testing.T) {
 	iss := &fakeIssuer{}
 	m, st, _, relay, _ := newTestManager(t, iss)
-	relay.fail = errors.New("domain already in use")
+	relay.failAdd = errors.New("domain already in use")
 	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
 		t.Fatal(err)
 	}
@@ -303,17 +324,44 @@ func TestRelayRejectionSurfacesAsFailed(t *testing.T) {
 	if dc.Error != "domain already in use" {
 		t.Fatalf("error = %q", dc.Error)
 	}
-	// Retries must reuse the disk cert instead of re-obtaining (rate limits).
-	before := iss.obtainCalls()
+	// The claim precedes issuance, so a contested name never burns an ACME
+	// order at all.
 	time.Sleep(50 * time.Millisecond)
-	if after := iss.obtainCalls(); after != before {
-		t.Fatalf("obtain calls grew %d→%d during relay-only retries", before, after)
+	if got := iss.obtainCalls(); got != 0 {
+		t.Fatalf("obtain calls = %d during relay-rejected retries, want 0", got)
 	}
 	// Unblock the relay; the loop must converge to active.
 	relay.mu.Lock()
-	relay.fail = nil
+	relay.failAdd = nil
 	relay.mu.Unlock()
 	waitStatus(t, st, StatusActive)
+}
+
+// A relay confirm failure after the cert was obtained must retry on the disk
+// cert instead of re-obtaining (rate limits).
+func TestRelayConfirmFailureReusesDiskCert(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, _, relay, _ := newTestManager(t, iss)
+	relay.failConfirm = errors.New("tunnel down")
+	if _, err := m.Set("example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, StatusFailed)
+	before := iss.obtainCalls()
+	if before == 0 {
+		t.Fatal("no cert obtained before the confirm failure")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if after := iss.obtainCalls(); after != before {
+		t.Fatalf("obtain calls grew %d→%d during confirm-only retries", before, after)
+	}
+	relay.mu.Lock()
+	relay.failConfirm = nil
+	relay.mu.Unlock()
+	waitStatus(t, st, StatusActive)
+	if got := iss.obtainCalls(); got != before {
+		t.Fatalf("activation after confirm unblocked re-obtained (%d→%d)", before, got)
+	}
 }
 
 func TestSetEnvManaged(t *testing.T) {
@@ -409,8 +457,8 @@ func TestRemoveTearsDown(t *testing.T) {
 	if err := m.Remove(); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if got := relay.last(); got != "" {
-		t.Fatalf("relay last notify = %q, want cleared", got)
+	if got := relay.last(); got != "remove:example.com" {
+		t.Fatalf("relay last op = %q, want remove:example.com", got)
 	}
 	proxy.mu.Lock()
 	removed := append([]string(nil), proxy.removed...)
@@ -609,19 +657,22 @@ func TestSetReplaceDuringInFlightIssuance(t *testing.T) {
 	if dc.Domain != "new.dev" {
 		t.Fatalf("active domain = %q, want new.dev", dc.Domain)
 	}
-	if got := relay.last(); got != "new.dev" {
-		t.Fatalf("relay last push = %q, want new.dev", got)
+	if got := relay.last(); got != "confirm:new.dev" {
+		t.Fatalf("relay last op = %q, want confirm:new.dev", got)
 	}
-	// After the replace's teardown clear (""), the old domain must never be
-	// re-pushed by the stale run.
+	// After the replace's teardown removal, the old domain must never be
+	// re-claimed or re-confirmed by the stale run.
 	pushes := relay.pushes()
-	cleared := false
+	removed := false
 	for _, p := range pushes {
-		if p == "" {
-			cleared = true
-		} else if cleared && p == "old.dev" {
-			t.Fatalf("stale run re-pushed old.dev after teardown: pushes = %v", pushes)
+		if p == "remove:old.dev" {
+			removed = true
+		} else if removed && strings.HasSuffix(p, ":old.dev") {
+			t.Fatalf("stale run re-pushed old.dev after teardown: ops = %v", pushes)
 		}
+	}
+	if !removed {
+		t.Fatalf("replace never removed old.dev from the relay: ops = %v", pushes)
 	}
 }
 
@@ -647,8 +698,8 @@ func TestRemoveDuringInFlightIssuance(t *testing.T) {
 	if _, err := st.GetDomainConfig(); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("config survives Remove: %v", err)
 	}
-	if got := relay.last(); got != "" {
-		t.Fatalf("relay last push = %q after Remove, want cleared", got)
+	if got := relay.last(); got != "remove:gone.dev" {
+		t.Fatalf("relay last op = %q after Remove, want remove:gone.dev", got)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "domain")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cert dir resurrected after Remove: %v", err)
@@ -718,8 +769,8 @@ func TestRemoveFailsWhenRelayClearFails(t *testing.T) {
 	if _, err := st.GetDomainConfig(); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("config survives retried Remove: %v", err)
 	}
-	if got := relay.last(); got != "" {
-		t.Fatalf("relay last push = %q, want cleared", got)
+	if got := relay.last(); got != "remove:shop.dev" {
+		t.Fatalf("relay last op = %q, want remove:shop.dev", got)
 	}
 }
 

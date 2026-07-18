@@ -100,17 +100,10 @@ func (c *TunnelClient) Provision(token string) error {
 	return err
 }
 
-// SetCustomDomain tells the relay to splice SNI for domain (and subdomains)
-// down this tunnel as passthrough. Empty domain clears the mapping. It rides
-// the authenticated session, so it can only ever set this agent's domain.
-func (c *TunnelClient) SetCustomDomain(domain string) error {
-	_, err := c.control(tunnel.ControlRequest{Op: "set-domain", Domain: domain})
-	return err
-}
-
-// AddCustomDomain claims domain on the relay as a pending per-app custom
-// domain (#227): routable immediately so the TLS-ALPN-01 challenge can reach
-// this box, evictable if not confirmed within the relay's pending TTL.
+// AddCustomDomain claims domain on the relay as a pending custom domain
+// (#227): routable immediately so the TLS-ALPN-01 challenge can reach this
+// box, evictable if not confirmed within the relay's pending TTL. It rides
+// the authenticated session, so it can only ever claim for this agent.
 func (c *TunnelClient) AddCustomDomain(domain string) error {
 	_, err := c.control(tunnel.ControlRequest{Op: "add-domain", Domain: domain})
 	return err

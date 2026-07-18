@@ -112,7 +112,7 @@ func (m *Manager) reissue(snap store.DomainConfig) error {
 	if err := m.writeCert(certPEM, keyPEM); err != nil {
 		return err
 	}
-	if err := m.proxy.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+	if err := m.setCert(boxWideKey, certPEM, keyPEM); err != nil {
 		return err
 	}
 	notAfter, err := certs.NotAfter(certPEM)
@@ -132,7 +132,7 @@ func (m *Manager) RunEnv(ctx context.Context, iss Issuer) error {
 		m.setEnvStatus(StatusFailed, err.Error(), time.Time{})
 		return err
 	}
-	if err := m.proxy.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+	if err := m.setCert(boxWideKey, certPEM, keyPEM); err != nil {
 		m.setEnvStatus(StatusFailed, err.Error(), time.Time{})
 		return err
 	}
@@ -161,7 +161,7 @@ func (m *Manager) runEnvRenew(ctx context.Context, iss Issuer, certPEM []byte, t
 				log.Printf("domain: env renew: %v", err)
 				continue
 			}
-			if err := m.proxy.ReplaceCert(string(newCert), string(newKey)); err != nil {
+			if err := m.setCert(boxWideKey, newCert, newKey); err != nil {
 				log.Printf("domain: env renew load: %v", err)
 				continue
 			}

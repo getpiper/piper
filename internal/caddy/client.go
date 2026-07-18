@@ -121,13 +121,25 @@ func (c *Client) LoadCert(certPEM, keyPEM string) error {
 	return nil
 }
 
-// ReplaceCert replaces Caddy's complete load_pem certificate list with one
-// cert/key pair. Renewal uses this instead of appending duplicate entries.
-func (c *Client) ReplaceCert(certPEM, keyPEM string) error {
-	body, _ := json.Marshal([]map[string]string{{
-		"certificate": certPEM,
-		"key":         keyPEM,
-	}})
+// CertPair is one PEM cert/key entry in Caddy's tls.certificates.load_pem.
+type CertPair struct {
+	CertPEM string
+	KeyPEM  string
+}
+
+// ReplaceCerts replaces Caddy's complete load_pem certificate list with pairs.
+// The domain manager owns the full set (box-wide wildcard + per-app exact-host
+// certs) and re-syncs it whole on every change, so issue/renew/remove can never
+// append duplicates or strand another domain's cert. An empty pairs unloads all.
+func (c *Client) ReplaceCerts(pairs []CertPair) error {
+	entries := make([]map[string]string, 0, len(pairs))
+	for _, p := range pairs {
+		entries = append(entries, map[string]string{
+			"certificate": p.CertPEM,
+			"key":         p.KeyPEM,
+		})
+	}
+	body, _ := json.Marshal(entries)
 	url := c.base + "/config/apps/tls/certificates/load_pem"
 	req, _ := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -137,7 +149,7 @@ func (c *Client) ReplaceCert(certPEM, keyPEM string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("caddy replace cert: status %d", resp.StatusCode)
+		return fmt.Errorf("caddy replace certs: status %d", resp.StatusCode)
 	}
 	return nil
 }
