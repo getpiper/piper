@@ -99,6 +99,10 @@ type Options struct {
 	RelayHost   string // host part of the relay address; the DNS-record target
 	HTTPSListen string // e.g. ":443"
 	EnvDomain   string
+	// Resolve overrides the DNS lookup behind dns_ok and the per-app DNS
+	// gate; nil uses net.DefaultResolver. E2E seam: the test domains have no
+	// real DNS (see PIPER_TEST_ISSUER in cmd/piperd).
+	Resolve func(ctx context.Context, host string) ([]net.IP, error)
 }
 
 // Manager owns the custom-domain lifecycles — one state machine per domain,
@@ -162,6 +166,12 @@ func New(o Options) *Manager {
 	if o.EnvDomain != "" {
 		envStatus = StatusIssuing // pending until RunEnv reports its outcome
 	}
+	resolve := o.Resolve
+	if resolve == nil {
+		resolve = func(ctx context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(ctx, "ip", host)
+		}
+	}
 	return &Manager{
 		st: o.Store, newIssuer: o.Issuer, appIssuer: o.AppIssuer,
 		proxy: o.Proxy, router: o.Router,
@@ -174,10 +184,8 @@ func New(o Options) *Manager {
 		envStatus:  envStatus,
 		retryDelay: defaultRetryDelay,
 		dnsWait:    defaultDNSWait,
-		resolve: func(ctx context.Context, host string) ([]net.IP, error) {
-			return net.DefaultResolver.LookupIP(ctx, "ip", host)
-		},
-		now: time.Now,
+		resolve:    resolve,
+		now:        time.Now,
 	}
 }
 
