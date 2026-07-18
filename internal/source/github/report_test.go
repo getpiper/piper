@@ -107,6 +107,70 @@ func TestReportPendingUsesPREnvironment(t *testing.T) {
 	}
 }
 
+func TestReportPRScopesDeploymentLookupToPREnvironment(t *testing.T) {
+	var gotEnv, gotSHA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/app/installations/99/access_tokens":
+			io.WriteString(w, `{"token":"ghs_x"}`)
+		case r.URL.Path == "/repos/alice/blog/deployments" && r.Method == http.MethodGet:
+			gotEnv = r.URL.Query().Get("environment")
+			gotSHA = r.URL.Query().Get("sha")
+			io.WriteString(w, `[{"id":555}]`)
+		case r.URL.Path == "/repos/alice/blog/deployments/555/statuses":
+			w.WriteHeader(201)
+			io.WriteString(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p, _ := New(Config{AppID: 1, PrivateKeyPEM: testKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL})
+	ev := source.Event{Repo: "alice/blog", SHA: "sha1", InstallationID: 99, PR: 42}
+	if err := p.Report(context.Background(), ev, source.StatusSuccess, ""); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if gotSHA != "sha1" {
+		t.Errorf("sha filter = %q, want sha1", gotSHA)
+	}
+	if gotEnv != "pr-42" {
+		t.Fatalf("environment filter = %q, want pr-42 (a status could otherwise post to a production deployment on the same SHA)", gotEnv)
+	}
+}
+
+func TestReportProductionScopesDeploymentLookupToProductionEnvironment(t *testing.T) {
+	var gotEnv, gotSHA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/app/installations/99/access_tokens":
+			io.WriteString(w, `{"token":"ghs_x"}`)
+		case r.URL.Path == "/repos/alice/blog/deployments" && r.Method == http.MethodGet:
+			gotEnv = r.URL.Query().Get("environment")
+			gotSHA = r.URL.Query().Get("sha")
+			io.WriteString(w, `[{"id":555}]`)
+		case r.URL.Path == "/repos/alice/blog/deployments/555/statuses":
+			w.WriteHeader(201)
+			io.WriteString(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p, _ := New(Config{AppID: 1, PrivateKeyPEM: testKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL})
+	ev := source.Event{Repo: "alice/blog", SHA: "sha1", InstallationID: 99}
+	if err := p.Report(context.Background(), ev, source.StatusSuccess, ""); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if gotSHA != "sha1" {
+		t.Errorf("sha filter = %q, want sha1", gotSHA)
+	}
+	if gotEnv != "production" {
+		t.Fatalf("environment filter = %q, want production (a status could otherwise post to a PR-preview deployment on the same SHA)", gotEnv)
+	}
+}
+
 func TestReportInactivePostsInactiveState(t *testing.T) {
 	var gotState string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

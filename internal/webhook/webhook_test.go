@@ -44,6 +44,7 @@ type fakeDeployer struct {
 	calls         int
 	previewCalls  int
 	teardownCalls int
+	retired       bool
 	err           error
 }
 
@@ -63,7 +64,9 @@ func (d *blockingDeployer) DeployPreview(context.Context, string, int, string) (
 	return store.Deployment{}, nil
 }
 
-func (d *blockingDeployer) TeardownPreview(context.Context, string, int) error { return nil }
+func (d *blockingDeployer) TeardownPreview(context.Context, string, int) (bool, error) {
+	return false, nil
+}
 
 func (d *fakeDeployer) Deploy(context.Context, string, string) (store.Deployment, error) {
 	d.mu.Lock()
@@ -77,11 +80,12 @@ func (d *fakeDeployer) DeployPreview(context.Context, string, int, string) (stor
 	d.mu.Unlock()
 	return store.Deployment{}, d.err
 }
-func (d *fakeDeployer) TeardownPreview(context.Context, string, int) error {
+func (d *fakeDeployer) TeardownPreview(context.Context, string, int) (bool, error) {
 	d.mu.Lock()
 	d.teardownCalls++
+	retired := d.retired
 	d.mu.Unlock()
-	return d.err
+	return retired, d.err
 }
 func (d *fakeDeployer) count() int     { d.mu.Lock(); defer d.mu.Unlock(); return d.calls }
 func (d *fakeDeployer) previews() int  { d.mu.Lock(); defer d.mu.Unlock(); return d.previewCalls }
@@ -274,14 +278,14 @@ func TestPRSyncedIsIdempotentOnSHA(t *testing.T) {
 	}
 }
 
-func TestPRClosedTearsDownAndReportsInactive(t *testing.T) {
+func TestPRClosedWithPreviewTearsDownAndReportsInactive(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
 	s.UpdateAppRepo("blog", "alice/blog", "main")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPRClosed, Repo: "alice/blog", PR: 7, SHA: "s1",
 	}}
-	d := &fakeDeployer{}
+	d := &fakeDeployer{retired: true}
 	h := webhook.New(p, s, d, "piper.localhost")
 	post(h)
 	h.Wait()
@@ -291,5 +295,26 @@ func TestPRClosedTearsDownAndReportsInactive(t *testing.T) {
 	got := p.statuses()
 	if len(got) != 1 || got[0] != source.StatusInactive {
 		t.Fatalf("statuses = %v, want [inactive]", got)
+	}
+}
+
+func TestPRClosedWithoutPreviewReportsNothing(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	p := &fakeProvider{ev: source.Event{
+		Kind: source.KindPRClosed, Repo: "alice/blog", PR: 7, SHA: "s1",
+	}}
+	d := &fakeDeployer{retired: false}
+	h := webhook.New(p, s, d, "piper.localhost")
+	post(h)
+	h.Wait()
+	if d.teardowns() != 1 {
+		t.Fatalf("teardowns = %d, want 1", d.teardowns())
+	}
+	// Nothing was retired, so no deployment status should be posted at all —
+	// no wasted deployments lookup, no swallowed "no deployment" error.
+	if got := p.statuses(); len(got) != 0 {
+		t.Fatalf("statuses = %v, want none", got)
 	}
 }
