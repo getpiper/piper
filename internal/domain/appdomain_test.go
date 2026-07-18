@@ -188,6 +188,15 @@ func TestAddAppDomainValidation(t *testing.T) {
 	if _, err := m.AddAppDomain("blog", "shop.example.com"); !errors.Is(err, store.ErrDomainExists) {
 		t.Fatalf("duplicate: %v", err)
 	}
+	// The box-wide domain must not double as a per-app domain: the relay
+	// no-ops an add for the agent's own active row, so only this local check
+	// stops two lifecycles from managing the same name.
+	if err := st.SetDomainConfig("wild.example.com", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AddAppDomain("blog", "wild.example.com"); !errors.Is(err, ErrBoxWideDomain) {
+		t.Fatalf("box-wide collision: %v", err)
+	}
 }
 
 // While the user's DNS does not point at the relay the domain stays pending —
@@ -432,6 +441,78 @@ func TestResumeAppDomainActiveReloadsWithoutReissuing(t *testing.T) {
 	row, _ := st.GetAppDomain("shop.example.com")
 	if row.Status != StatusActive {
 		t.Fatalf("resume flapped status to %q", row.Status)
+	}
+}
+
+// gatedAddNotifier holds the FIRST AddCustomDomain call open until the test
+// releases it, exposing the window between reassertLoop's checks and its push.
+type gatedAddNotifier struct {
+	fakeNotifier
+	entered chan struct{} // one value when the gated Add enters
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedAddNotifier) AddCustomDomain(d string) error {
+	gated := false
+	g.once.Do(func() { gated = true })
+	if gated {
+		g.entered <- struct{}{}
+		<-g.release
+	}
+	return g.fakeNotifier.AddCustomDomain(d)
+}
+
+// A RemoveAppDomain racing a resumed domain's relay re-assert must win: the
+// re-assert push must never land after the removal, or it would mint a fresh
+// durable relay claim for a domain the box no longer tracks — unremovable
+// (row gone, resume never sees it) and eating the per-agent quota forever.
+func TestReassertLoopCannotResurrectRemovedDomain(t *testing.T) {
+	iss := &fakeIssuer{}
+	m1, st, _, _, _, dataDir := newAppTestManager(t, iss)
+	if _, err := st.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m1.AddAppDomain("blog", "shop.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	waitAppStatus(t, st, "shop.example.com", StatusActive)
+
+	// "Restart" with a relay whose first add-domain hangs mid-push.
+	m2, _, _, _ := newAppManagerOn(t, st, dataDir, iss)
+	gated := &gatedAddNotifier{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}, 1),
+	}
+	m2.SetRelay(gated)
+	m2.ResumeAppDomains()
+	<-gated.entered // the re-assert is inside its add-domain push
+
+	remDone := make(chan error, 1)
+	go func() { remDone <- m2.RemoveAppDomain("shop.example.com") }()
+	// Let Remove run as far as it can while the push is held, then release.
+	time.Sleep(50 * time.Millisecond)
+	gated.release <- struct{}{}
+	if err := <-remDone; err != nil {
+		t.Fatalf("RemoveAppDomain: %v", err)
+	}
+	// Give a stale re-assert time to misbehave before asserting.
+	time.Sleep(50 * time.Millisecond)
+
+	ops := gated.pushes()
+	removed := false
+	for _, p := range ops {
+		if p == "remove:shop.example.com" {
+			removed = true
+		} else if removed && strings.HasSuffix(p, ":shop.example.com") {
+			t.Fatalf("re-assert resurrected the removed claim: ops = %v", ops)
+		}
+	}
+	if !removed {
+		t.Fatalf("removal never reached the relay: ops = %v", ops)
+	}
+	if _, err := st.GetAppDomain("shop.example.com"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("row survives remove: %v", err)
 	}
 }
 

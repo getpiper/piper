@@ -21,6 +21,13 @@ import (
 // ordering. One goroutine and one run lock per domain: a failing or slow
 // domain never blocks another's lifecycle.
 
+// ErrBoxWideDomain rejects a per-app domain equal to the box-wide custom
+// domain. The relay would not catch this: add-domain against the agent's own
+// active claim is a no-op success, so without the local check two lifecycles
+// (the box-wide "*" instance and a per-app one) would manage the same name —
+// two cert-set entries and clashing routes.
+var ErrBoxWideDomain = errors.New("domain is already the box-wide custom domain")
+
 // errWaitDNS marks a run that stopped because the user's DNS record does not
 // point at the relay yet: the domain stays pending and the loop polls at
 // dnsWait instead of backing off — the wait is on the user, and issuing before
@@ -37,6 +44,9 @@ func (m *Manager) AddAppDomain(app, domainName string) (store.AppDomain, error) 
 	}
 	if _, err := m.st.GetApp(app); err != nil {
 		return store.AppDomain{}, err
+	}
+	if dc, err := m.st.GetDomainConfig(); err == nil && dc.Domain == d {
+		return store.AppDomain{}, ErrBoxWideDomain
 	}
 	if err := m.st.AddAppDomain(d, app); err != nil {
 		return store.AppDomain{}, err
@@ -223,20 +233,39 @@ func (m *Manager) ResumeAppDomains() {
 // tunnel not being connected yet at resume. Failures never touch the row.
 func (m *Manager) reassertLoop(domain string, gen int) {
 	for attempt := 0; ; attempt++ {
-		if m.currentGenFor(domain) != gen {
+		if m.reassertOnce(domain, gen) {
 			return
-		}
-		if _, err := m.st.GetAppDomain(domain); err != nil {
-			return
-		}
-		if r := m.notifier(); r != nil {
-			if err := r.AddCustomDomain(domain); err == nil {
-				_ = r.ConfirmCustomDomain(domain)
-				return
-			}
 		}
 		time.Sleep(m.retryDelay(attempt))
 	}
+}
+
+// reassertOnce reports whether the loop is finished: superseded, row gone, or
+// claim + confirmation pushed. The domain's run lock spans the checks AND the
+// push — like every other relay-pushing path — so a concurrent
+// RemoveAppDomain cannot interleave between them and let this push mint a
+// fresh durable claim for a domain the removal just cleared (the relay would
+// hold it forever: the row is gone, so nothing on the box would ever remove
+// it again).
+func (m *Manager) reassertOnce(domain string, gen int) bool {
+	lock := m.appLock(domain)
+	lock.Lock()
+	defer lock.Unlock()
+	if m.currentGenFor(domain) != gen {
+		return true
+	}
+	if _, err := m.st.GetAppDomain(domain); err != nil {
+		return true
+	}
+	r := m.notifier()
+	if r == nil {
+		return false
+	}
+	if err := r.AddCustomDomain(domain); err != nil {
+		return false
+	}
+	_ = r.ConfirmCustomDomain(domain)
+	return true
 }
 
 // renewCheckApps renews every active per-app domain whose disk cert is inside
