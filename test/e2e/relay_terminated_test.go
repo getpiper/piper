@@ -50,6 +50,7 @@ func TestRelayTerminatedSelfService(t *testing.T) {
 	relay.Env = append(os.Environ(),
 		"PIPER_RELAY_DATA_DIR="+relayData,
 		"PIPER_RELAY_TLS_ADDR=127.0.0.1:8443",
+		"PIPER_RELAY_HTTP_ADDR=127.0.0.1:8880",
 		"PIPER_RELAY_TUNNEL_ADDR=127.0.0.1:7000",
 		"PIPER_RELAY_API_ADDR=127.0.0.1:8080",
 		"PIPER_RELAY_TUNNEL_PUBLIC=127.0.0.1:7000",

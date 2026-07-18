@@ -16,8 +16,9 @@ import (
 
 // startTestRelay opens a store with one enrolled account-bound agent, starts
 // Serve on ephemeral ports with the given tlsCfg, and dials an agent tunnel back.
-// It returns the agent session, the relay's TLS address, the agent base domain, and the store.
-func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunnel.Session, string, string, *Store) {
+// It returns the agent session, the relay's TLS address, its plain-HTTP (:80
+// stand-in) address, the agent base domain, and the store.
+func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunnel.Session, string, string, string, *Store) {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
 	if err != nil {
@@ -29,6 +30,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 	en, _ := st.EnrollForAccount(acc.ID)
 
 	tlsLn, _ := net.Listen("tcp", "127.0.0.1:0")
+	httpLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	tunLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	router := NewRouter()
 
@@ -74,7 +76,8 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 			go handlePublic(c, router, tlsCfg, ctrlHost, ctrlQ)
 		}
 	}()
-	t.Cleanup(func() { tlsLn.Close(); tunLn.Close() })
+	go acceptHTTP(httpLn, router)
+	t.Cleanup(func() { tlsLn.Close(); httpLn.Close(); tunLn.Close() })
 
 	conn, err := net.Dial("tcp", tunLn.Addr().String())
 	if err != nil {
@@ -84,7 +87,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sess, tlsLn.Addr().String(), en.BaseDomain, st
+	return sess, tlsLn.Addr().String(), httpLn.Addr().String(), en.BaseDomain, st
 }
 
 func TestControlRegisterThenTerminate(t *testing.T) {
@@ -93,7 +96,7 @@ func TestControlRegisterThenTerminate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess, tlsAddr, _, _ := startTestRelay(t, tlsCfg, nil)
+	sess, tlsAddr, _, _, _ := startTestRelay(t, tlsCfg, nil)
 
 	// Agent side: register a hostname over a control stream.
 	cs, err := sess.OpenKind(tunnel.KindControl)
@@ -168,7 +171,7 @@ func indexOf(s, sub string) int {
 }
 
 func TestControlProvisionStoresToken(t *testing.T) {
-	sess, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st := startTestRelay(t, nil, nil)
 
 	cs, err := sess.OpenKind(tunnel.KindControl)
 	if err != nil {
@@ -191,7 +194,7 @@ func TestControlProvisionStoresToken(t *testing.T) {
 }
 
 func TestControlProvisionRejectsEmptyToken(t *testing.T) {
-	sess, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st := startTestRelay(t, nil, nil)
 
 	// Seed a working token first, so we can confirm an empty provision
 	// doesn't clear it.
@@ -232,7 +235,7 @@ func TestControlProvisionRejectsEmptyToken(t *testing.T) {
 }
 
 func TestSetDomainControlOp(t *testing.T) {
-	sess, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st := startTestRelay(t, nil, nil)
 
 	cs, err := sess.OpenKind(tunnel.KindControl)
 	if err != nil {
@@ -258,7 +261,7 @@ func TestSetDomainControlOp(t *testing.T) {
 // surfaced in ControlResponse.Error — claiming another agent's base domain
 // (or the apex) would splice that victim's traffic to the attacker's box.
 func TestSetDomainControlOpRejectsHijack(t *testing.T) {
-	sess, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st := startTestRelay(t, nil, nil)
 	if _, err := st.Enroll("victim", "victim.example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +304,7 @@ func TestControlPlaneSNIDispatch(t *testing.T) {
 	ctrl := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ctrl-ok "+r.URL.Path)
 	})
-	_, tlsAddr, _, _ := startTestRelay(t, tlsCfg, ctrl)
+	_, tlsAddr, _, _, _ := startTestRelay(t, tlsCfg, ctrl)
 
 	d := &tls.Dialer{Config: &tls.Config{ServerName: "api.public.getpiper.co", InsecureSkipVerify: true}}
 	c, err := d.Dial("tcp", tlsAddr)
@@ -344,7 +347,7 @@ func controlOp(t *testing.T, sess *tunnel.Session, req tunnel.ControlRequest, wa
 // A pending claim must route immediately: that is what lets the TLS-ALPN-01
 // challenge reach the box before any cert exists (#227).
 func TestAddDomainRoutesWhilePending(t *testing.T) {
-	sess, tlsAddr, _, st := startTestRelay(t, nil, nil)
+	sess, tlsAddr, _, _, st := startTestRelay(t, nil, nil)
 
 	got := make(chan byte, 1)
 	go func() {
@@ -389,7 +392,7 @@ func TestAddDomainRoutesWhilePending(t *testing.T) {
 }
 
 func TestDomainLifecycleControlOps(t *testing.T) {
-	sess, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st := startTestRelay(t, nil, nil)
 
 	controlOp(t, sess, tunnel.ControlRequest{Op: "add-domain", Domain: "shop.dev"}, false)
 	controlOp(t, sess, tunnel.ControlRequest{Op: "domain-active", Domain: "shop.dev"}, false)

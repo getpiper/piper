@@ -154,6 +154,7 @@ func main() {
 	)
 
 	tlsAddr := env("PIPER_RELAY_TLS_ADDR", ":443")
+	httpAddr := env("PIPER_RELAY_HTTP_ADDR", ":80")
 	tunnelAddr := env("PIPER_RELAY_TUNNEL_ADDR", ":7000")
 	apiAddr := env("PIPER_RELAY_API_ADDR", ":8080")
 	tunnelPublic := env("PIPER_RELAY_TUNNEL_PUBLIC", "")
@@ -202,6 +203,6 @@ func main() {
 		log.Print("piper-relay: no wildcard cert (PIPER_RELAY_TLS_CERT/KEY); passthrough-only, shared-domain termination disabled")
 	}
 
-	log.Printf("piper-relay: TLS %s, tunnel %s", tlsAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, tunnelAddr, st, tlsCfg, router, apiHandler))
+	log.Printf("piper-relay: TLS %s, HTTP %s, tunnel %s", tlsAddr, httpAddr, tunnelAddr)
+	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, apiHandler))
 }

@@ -364,18 +364,16 @@ func TestDialLocalControlGoesToAuthListener(t *testing.T) {
 		}
 	}()
 
-	for _, terminated := range []bool{true, false} {
-		dial := newDialLocal(terminated, ln.Addr().String(), "", "127.0.0.1:443")
-		conn, err := dial(tunnel.KindControlAPI, nil)
-		if err != nil {
-			t.Fatalf("terminated=%v: dial control: %v", terminated, err)
-		}
-		conn.Close()
-		select {
-		case <-accepted:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("terminated=%v: control stream did not reach the auth listener", terminated)
-		}
+	dial := newDialLocal(ln.Addr().String(), "", "127.0.0.1:443")
+	conn, err := dial(tunnel.KindControlAPI, nil)
+	if err != nil {
+		t.Fatalf("dial control: %v", err)
+	}
+	conn.Close()
+	select {
+	case <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("control stream did not reach the auth listener")
 	}
 }
 
@@ -411,7 +409,7 @@ func TestDialLocalPassthroughACMEGoesToSolver(t *testing.T) {
 		}).Handshake()
 	}()
 
-	dial := newDialLocal(false, "127.0.0.1:1", solver.Addr().String(), "127.0.0.1:443")
+	dial := newDialLocal("127.0.0.1:1", solver.Addr().String(), "127.0.0.1:443")
 	conn, err := dial(tunnel.KindPassthrough, server)
 	if err != nil {
 		t.Fatalf("dial passthrough: %v", err)
@@ -475,7 +473,7 @@ func TestDialLocalPassthroughNonACMEGoesToCaddy(t *testing.T) {
 		}).Handshake()
 	}()
 
-	dial := newDialLocal(false, "127.0.0.1:1", solver.Addr().String(), caddy.Addr().String())
+	dial := newDialLocal("127.0.0.1:1", solver.Addr().String(), caddy.Addr().String())
 	conn, err := dial(tunnel.KindPassthrough, server)
 	if err != nil {
 		t.Fatalf("dial passthrough: %v", err)
