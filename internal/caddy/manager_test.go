@@ -240,8 +240,8 @@ func TestEnsureHTTPSServesTLSAlongsidePlaintext(t *testing.T) {
 	}
 
 	certPEM, keyPEM := selfSignedPEM(t, "shop.example.com")
-	if err := c.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
-		t.Fatalf("ReplaceCert: %v", err)
+	if err := c.ReplaceCerts([]CertPair{{CertPEM: string(certPEM), KeyPEM: string(keyPEM)}}); err != nil {
+		t.Fatalf("ReplaceCerts: %v", err)
 	}
 
 	// Plaintext HTTP on the original listener still answers.

@@ -821,6 +821,39 @@ func TestListActiveAppDomainsFiltersByStatus(t *testing.T) {
 	}
 }
 
+func TestAllAppDomainsListsEveryStatus(t *testing.T) {
+	s := openTemp(t)
+
+	all, err := s.AllAppDomains()
+	if err != nil || len(all) != 0 {
+		t.Fatalf("empty store = %v (err %v), want empty, nil", all, err)
+	}
+
+	for _, d := range []struct{ domain, app, status string }{
+		{"b.dev", "blog", "active"},
+		{"a.dev", "api", "pending"},
+		{"c.dev", "blog", "failed"},
+	} {
+		if err := s.AddAppDomain(d.domain, d.app); err != nil {
+			t.Fatalf("AddAppDomain(%q,%q): %v", d.domain, d.app, err)
+		}
+		if err := s.UpdateAppDomainStatus(d.domain, d.status, "", time.Time{}); err != nil {
+			t.Fatalf("UpdateAppDomainStatus: %v", err)
+		}
+	}
+
+	all, err = s.AllAppDomains()
+	if err != nil {
+		t.Fatalf("AllAppDomains: %v", err)
+	}
+	if len(all) != 3 || all[0].Domain != "a.dev" || all[1].Domain != "b.dev" || all[2].Domain != "c.dev" {
+		t.Fatalf("all domains = %+v, want a.dev/b.dev/c.dev in order", all)
+	}
+	if all[0].Status != "pending" || all[1].App != "blog" {
+		t.Fatalf("row contents = %+v", all)
+	}
+}
+
 func TestDeploymentOrderingTiebreaksOnRowid(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.CreateApp("blog", 8080); err != nil {

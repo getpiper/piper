@@ -51,9 +51,10 @@ func (m *Manager) setEnvStatus(status, errMsg string, notAfter time.Time) {
 	m.envMu.Unlock()
 }
 
-// StartRenewals renews the API-managed cert: every renewInterval, when the
-// disk cert is within renewWindow of expiry, re-obtain and hot-swap. Blocks
-// until ctx ends; run it in a goroutine.
+// StartRenewals renews the API-managed box-wide cert and every active per-app
+// domain cert: every renewInterval, when a disk cert is within renewWindow of
+// expiry, re-obtain and hot-swap it. Blocks until ctx ends; run it in a
+// goroutine.
 func (m *Manager) StartRenewals(ctx context.Context) {
 	t := time.NewTicker(renewInterval)
 	defer t.Stop()
@@ -63,6 +64,7 @@ func (m *Manager) StartRenewals(ctx context.Context) {
 			return
 		case <-t.C:
 			m.renewCheck(time.Now())
+			m.renewCheckApps(time.Now())
 		}
 	}
 }
@@ -112,7 +114,7 @@ func (m *Manager) reissue(snap store.DomainConfig) error {
 	if err := m.writeCert(certPEM, keyPEM); err != nil {
 		return err
 	}
-	if err := m.proxy.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+	if err := m.setCert(boxWideKey, certPEM, keyPEM); err != nil {
 		return err
 	}
 	notAfter, err := certs.NotAfter(certPEM)
@@ -132,7 +134,7 @@ func (m *Manager) RunEnv(ctx context.Context, iss Issuer) error {
 		m.setEnvStatus(StatusFailed, err.Error(), time.Time{})
 		return err
 	}
-	if err := m.proxy.ReplaceCert(string(certPEM), string(keyPEM)); err != nil {
+	if err := m.setCert(boxWideKey, certPEM, keyPEM); err != nil {
 		m.setEnvStatus(StatusFailed, err.Error(), time.Time{})
 		return err
 	}
@@ -161,7 +163,7 @@ func (m *Manager) runEnvRenew(ctx context.Context, iss Issuer, certPEM []byte, t
 				log.Printf("domain: env renew: %v", err)
 				continue
 			}
-			if err := m.proxy.ReplaceCert(string(newCert), string(newKey)); err != nil {
+			if err := m.setCert(boxWideKey, newCert, newKey); err != nil {
 				log.Printf("domain: env renew load: %v", err)
 				continue
 			}

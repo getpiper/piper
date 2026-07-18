@@ -345,8 +345,16 @@ func main() {
 		if h, _, err := net.SplitHostPort(cfg.RelayAddr); err == nil {
 			relayHost = h
 		}
+		// The TLS-ALPN-01 solver runs whenever relay mode is up: idle it is one
+		// dormant loopback listener. The relay splices acme-tls/1 ClientHellos
+		// down the tunnel to it (see newDialLocal); the per-app domain
+		// lifecycle drives issuance against it.
+		alpnSolver, err = certs.NewALPNSolver("127.0.0.1:0")
+		if err != nil {
+			log.Fatalf("alpn solver: %v", err)
+		}
 		opts := domain.Options{
-			Store: st, Proxy: caddy.NewClient(cfg.CaddyAdmin),
+			Store: st, Proxy: caddy.NewClient(cfg.CaddyAdmin), Router: dep,
 			DataDir: cfg.DataDir, RelayHost: relayHost, HTTPSListen: ":443",
 			Issuer: func(provider, token string) (domain.Issuer, error) {
 				if os.Getenv("PIPER_TEST_ISSUER") == "selfsigned" {
@@ -357,6 +365,19 @@ func main() {
 					return nil, err
 				}
 				return certs.NewCloudflareIssuer(cfg.ACMEEmail, cfg.ACMECA, token, key)
+			},
+			AppIssuer: func() (domain.Issuer, error) {
+				if os.Getenv("PIPER_TEST_ISSUER") == "selfsigned" {
+					return testSelfSignedIssuer{}, nil
+				}
+				key, err := certs.LoadOrCreateAccountKey(filepath.Join(cfg.DataDir, "acme_account.key"))
+				if err != nil {
+					return nil, err
+				}
+				return certs.New(certs.Config{
+					Email: cfg.ACMEEmail, CADirURL: cfg.ACMECA,
+					ALPNSolver: alpnSolver, AccountKey: key,
+				})
 			},
 		}
 		if !cfg.Terminated {
@@ -393,13 +414,6 @@ func main() {
 	// cert, serves :443, and answers KindPassthrough streams. Control streams go
 	// to the authenticated listener — never the tokenless local one.
 	if cfg.RelayAddr != "" {
-		// The TLS-ALPN-01 solver runs whenever relay mode is up: idle it is one
-		// dormant loopback listener. Issuance wiring lands with the per-domain
-		// lifecycle manager (#229); this guarantees the challenge is answerable.
-		alpnSolver, err = certs.NewALPNSolver("127.0.0.1:0")
-		if err != nil {
-			log.Fatalf("alpn solver: %v", err)
-		}
 		dialLocal := newDialLocal(authAddr, alpnSolver.Addr(), "127.0.0.1:443")
 		if !cfg.Terminated {
 			if cfg.TLSCertFile != "" {
@@ -411,7 +425,9 @@ func main() {
 				if err != nil {
 					log.Fatalf("relay tls: %v", err)
 				}
-				if err := caddy.NewClient(cfg.CaddyAdmin).LoadCert(string(certPEM), string(keyPEM)); err != nil {
+				// Through the manager's cert set, not straight into Caddy, so
+				// a per-app domain sync can't clobber the file-provided cert.
+				if err := domMgr.LoadStaticCert(certPEM, keyPEM); err != nil {
 					log.Fatalf("relay tls: %v", err)
 				}
 			} else {
@@ -435,9 +451,10 @@ func main() {
 		}
 		domMgr.SetRelay(tc)
 		if cfg.Terminated {
-			domMgr.Resume()
-			go domMgr.StartRenewals(ctx)
+			domMgr.Resume() // box-wide API-managed config; env mode has none
 		}
+		domMgr.ResumeAppDomains()
+		go domMgr.StartRenewals(ctx)
 
 		wh = newWebhookStarter(cfg, st, rt)
 		if _, err := st.GetGitHubApp(); err == nil {
