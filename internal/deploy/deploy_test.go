@@ -1295,6 +1295,180 @@ func TestDeployPanicStopsContainerAndRecordsFailed(t *testing.T) {
 	}
 }
 
+// addAppDomain registers a per-app custom domain in the given status.
+func addAppDomain(t *testing.T, s *store.Store, domain, app, status string) {
+	t.Helper()
+	if err := s.AddAppDomain(domain, app); err != nil {
+		t.Fatalf("AddAppDomain(%s): %v", domain, err)
+	}
+	if status != "" {
+		if err := s.UpdateAppDomainStatus(domain, status, "", time.Now().Add(60*24*time.Hour)); err != nil {
+			t.Fatalf("UpdateAppDomainStatus(%s): %v", domain, err)
+		}
+	}
+}
+
+// Deploy arms an exact-host TLS route for each of the app's active per-app
+// domains — and only those: not pending/failed ones, not other apps'. #230.
+func TestDeployRoutesActiveAppDomainsOnly(t *testing.T) {
+	s, _ := newStore(t)
+	if _, err := s.CreateApp("shop", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	addAppDomain(t, s, "blog.example.com", "blog", "active")
+	addAppDomain(t, s, "www.blog.example.com", "blog", "active")
+	addAppDomain(t, s, "pending.example.com", "blog", "pending")
+	addAppDomain(t, s, "failed.example.com", "blog", "failed")
+	addAppDomain(t, s, "shop.example.com", "shop", "active")
+
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	want := []string{"blog.example.com->40001", "www.blog.example.com->40001"}
+	if len(routes.tlsRoutes) != len(want) {
+		t.Fatalf("tlsRoutes = %v, want %v", routes.tlsRoutes, want)
+	}
+	for i, w := range want {
+		if routes.tlsRoutes[i] != w {
+			t.Errorf("tlsRoutes[%d] = %q, want %q", i, routes.tlsRoutes[i], w)
+		}
+	}
+}
+
+// A flaky Caddy admin call on a per-app domain route must not fail a deploy
+// that already succeeded on its primary URL (same stance as #115).
+func TestDeployAppDomainRouteFailureDoesNotAbort(t *testing.T) {
+	s, _ := newStore(t)
+	addAppDomain(t, s, "blog.example.com", "blog", "active")
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	routes.tlsErr = errors.New("caddy admin flaky")
+	d := New(s, rt, routes, "piper.localhost")
+
+	dep, err := d.Deploy(context.Background(), "blog", t.TempDir())
+	if err != nil {
+		t.Fatalf("deploy should succeed despite an app-domain route failure: %v", err)
+	}
+	if dep.Status != "running" {
+		t.Errorf("status = %q, want running", dep.Status)
+	}
+	if routes.upserts["blog.piper.localhost"] != 40001 {
+		t.Errorf("primary route = %+v, want blog.piper.localhost -> 40001", routes.upserts)
+	}
+}
+
+// Stop drops exactly the stopped app's per-app domain routes; another app's
+// domains are untouched. #230.
+func TestStopRemovesAppDomainRoutes(t *testing.T) {
+	s, _ := newStore(t)
+	if _, err := s.CreateApp("shop", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	addAppDomain(t, s, "blog.example.com", "blog", "active")
+	addAppDomain(t, s, "pending.example.com", "blog", "pending")
+	addAppDomain(t, s, "shop.example.com", "shop", "active")
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	removed := map[string]bool{}
+	for _, h := range routes.removed() {
+		removed[h] = true
+	}
+	if !removed["blog.piper.localhost"] || !removed["blog.example.com"] {
+		t.Errorf("removed = %v, want primary and blog.example.com", routes.removed())
+	}
+	if removed["shop.example.com"] || removed["pending.example.com"] {
+		t.Errorf("removed = %v, must not touch other apps' or inactive domains", routes.removed())
+	}
+}
+
+// Delete drops the app's per-app domain routes along with everything else. #230.
+func TestDeleteRemovesAppDomainRoutes(t *testing.T) {
+	s, _ := newStore(t)
+	addAppDomain(t, s, "blog.example.com", "blog", "active")
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.Delete(context.Background(), "blog"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	found := false
+	for _, h := range routes.removed() {
+		found = found || h == "blog.example.com"
+	}
+	if !found {
+		t.Errorf("removed = %v, want blog.example.com among them", routes.removed())
+	}
+}
+
+// RouteAppDomain backfills the exact-host route when a domain goes active
+// while its app is already running. #230.
+func TestRouteAppDomainBackfillsRunningApp(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	if err := d.RouteAppDomain("blog", "blog.example.com"); err != nil {
+		t.Fatalf("RouteAppDomain: %v", err)
+	}
+	want := "blog.example.com->40001"
+	found := false
+	for _, r := range routes.tlsRoutes {
+		found = found || r == want
+	}
+	if !found {
+		t.Errorf("tlsRoutes = %v, want %s", routes.tlsRoutes, want)
+	}
+}
+
+// With nothing running there is no upstream to route to: RouteAppDomain is a
+// no-op — the next deploy arms the route.
+func TestRouteAppDomainNothingRunningIsNoOp(t *testing.T) {
+	s, _ := newStore(t)
+	routes := newFakeCaddy()
+	d := New(s, &runtime.FakeRuntime{}, routes, "piper.localhost")
+	if err := d.RouteAppDomain("blog", "blog.example.com"); err != nil {
+		t.Fatalf("RouteAppDomain no-op err = %v, want nil", err)
+	}
+	if len(routes.tlsRoutes) != 0 {
+		t.Errorf("tlsRoutes = %v, want none", routes.tlsRoutes)
+	}
+}
+
 // A successful deploy GCs superseded images, keeping the newest N per app. #125.
 func TestDeployPrunesOldImages(t *testing.T) {
 	s, _ := newStore(t)

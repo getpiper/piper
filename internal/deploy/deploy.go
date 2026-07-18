@@ -262,6 +262,21 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 			log.Printf("deploy %s: custom-domain route %s (deploy still succeeded on primary): %v", dep.App, host, err)
 		}
 	}
+	// Per-app custom domains (#224) are exact hosts owned by this app; each
+	// active one is served over the box-terminated :443 alongside the primary
+	// host. Same secondary-hostname stance as above (#115).
+	if doms, err := d.store.ListAppDomains(dep.App); err != nil {
+		log.Printf("deploy %s: list app domains (deploy still succeeded on primary): %v", dep.App, err)
+	} else {
+		for _, ad := range doms {
+			if ad.Status != "active" {
+				continue
+			}
+			if err := d.routes.UpsertRouteTLS(ad.Domain, run.HostPort); err != nil {
+				log.Printf("deploy %s: app-domain route %s (deploy still succeeded on primary): %v", dep.App, ad.Domain, err)
+			}
+		}
+	}
 
 	if err := d.store.FinalizeDeployment(dep.ID, build.ImageID, run.ContainerID, run.HostPort, "running", logs); err != nil {
 		return err
@@ -382,15 +397,42 @@ func (d *Deployer) primaryHost(appName string) (string, bool) {
 	return host, err == nil
 }
 
-// removeCustomDomainRoute drops <app>.<custom> when a BYO custom domain is
-// active; without one it's a no-op (mirrors the upsert in Deploy).
-func (d *Deployer) removeCustomDomainRoute(appName string) error {
-	dc, err := d.store.GetDomainConfig()
-	if err != nil || dc.Status != "active" {
+// RouteAppDomain arms the exact-host TLS route for a per-app custom domain
+// that goes active while its app is already running (the domain manager's
+// backfill; a deploy arms routes itself). Nothing running is a no-op — the
+// next deploy adds the route.
+func (d *Deployer) RouteAppDomain(appName, domain string) error {
+	defer d.lockApp(appName)()
+	dep, err := d.store.LatestRunning(appName)
+	if errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
-	if err := d.routes.RemoveRoute(appName + "." + dc.Domain); err != nil {
-		return fmt.Errorf("unroute custom domain: %w", err)
+	if err != nil {
+		return err
+	}
+	return d.routes.UpsertRouteTLS(domain, dep.HostPort)
+}
+
+// removeCustomDomainRoute drops the app's custom-domain routes: <app>.<custom>
+// when the box-wide BYO domain is active, plus each active per-app domain
+// (mirrors the upserts in finish). Without any it's a no-op.
+func (d *Deployer) removeCustomDomainRoute(appName string) error {
+	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {
+		if err := d.routes.RemoveRoute(appName + "." + dc.Domain); err != nil {
+			return fmt.Errorf("unroute custom domain: %w", err)
+		}
+	}
+	doms, err := d.store.ListAppDomains(appName)
+	if err != nil {
+		return err
+	}
+	for _, ad := range doms {
+		if ad.Status != "active" {
+			continue
+		}
+		if err := d.routes.RemoveRoute(ad.Domain); err != nil {
+			return fmt.Errorf("unroute app domain: %w", err)
+		}
 	}
 	return nil
 }
