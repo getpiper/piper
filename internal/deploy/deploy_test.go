@@ -280,8 +280,12 @@ func TestTeardownPreviewStopsAndUnroutes(t *testing.T) {
 		t.Fatalf("DeployPreview: %v", err)
 	}
 
-	if err := d.TeardownPreview(context.Background(), "blog", 5); err != nil {
+	retired, err := d.TeardownPreview(context.Background(), "blog", 5)
+	if err != nil {
 		t.Fatalf("TeardownPreview: %v", err)
+	}
+	if !retired {
+		t.Errorf("retired = false, want true (a running preview was torn down)")
 	}
 	if len(rt.Stopped) != 1 || rt.Stopped[0] != "p1" {
 		t.Errorf("stopped = %v, want [p1]", rt.Stopped)
@@ -298,8 +302,61 @@ func TestTeardownPreviewNoRunningIsNoOp(t *testing.T) {
 	s, _ := newStore(t)
 	rt := &runtime.FakeRuntime{}
 	d := New(s, rt, newFakeCaddy(), "piper.localhost")
-	if err := d.TeardownPreview(context.Background(), "blog", 99); err != nil {
+	retired, err := d.TeardownPreview(context.Background(), "blog", 99)
+	if err != nil {
 		t.Fatalf("TeardownPreview no-op err = %v, want nil", err)
+	}
+	if retired {
+		t.Errorf("retired = true, want false (nothing was running)")
+	}
+}
+
+// A route can outlive its store row (e.g. a crash between UpsertRoute and the
+// row write). TeardownPreview must still attempt RemoveRoute when PreviewRunning
+// reports ErrNotFound, so the orphaned route can't leak.
+func TestTeardownPreviewRemovesOrphanRouteWhenRowGone(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+
+	// No preview deployment exists for PR 42 (store row absent).
+	retired, err := d.TeardownPreview(context.Background(), "blog", 42)
+	if err != nil {
+		t.Fatalf("TeardownPreview: %v", err)
+	}
+	if retired {
+		t.Errorf("retired = true, want false (no row existed)")
+	}
+	if len(routes.removed()) != 1 || routes.removed()[0] != "pr-42-blog.piper.localhost" {
+		t.Errorf("removed = %v, want [pr-42-blog.piper.localhost]", routes.removed())
+	}
+}
+
+// When UpsertRoute fails after the container is running, DeployPreview must
+// unwind rather than leave a running container and a "running" row with no
+// route: stop the container and mark the row "failed".
+func TestDeployPreviewUpsertRouteFailureUnwinds(t *testing.T) {
+	s, path := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "p1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	routes.upsertErr = errors.New("caddy down")
+	d := New(s, rt, routes, "piper.localhost")
+
+	if _, err := d.DeployPreview(context.Background(), "blog", 5, t.TempDir()); err == nil {
+		t.Fatal("DeployPreview err = nil, want route error")
+	}
+	if len(rt.Stopped) != 1 || rt.Stopped[0] != "p1" {
+		t.Errorf("stopped = %v, want [p1] (container unwound)", rt.Stopped)
+	}
+	if n := deploymentCountWithStatus(t, path, "running"); n != 0 {
+		t.Errorf("running rows = %d, want 0 (row must not stay running)", n)
+	}
+	if _, err := s.PreviewRunning("blog", 5); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("PreviewRunning err = %v, want ErrNotFound (no running preview left)", err)
 	}
 }
 
