@@ -560,6 +560,12 @@ type fakeDomainManager struct {
 	setErr  error
 	gotSet  []string
 	removed bool
+
+	appStatuses    []domain.AppDomainStatus
+	addErr         error
+	added          []string // "app:domain"
+	removeAppErr   error
+	removedDomains []string
 }
 
 func (f *fakeDomainManager) Set(d, p, tok string) (domain.Status, error) {
@@ -571,6 +577,36 @@ func (f *fakeDomainManager) Set(d, p, tok string) (domain.Status, error) {
 }
 func (f *fakeDomainManager) Status() (domain.Status, error) { return f.status, nil }
 func (f *fakeDomainManager) Remove() error                  { f.removed = true; return nil }
+
+func (f *fakeDomainManager) AddAppDomain(app, d string) (store.AppDomain, error) {
+	if f.addErr != nil {
+		return store.AppDomain{}, f.addErr
+	}
+	f.added = append(f.added, app+":"+d)
+	return store.AppDomain{Domain: d, App: app, Status: "pending"}, nil
+}
+
+func (f *fakeDomainManager) RemoveAppDomain(d string) error {
+	if f.removeAppErr != nil {
+		return f.removeAppErr
+	}
+	f.removedDomains = append(f.removedDomains, d)
+	return nil
+}
+
+func (f *fakeDomainManager) AppDomainStatus(d string) (domain.AppDomainStatus, error) {
+	for _, st := range f.appStatuses {
+		if st.Domain == d {
+			return st, nil
+		}
+	}
+	return domain.AppDomainStatus{Domain: d, Status: "pending",
+		DNSRecords: []domain.DNSRecord{{Type: "CNAME", Name: d, Value: "relay.example.net"}}}, nil
+}
+
+func (f *fakeDomainManager) AppDomainStatuses(app string) ([]domain.AppDomainStatus, error) {
+	return f.appStatuses, nil
+}
 
 func TestDomainEndpoints(t *testing.T) {
 	fdm := &fakeDomainManager{status: domain.Status{
@@ -649,6 +685,188 @@ func TestDomainEndpointsWithoutRelay(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(m, "/v1/domain", strings.NewReader(`{}`)))
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("%s without relay = %d, want 409", m, rec.Code)
+		}
+	}
+}
+
+// The per-app domains collection (#231): POST attaches and returns the fresh
+// wire status, GET lists the per-domain status shape, DELETE tears down.
+func TestAppDomainsEndpoints(t *testing.T) {
+	notAfter := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	fdm := &fakeDomainManager{appStatuses: []domain.AppDomainStatus{{
+		Domain: "myshop.com", App: "blog", Status: "active", Error: "",
+		CertNotAfter: &notAfter,
+		DNSRecords:   []domain.DNSRecord{{Type: "CNAME", Name: "myshop.com", Value: "relay.example.net"}},
+		DNSOK:        true,
+	}}}
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+
+	// POST kicks AddAppDomain and answers 201 with the domain's wire status.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/domains",
+		strings.NewReader(`{"domain":"myshop.com"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if len(fdm.added) != 1 || fdm.added[0] != "blog:myshop.com" {
+		t.Fatalf("AddAppDomain called with %v", fdm.added)
+	}
+	var created domain.AppDomainStatus
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode POST body: %v", err)
+	}
+	if created.Domain != "myshop.com" {
+		t.Fatalf("POST body = %+v", created)
+	}
+
+	// GET lists the per-domain status shape.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apps/blog/domains", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET = %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"status":"active"`, `"cert_not_after"`, `"dns_ok":true`,
+		`"dns_records":[{"type":"CNAME","name":"myshop.com","value":"relay.example.net"}]`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET body missing %s: %s", want, body)
+		}
+	}
+
+	// DELETE tears down through the manager. The row must exist in the store
+	// and belong to this app for the handler to route the removal.
+	if err := s.AddAppDomain("myshop.com", "blog"); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog/domains/myshop.com", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if len(fdm.removedDomains) != 1 || fdm.removedDomains[0] != "myshop.com" {
+		t.Fatalf("RemoveAppDomain called with %v", fdm.removedDomains)
+	}
+}
+
+// GET on an app with no domains serves JSON [] — never null.
+func TestAppDomainsListEmptyReturnsArray(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, &fakeDomainManager{})
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apps/blog/domains", nil))
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("body = %s, want []", body)
+	}
+}
+
+func TestAppDomainsPostErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"invalid domain", domain.ErrInvalidDomain, http.StatusBadRequest},
+		{"box-wide collision", domain.ErrBoxWideDomain, http.StatusConflict},
+		{"already attached", store.ErrDomainExists, http.StatusConflict},
+		{"unknown app", store.ErrNotFound, http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil,
+				&fakeDomainManager{addErr: tc.err})
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/domains",
+				strings.NewReader(`{"domain":"myshop.com"}`)))
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+		})
+	}
+
+	// Malformed / empty body never reaches the manager.
+	s := newTestStore(t)
+	fdm := &fakeDomainManager{}
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm)
+	for _, body := range []string{`{`, `{}`, `{"domain":""}`} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/domains",
+			strings.NewReader(body)))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", body, rec.Code)
+		}
+	}
+	if len(fdm.added) != 0 {
+		t.Errorf("manager reached on bad body: %v", fdm.added)
+	}
+}
+
+func TestAppDomainsUnknownAppAndDomain(t *testing.T) {
+	s := newTestStore(t)
+	fdm := &fakeDomainManager{}
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddAppDomain("owned.example.com", "api"); err != nil {
+		t.Fatal(err)
+	}
+
+	// GET unknown app.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apps/ghost/domains", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET ghost = %d, want 404", rec.Code)
+	}
+	// DELETE unknown app.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/ghost/domains/x.com", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("DELETE ghost app = %d, want 404", rec.Code)
+	}
+	// DELETE unknown domain.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog/domains/x.com", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("DELETE unknown domain = %d, want 404", rec.Code)
+	}
+	// DELETE a domain owned by a different app.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog/domains/owned.example.com", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("DELETE cross-app domain = %d, want 404", rec.Code)
+	}
+	if len(fdm.removedDomains) != 0 {
+		t.Errorf("RemoveAppDomain reached: %v", fdm.removedDomains)
+	}
+}
+
+// No relay configured (nil manager): the collection answers 409, like /v1/domain.
+func TestAppDomainsWithoutRelay(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/v1/apps/blog/domains", nil),
+		httptest.NewRequest(http.MethodPost, "/v1/apps/blog/domains", strings.NewReader(`{"domain":"a.com"}`)),
+		httptest.NewRequest(http.MethodDelete, "/v1/apps/blog/domains/a.com", nil),
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusConflict {
+			t.Errorf("%s without relay = %d, want 409", req.Method, rec.Code)
 		}
 	}
 }
