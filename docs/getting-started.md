@@ -208,6 +208,22 @@ credential never reaches the box, and the box still enforces its own auth.
 The `--remote` flag overrides `PIPER_REMOTE`; `login` and `connect` are
 inherently local and reject `--remote`.
 
+## Point your own domain at an app
+
+A relay-connected box can serve one specific app on a domain you own — no
+DNS-provider API token, just a CNAME:
+
+```bash
+piper domains add myshop.com --app shop   # prints the CNAME record to create
+# create it at your DNS host, then watch it go active:
+piper domains list                        # myshop.com  app=shop  status=active  dns=ok
+```
+
+The cert issues through the relay tunnel (ACME TLS-ALPN-01) once the name
+resolves to the relay; the box terminates TLS itself, and the app's
+shared-domain URL keeps working alongside. Apex-domain caveats and the API
+shape: [`custom-domains.md`](custom-domains.md).
+
 ## Git deploys
 
 Once your box runs in relay mode, a `git push` can build and publish an app.
