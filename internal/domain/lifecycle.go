@@ -51,9 +51,10 @@ func (m *Manager) setEnvStatus(status, errMsg string, notAfter time.Time) {
 	m.envMu.Unlock()
 }
 
-// StartRenewals renews the API-managed cert: every renewInterval, when the
-// disk cert is within renewWindow of expiry, re-obtain and hot-swap. Blocks
-// until ctx ends; run it in a goroutine.
+// StartRenewals renews the API-managed box-wide cert and every active per-app
+// domain cert: every renewInterval, when a disk cert is within renewWindow of
+// expiry, re-obtain and hot-swap it. Blocks until ctx ends; run it in a
+// goroutine.
 func (m *Manager) StartRenewals(ctx context.Context) {
 	t := time.NewTicker(renewInterval)
 	defer t.Stop()
@@ -63,6 +64,7 @@ func (m *Manager) StartRenewals(ctx context.Context) {
 			return
 		case <-t.C:
 			m.renewCheck(time.Now())
+			m.renewCheckApps(time.Now())
 		}
 	}
 }
