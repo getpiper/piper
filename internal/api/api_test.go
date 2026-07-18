@@ -871,6 +871,68 @@ func TestAppDomainsWithoutRelay(t *testing.T) {
 	}
 }
 
+// #267: deleting an app tears down its per-app custom domains through the
+// manager before the deploy delete — otherwise the relay claim, loaded cert,
+// and cert dir leak (the store cascade only removes the rows).
+func TestDeleteAppTearsDownAppDomains(t *testing.T) {
+	s := newTestStore(t)
+	deployer := &fakeDeployer{store: s}
+	fdm := &fakeDomainManager{}
+	h := New(s, deployer, "piper.localhost", "", nil, fdm)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateApp("api", 3000); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []struct{ dom, app string }{
+		{"a.example.com", "blog"}, {"b.example.com", "blog"}, {"other.example.com", "api"},
+	} {
+		if err := s.AddAppDomain(d.dom, d.app); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE app = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if len(fdm.removedDomains) != 2 || fdm.removedDomains[0] != "a.example.com" || fdm.removedDomains[1] != "b.example.com" {
+		t.Fatalf("removed domains = %v, want blog's two", fdm.removedDomains)
+	}
+	if len(deployer.deleted) != 1 || deployer.deleted[0] != "blog" {
+		t.Fatalf("deploy delete = %v, want [blog]", deployer.deleted)
+	}
+}
+
+// #267: a mandatory relay-removal failure aborts the app delete (500), leaving
+// it retryable — the deploy delete must not run and cascade the rows away.
+func TestDeleteAppAbortsOnDomainTeardownFailure(t *testing.T) {
+	s := newTestStore(t)
+	deployer := &fakeDeployer{store: s}
+	fdm := &fakeDomainManager{removeAppErr: errors.New("clear relay domain mapping: tunnel down")}
+	h := New(s, deployer, "piper.localhost", "", nil, fdm)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddAppDomain("a.example.com", "blog"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("DELETE app = %d, want 500", rec.Code)
+	}
+	if len(deployer.deleted) != 0 {
+		t.Fatalf("deploy delete ran despite teardown failure: %v", deployer.deleted)
+	}
+	if _, err := s.GetAppDomain("a.example.com"); err != nil {
+		t.Fatalf("domain row gone after aborted delete: %v", err)
+	}
+}
+
 func TestStopEndpoint(t *testing.T) {
 	s := newTestStore(t)
 	deployer := &fakeDeployer{store: s}

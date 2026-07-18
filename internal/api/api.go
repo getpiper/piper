@@ -234,6 +234,24 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("DELETE /v1/apps/{name}", func(w http.ResponseWriter, r *http.Request) {
+		// Tear down the app's per-app custom domains through the manager first
+		// (#267): store.DeleteApp cascades the rows away, so this is the last
+		// moment anything can still release the relay claims, loaded certs, and
+		// cert dirs. A mandatory removal failure aborts the delete — the app
+		// (and its rows) survive, so the delete stays retryable.
+		if dom != nil {
+			domains, err := s.ListAppDomains(r.PathValue("name"))
+			if err != nil {
+				serverError(w, r, err)
+				return
+			}
+			for _, ad := range domains {
+				if err := dom.RemoveAppDomain(ad.Domain); err != nil {
+					serverError(w, r, err)
+					return
+				}
+			}
+		}
 		if err := d.Delete(r.Context(), r.PathValue("name")); errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
