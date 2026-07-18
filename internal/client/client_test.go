@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -533,6 +534,114 @@ func TestResponseErrorsCarryHTTPStatusCode(t *testing.T) {
 	}
 	if se.Code != http.StatusUnauthorized {
 		t.Fatalf("Code = %d, want %d", se.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAppDomains(t *testing.T) {
+	notAfter := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps/blog/domains" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		writeJSONTest(w, []domain.AppDomainStatus{{
+			Domain: "myshop.com", App: "blog", Status: "active",
+			CertNotAfter: &notAfter,
+			DNSRecords:   []domain.DNSRecord{{Type: "CNAME", Name: "myshop.com", Value: "relay.example.net"}},
+			DNSOK:        true,
+		}})
+	}))
+	defer srv.Close()
+
+	ds, err := New(srv.URL, "").AppDomains("blog")
+	if err != nil {
+		t.Fatalf("AppDomains: %v", err)
+	}
+	if len(ds) != 1 {
+		t.Fatalf("domains = %+v, want 1", ds)
+	}
+	d := ds[0]
+	if d.Domain != "myshop.com" || d.App != "blog" || d.Status != "active" || !d.DNSOK {
+		t.Errorf("domain = %+v", d)
+	}
+	if d.CertNotAfter == nil || !d.CertNotAfter.Equal(notAfter) {
+		t.Errorf("CertNotAfter = %v, want %v", d.CertNotAfter, notAfter)
+	}
+	wantRec := domain.DNSRecord{Type: "CNAME", Name: "myshop.com", Value: "relay.example.net"}
+	if len(d.DNSRecords) != 1 || d.DNSRecords[0] != wantRec {
+		t.Errorf("DNSRecords = %+v, want [%+v]", d.DNSRecords, wantRec)
+	}
+}
+
+func TestAddAppDomain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/domains" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type = %q", got)
+		}
+		var body struct {
+			Domain string `json:"domain"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Domain != "myshop.com" {
+			t.Errorf("body = %+v (err %v)", body, err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(domain.AppDomainStatus{
+			Domain: "myshop.com", App: "blog", Status: "pending",
+			DNSRecords: []domain.DNSRecord{{Type: "CNAME", Name: "myshop.com", Value: "relay.example.net"}},
+		})
+	}))
+	defer srv.Close()
+
+	st, err := New(srv.URL, "").AddAppDomain("blog", "myshop.com")
+	if err != nil {
+		t.Fatalf("AddAppDomain: %v", err)
+	}
+	if st.Domain != "myshop.com" || st.App != "blog" || st.Status != "pending" {
+		t.Errorf("status = %+v", st)
+	}
+	if len(st.DNSRecords) != 1 || st.DNSRecords[0].Value != "relay.example.net" {
+		t.Errorf("DNSRecords = %+v", st.DNSRecords)
+	}
+}
+
+func TestAddAppDomainErrorIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "domain config requires a relay: connect this box to a relay first", http.StatusConflict)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, "").AddAppDomain("blog", "myshop.com")
+	if err == nil || !strings.Contains(err.Error(), "requires a relay") {
+		t.Fatalf("err = %v, want body in message", err)
+	}
+	var se *StatusError
+	if !errors.As(err, &se) || se.Code != http.StatusConflict {
+		t.Fatalf("err = %v, want *StatusError with 409", err)
+	}
+}
+
+func TestRemoveAppDomain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/apps/blog/domains/myshop.com" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, "").RemoveAppDomain("blog", "myshop.com"); err != nil {
+		t.Fatalf("RemoveAppDomain: %v", err)
+	}
+}
+
+func TestRemoveAppDomainErrorIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unknown domain", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "").RemoveAppDomain("blog", "ghost.com")
+	if err == nil || !strings.Contains(err.Error(), "unknown domain") {
+		t.Fatalf("err = %v, want body in message", err)
 	}
 }
 
