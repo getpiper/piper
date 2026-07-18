@@ -13,12 +13,14 @@ type Router struct {
 	mu     sync.RWMutex
 	byBase map[string]*tunnel.Session
 	byHost map[string]*tunnel.Session
+	custom map[string]*tunnel.Session
 }
 
 func NewRouter() *Router {
 	return &Router{
 		byBase: map[string]*tunnel.Session{},
 		byHost: map[string]*tunnel.Session{},
+		custom: map[string]*tunnel.Session{},
 	}
 }
 
@@ -57,7 +59,8 @@ func (r *Router) LookupHost(hostname string) (*tunnel.Session, bool) {
 }
 
 // RegisterCustom maps a BYO custom domain to sess. It shares byBase so
-// Lookup's exact + subdomain matching applies unchanged.
+// Lookup's exact + subdomain matching applies unchanged, and also records the
+// domain in custom so the :80 Host routing can match custom domains alone.
 func (r *Router) RegisterCustom(domain string, sess *tunnel.Session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -65,6 +68,7 @@ func (r *Router) RegisterCustom(domain string, sess *tunnel.Session) {
 		return
 	}
 	r.byBase[domain] = sess
+	r.custom[domain] = sess
 }
 
 // UnregisterCustom removes a custom-domain mapping.
@@ -72,6 +76,7 @@ func (r *Router) UnregisterCustom(domain string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.byBase, domain)
+	delete(r.custom, domain)
 }
 
 func (r *Router) Unregister(sess *tunnel.Session) {
@@ -85,6 +90,11 @@ func (r *Router) Unregister(sess *tunnel.Session) {
 	for host, s := range r.byHost {
 		if s == sess {
 			delete(r.byHost, host)
+		}
+	}
+	for domain, s := range r.custom {
+		if s == sess {
+			delete(r.custom, domain)
 		}
 	}
 }
@@ -105,6 +115,24 @@ func (r *Router) Lookup(sni string) (*tunnel.Session, bool) {
 	}
 	for base, s := range r.byBase {
 		if strings.HasSuffix(sni, "."+base) {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+// LookupCustom is Lookup restricted to BYO custom domains — same exact +
+// subdomain matching, but agent base domains and terminated shared hostnames
+// never match. It is what keeps the :80 Host routing (#228) from serving
+// shared-domain hosts over plain HTTP.
+func (r *Router) LookupCustom(host string) (*tunnel.Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if s, ok := r.custom[host]; ok {
+		return s, true
+	}
+	for domain, s := range r.custom {
+		if strings.HasSuffix(host, "."+domain) {
 			return s, true
 		}
 	}

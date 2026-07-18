@@ -109,6 +109,48 @@ func TestRegisterRefusesClosedSession(t *testing.T) {
 	if _, ok := r.Lookup("custom.example.com"); ok {
 		t.Fatal("RegisterCustom must refuse a closed session")
 	}
+	if _, ok := r.LookupCustom("custom.example.com"); ok {
+		t.Fatal("LookupCustom must not see a refused registration")
+	}
+}
+
+// LookupCustom must match ONLY custom domains (exact or subdomain) — never an
+// agent base domain or a terminated shared hostname. It is what keeps the :80
+// Host routing (#228) from resurrecting shared-domain HTTP.
+func TestRouterLookupCustomOnlyMatchesCustomDomains(t *testing.T) {
+	r := NewRouter()
+	sess := &tunnel.Session{BaseDomain: "alice.example.com"}
+	r.Register(sess)
+	r.RegisterHost("blog-alice.public.getpiper.co", sess)
+	r.RegisterCustom("shop.dev", sess)
+
+	if s, ok := r.LookupCustom("shop.dev"); !ok || s != sess {
+		t.Fatal("exact custom domain should match")
+	}
+	if s, ok := r.LookupCustom("www.shop.dev"); !ok || s != sess {
+		t.Fatal("subdomain of custom domain should match")
+	}
+	if _, ok := r.LookupCustom("alice.example.com"); ok {
+		t.Fatal("agent base domain must not match LookupCustom")
+	}
+	if _, ok := r.LookupCustom("blog.alice.example.com"); ok {
+		t.Fatal("subdomain of base domain must not match LookupCustom")
+	}
+	if _, ok := r.LookupCustom("blog-alice.public.getpiper.co"); ok {
+		t.Fatal("terminated shared hostname must not match LookupCustom")
+	}
+
+	r.UnregisterCustom("shop.dev")
+	if _, ok := r.LookupCustom("shop.dev"); ok {
+		t.Fatal("custom domain should be gone after UnregisterCustom")
+	}
+
+	// Unregister(sess) sweeps custom entries out of LookupCustom too.
+	r.RegisterCustom("shop.dev", sess)
+	r.Unregister(sess)
+	if _, ok := r.LookupCustom("shop.dev"); ok {
+		t.Fatal("custom domain should be swept by Unregister")
+	}
 }
 
 func TestRouterCustomDomain(t *testing.T) {

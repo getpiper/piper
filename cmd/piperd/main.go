@@ -188,17 +188,19 @@ func loopbackAddr(addr string) bool {
 // newDialLocal maps relay tunnel stream kinds to local addresses. Control
 // streams go to the authenticated listener (authAddr) — never the tokenless
 // local one, or the relay path would silently lose its bearer gate (#221).
-// Terminated mode serves apps plaintext on :80; otherwise TLS on :443.
-// Passthrough streams whose ClientHello offers acme-tls/1 are TLS-ALPN-01
-// validations and are spliced to the in-process solver (alpnAddr) instead of
-// Caddy (caddyAddr), with the peeked hello replayed into whichever backend is
-// dialed (#226).
-func newDialLocal(terminated bool, authAddr, alpnAddr, caddyAddr string) func(kind byte, stream net.Conn) (net.Conn, error) {
+// KindHTTP is plaintext HTTP for the box's :80 in every mode — Caddy listens
+// there in terminated mode (relay-terminated shared-domain apps) and in BYO
+// mode alike, which is what lets custom-domain port-80 traffic reach the box
+// (#228). Passthrough streams whose ClientHello offers acme-tls/1 are
+// TLS-ALPN-01 validations and are spliced to the in-process solver (alpnAddr)
+// instead of Caddy (caddyAddr), with the peeked hello replayed into whichever
+// backend is dialed (#226).
+func newDialLocal(authAddr, alpnAddr, caddyAddr string) func(kind byte, stream net.Conn) (net.Conn, error) {
 	return func(kind byte, stream net.Conn) (net.Conn, error) {
 		switch {
 		case kind == tunnel.KindControlAPI:
 			return net.Dial("tcp", authAddr)
-		case terminated && kind == tunnel.KindHTTP:
+		case kind == tunnel.KindHTTP:
 			return net.Dial("tcp", "127.0.0.1:80")
 		default:
 			acme, consumed := agent.PeekALPN(stream)
@@ -398,7 +400,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("alpn solver: %v", err)
 		}
-		dialLocal := newDialLocal(cfg.Terminated, authAddr, alpnSolver.Addr(), "127.0.0.1:443")
+		dialLocal := newDialLocal(authAddr, alpnSolver.Addr(), "127.0.0.1:443")
 		if !cfg.Terminated {
 			if cfg.TLSCertFile != "" {
 				certPEM, err := os.ReadFile(cfg.TLSCertFile)

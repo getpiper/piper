@@ -52,12 +52,13 @@ func (q *connQueue) push(c net.Conn) {
 	}
 }
 
-// Serve runs the relay: it accepts agent tunnels on tunnelAddr and public TLS
-// traffic on tlsAddr, routing each connection by SNI. tlsCfg is the wildcard
+// Serve runs the relay: it accepts agent tunnels on tunnelAddr, public TLS
+// traffic on tlsAddr (routed by SNI), and public plain HTTP on httpAddr
+// (routed by Host, custom domains only — #228). tlsCfg is the wildcard
 // config for relay-terminated shared-domain apps; nil ⇒ passthrough-only.
 // ctrl, when non-nil and a wildcard cert is armed, is the relay's own HTTP API,
 // served TLS-terminated at SNI "api.<apex>" (#73). Blocks until a listener fails.
-func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler) error {
+func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler) error {
 	var ctrlQ *connQueue
 	if ctrl != nil && tlsCfg != nil {
 		ctrlQ = newConnQueue()
@@ -77,6 +78,12 @@ func Serve(tlsAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Ro
 		return err
 	}
 	go acceptTunnels(tunLn, st, router)
+
+	httpLn, err := net.Listen("tcp", httpAddr)
+	if err != nil {
+		return err
+	}
+	go acceptHTTP(httpLn, router)
 
 	tlsLn, err := net.Listen("tcp", tlsAddr)
 	if err != nil {
@@ -318,14 +325,17 @@ func handlePublic(conn net.Conn, router *Router, tlsCfg *tls.Config, ctrlHost st
 		return
 	}
 	if sess, ok := router.Lookup(sni); ok {
-		passthrough(conn, buffered, sess)
+		pump(conn, buffered, sess, tunnel.KindPassthrough)
 	}
 }
 
-// passthrough is the Plan-2 SNI-splice: replay the ClientHello down a KindPassthrough
-// stream and pipe raw bytes; the box terminates TLS.
-func passthrough(conn net.Conn, buffered []byte, sess *tunnel.Session) {
-	stream, err := sess.OpenKind(tunnel.KindPassthrough)
+// pump is the shared byte-splice: open a stream of the given kind on sess,
+// replay the bytes already consumed from conn, then pipe raw bytes both ways.
+// The :443 path uses it as the Plan-2 SNI passthrough (KindPassthrough, the
+// box terminates TLS); the :80 path pumps custom-domain plaintext HTTP down a
+// KindHTTP stream to the box's :80 (#228).
+func pump(conn net.Conn, buffered []byte, sess *tunnel.Session, kind byte) {
+	stream, err := sess.OpenKind(kind)
 	if err != nil {
 		return
 	}
