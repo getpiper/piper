@@ -46,12 +46,17 @@ func latestStatus(s *store.Store, app string) (string, error) {
 	return d.Status, nil
 }
 
-// DomainManager is the domain-config surface (#102). Nil when the box has no
+// DomainManager is the domain-config surface: the box-wide custom domain
+// (#102) and the per-app domains collection (#231). Nil when the box has no
 // relay configured: the endpoints then answer 409.
 type DomainManager interface {
 	Set(domain, provider, token string) (domain.Status, error)
 	Status() (domain.Status, error)
 	Remove() error
+	AddAppDomain(app, domain string) (store.AppDomain, error)
+	RemoveAppDomain(domain string) error
+	AppDomainStatus(domain string) (domain.AppDomainStatus, error)
+	AppDomainStatuses(app string) ([]domain.AppDomainStatus, error)
 }
 
 // onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
@@ -229,6 +234,24 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("DELETE /v1/apps/{name}", func(w http.ResponseWriter, r *http.Request) {
+		// Tear down the app's per-app custom domains through the manager first
+		// (#267): store.DeleteApp cascades the rows away, so this is the last
+		// moment anything can still release the relay claims, loaded certs, and
+		// cert dirs. A mandatory removal failure aborts the delete — the app
+		// (and its rows) survive, so the delete stays retryable.
+		if dom != nil {
+			domains, err := s.ListAppDomains(r.PathValue("name"))
+			if err != nil {
+				serverError(w, r, err)
+				return
+			}
+			for _, ad := range domains {
+				if err := dom.RemoveAppDomain(ad.Domain); err != nil {
+					serverError(w, r, err)
+					return
+				}
+			}
+		}
 		if err := d.Delete(r.Context(), r.PathValue("name")); errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
@@ -334,6 +357,99 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		} else if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Per-app custom domains collection (#231). knownApp maps the app path
+	// segment onto the 404, shared by GET and DELETE (POST gets it from
+	// AddAppDomain's own app check).
+	knownApp := func(w http.ResponseWriter, r *http.Request, name string) bool {
+		_, err := s.GetApp(name)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return false
+		}
+		if err != nil {
+			serverError(w, r, err)
+			return false
+		}
+		return true
+	}
+	mux.HandleFunc("GET /v1/apps/{name}/domains", func(w http.ResponseWriter, r *http.Request) {
+		if noRelay(w) {
+			return
+		}
+		name := r.PathValue("name")
+		if !knownApp(w, r, name) {
+			return
+		}
+		statuses, err := dom.AppDomainStatuses(name)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if statuses == nil {
+			statuses = []domain.AppDomainStatus{}
+		}
+		writeJSON(w, http.StatusOK, statuses)
+	})
+	mux.HandleFunc("POST /v1/apps/{name}/domains", func(w http.ResponseWriter, r *http.Request) {
+		if noRelay(w) {
+			return
+		}
+		var in struct {
+			Domain string `json:"domain"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Domain == "" {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		row, err := dom.AddAppDomain(r.PathValue("name"), in.Domain)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		case errors.Is(err, domain.ErrInvalidDomain):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		case errors.Is(err, domain.ErrBoxWideDomain), errors.Is(err, store.ErrDomainExists):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case err != nil:
+			serverError(w, r, err)
+			return
+		}
+		st, err := dom.AppDomainStatus(row.Domain)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, st)
+	})
+	mux.HandleFunc("DELETE /v1/apps/{name}/domains/{domain}", func(w http.ResponseWriter, r *http.Request) {
+		if noRelay(w) {
+			return
+		}
+		name := r.PathValue("name")
+		if !knownApp(w, r, name) {
+			return
+		}
+		// Rows are stored lowercase (AddAppDomain normalizes), so match the
+		// path segment the same way.
+		dn := strings.ToLower(r.PathValue("domain"))
+		row, err := s.GetAppDomain(dn)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && row.App != name) {
+			http.Error(w, "unknown domain", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if err := dom.RemoveAppDomain(dn); err != nil {
 			serverError(w, r, err)
 			return
 		}

@@ -383,6 +383,14 @@ func main() {
 		if !cfg.Terminated {
 			opts.EnvDomain = cfg.BaseDomain // env-managed BYO: API writes are 409
 		}
+		if os.Getenv("PIPER_TEST_ISSUER") == "selfsigned" {
+			// E2E: the fake issuer implies the test domains have no real DNS
+			// either. Resolve every name to loopback so the per-app DNS gate
+			// (and dns_ok) sees them pointing at the loopback relay.
+			opts.Resolve = func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP("127.0.0.1")}, nil
+			}
+		}
 		domMgr = domain.New(opts)
 	}
 

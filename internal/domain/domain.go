@@ -99,6 +99,10 @@ type Options struct {
 	RelayHost   string // host part of the relay address; the DNS-record target
 	HTTPSListen string // e.g. ":443"
 	EnvDomain   string
+	// Resolve overrides the DNS lookup behind dns_ok and the per-app DNS
+	// gate; nil uses net.DefaultResolver. E2E seam: the test domains have no
+	// real DNS (see PIPER_TEST_ISSUER in cmd/piperd).
+	Resolve func(ctx context.Context, host string) ([]net.IP, error)
 }
 
 // Manager owns the custom-domain lifecycles — one state machine per domain,
@@ -147,8 +151,8 @@ type Manager struct {
 	now        func() time.Time
 }
 
-// dnsCacheEntry memoizes one domain's dnsOK result so a polling dashboard
-// doesn't issue live DNS lookups on every GET/PUT /v1/domain (#114).
+// dnsCacheEntry memoizes one host's dns-points-at-relay result so a polling
+// dashboard doesn't issue live DNS lookups on every status read (#114).
 type dnsCacheEntry struct {
 	ok bool
 	at time.Time
@@ -162,6 +166,12 @@ func New(o Options) *Manager {
 	if o.EnvDomain != "" {
 		envStatus = StatusIssuing // pending until RunEnv reports its outcome
 	}
+	resolve := o.Resolve
+	if resolve == nil {
+		resolve = func(ctx context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(ctx, "ip", host)
+		}
+	}
 	return &Manager{
 		st: o.Store, newIssuer: o.Issuer, appIssuer: o.AppIssuer,
 		proxy: o.Proxy, router: o.Router,
@@ -174,10 +184,8 @@ func New(o Options) *Manager {
 		envStatus:  envStatus,
 		retryDelay: defaultRetryDelay,
 		dnsWait:    defaultDNSWait,
-		resolve: func(ctx context.Context, host string) ([]net.IP, error) {
-			return net.DefaultResolver.LookupIP(ctx, "ip", host)
-		},
-		now: time.Now,
+		resolve:    resolve,
+		now:        time.Now,
 	}
 }
 
@@ -513,8 +521,7 @@ func certValidFor(certPEM []byte, host string, now time.Time) bool {
 	return now.Add(24 * time.Hour).Before(crt.NotAfter)
 }
 
-// Status assembles the wire state (GET /v1/domain). DNSOK is computed in
-// dnsOK (added in Task 7).
+// Status assembles the wire state (GET /v1/domain).
 func (m *Manager) Status() (Status, error) {
 	if m.envDomain != "" {
 		m.envMu.Lock()
@@ -543,7 +550,10 @@ func (m *Manager) Status() (Status, error) {
 		Status: dc.Status, Error: dc.Error,
 		DNSRecords: m.dnsRecords(dc.Domain),
 	}
-	st.DNSOK = m.cachedDNSOK(dc.Domain)
+	// piper-probe.<domain>: any label matches the user's wildcard record, so a
+	// hit means wildcard traffic reaches the relay — readiness independent of
+	// issuance, which needs only the DNS API token.
+	st.DNSOK = m.cachedDNSPointsAt("piper-probe." + dc.Domain)
 	if !dc.CertNotAfter.IsZero() {
 		t := dc.CertNotAfter
 		st.CertNotAfter = &t
@@ -579,31 +589,23 @@ func (m *Manager) dnsRecords(domain string) []DNSRecord {
 	}
 }
 
-// cachedDNSOK serves dnsOK from a short TTL cache so a dashboard polling
-// GET /v1/domain (and PUT, which returns Status) doesn't trigger a pair of
+// cachedDNSPointsAt serves dnsPointsAt(relayHost, host) from a short TTL
+// cache so a dashboard polling the status endpoints doesn't trigger a pair of
 // blocking DNS lookups every call. The lookup runs outside the lock (#114).
-func (m *Manager) cachedDNSOK(domain string) bool {
+func (m *Manager) cachedDNSPointsAt(host string) bool {
 	m.dnsMu.Lock()
-	if e, ok := m.dnsCache[domain]; ok && m.now().Sub(e.at) < dnsOKTTL {
+	if e, ok := m.dnsCache[host]; ok && m.now().Sub(e.at) < dnsOKTTL {
 		m.dnsMu.Unlock()
 		return e.ok
 	}
 	m.dnsMu.Unlock()
 
-	ok := m.dnsOK(domain)
+	ok := m.dnsPointsAt(m.relayHost, host)
 
 	m.dnsMu.Lock()
-	m.dnsCache[domain] = dnsCacheEntry{ok: ok, at: m.now()}
+	m.dnsCache[host] = dnsCacheEntry{ok: ok, at: m.now()}
 	m.dnsMu.Unlock()
 	return ok
-}
-
-// dnsOK reports whether a wildcard lookup under domain reaches the relay:
-// piper-probe.<domain> (any label matches the user's wildcard record) must
-// resolve to an address the relay host also resolves to. Traffic readiness —
-// independent of issuance, which needs only the DNS API token.
-func (m *Manager) dnsOK(domain string) bool {
-	return m.dnsPointsAt(m.relayHost, "piper-probe."+domain)
 }
 
 // dnsPointsAt reports whether host resolves to an address target also

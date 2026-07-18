@@ -210,3 +210,237 @@ func TestRelayCustomDomainSelfService(t *testing.T) {
 		t.Fatal("shared-domain URL broke after adding the custom domain")
 	}
 }
+
+// TestRelayPerAppCustomDomain proves the per-app BYO domain flow (#224/#231):
+// on the relay-terminated loop, POST /v1/apps/<app>/domains claims the domain
+// on the relay and drives tokenless issuance (stubbed via
+// PIPER_TEST_ISSUER=selfsigned, which also stubs the DNS gate) to active, a
+// visitor reaches the app on the exact-host domain through the relay while the
+// shared URL keeps serving, DELETE tears everything down, and deleting the app
+// itself tears down its domains too (#267).
+func TestRelayPerAppCustomDomain(t *testing.T) {
+	if os.Getenv("RUN_E2E") != "1" {
+		t.Skip("set RUN_E2E=1 to run (needs Docker; Caddy is embedded)")
+	}
+	repoRoot, _ := filepath.Abs("../..")
+	apex := "public.localhost"
+	certFile, keyFile := writeSelfSigned(t, apex) // *.public.localhost
+
+	binDir := t.TempDir()
+	for _, c := range []string{"piperd", "piper-relay", "piper"} {
+		b := exec.Command("go", "build", "-o", filepath.Join(binDir, c), "./cmd/"+c)
+		b.Dir = repoRoot
+		if out, err := b.CombinedOutput(); err != nil {
+			t.Fatalf("build %s: %v\n%s", c, err, out)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	relayData := t.TempDir()
+	relay := exec.CommandContext(ctx, filepath.Join(binDir, "piper-relay"))
+	relay.Env = append(os.Environ(),
+		"PIPER_RELAY_DATA_DIR="+relayData,
+		"PIPER_RELAY_TLS_ADDR=127.0.0.1:8443",
+		"PIPER_RELAY_HTTP_ADDR=127.0.0.1:8880",
+		"PIPER_RELAY_TUNNEL_ADDR=127.0.0.1:7000",
+		"PIPER_RELAY_API_ADDR=127.0.0.1:8080",
+		"PIPER_RELAY_TUNNEL_PUBLIC=127.0.0.1:7000",
+		"PIPER_RELAY_APEX="+apex,
+		"PIPER_RELAY_TLS_CERT="+certFile,
+		"PIPER_RELAY_TLS_KEY="+keyFile,
+		"PIPER_RELAY_FAKE_APPROVE=1",
+	)
+	relay.Stdout, relay.Stderr = os.Stdout, os.Stderr
+	if err := relay.Start(); err != nil {
+		t.Fatalf("start relay: %v", err)
+	}
+	defer relay.Process.Kill()
+	waitPort(t, "127.0.0.1:7000", 10*time.Second)
+	waitPort(t, "127.0.0.1:8080", 10*time.Second)
+
+	home := t.TempDir()
+	piperEnv := append(os.Environ(), "HOME="+home, "PIPER_ADDR=", "PIPER_TOKEN=")
+	login := exec.Command(filepath.Join(binDir, "piper"), "login", "--relay", "http://127.0.0.1:8080")
+	login.Env = piperEnv
+	if out, err := login.CombinedOutput(); err != nil {
+		t.Fatalf("piper login: %v\n%s", err, out)
+	}
+
+	piperdData := t.TempDir()
+	connect := exec.Command(filepath.Join(binDir, "piper"), "connect", "--data-dir", piperdData)
+	connect.Env = piperEnv
+	if out, err := connect.CombinedOutput(); err != nil {
+		t.Fatalf("piper connect: %v\n%s", err, out)
+	}
+
+	tokenCmd := exec.Command(filepath.Join(binDir, "piperd"), "token", "create", "--name", "e2e")
+	tokenCmd.Env = append(os.Environ(), "PIPER_DATA_DIR="+piperdData)
+	tokenOut, err := tokenCmd.Output()
+	if err != nil {
+		t.Fatalf("token create: %v", err)
+	}
+	apiToken := strings.TrimSpace(string(tokenOut))
+
+	pd := exec.CommandContext(ctx, filepath.Join(binDir, "piperd"))
+	pd.Env = append(os.Environ(),
+		"PIPER_DATA_DIR="+piperdData,
+		"PIPER_API_ADDR=127.0.0.1:8088",
+		"PIPER_TEST_ISSUER=selfsigned",
+	)
+	pd.Stdout, pd.Stderr = os.Stdout, os.Stderr
+	if err := pd.Start(); err != nil {
+		t.Fatalf("start piperd: %v", err)
+	}
+	defer pd.Process.Kill()
+	waitPort(t, "127.0.0.1:8088", 15*time.Second)
+
+	create := exec.Command(filepath.Join(binDir, "piper"), "create", "blog", "--port", "8080")
+	create.Env = append(piperEnv, "PIPER_ADDR=http://127.0.0.1:8088", "PIPER_TOKEN="+apiToken)
+	if out, err := create.CombinedOutput(); err != nil {
+		t.Fatalf("piper create: %v\n%s", err, out)
+	}
+	var deployErr string
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		dep := exec.Command(filepath.Join(binDir, "piper"),
+			"deploy", "blog", "--path", filepath.Join(repoRoot, "test/e2e/sampleapp"))
+		dep.Env = append(piperEnv, "PIPER_ADDR=http://127.0.0.1:8088", "PIPER_TOKEN="+apiToken)
+		out, err := dep.CombinedOutput()
+		if err == nil {
+			deployErr = ""
+			break
+		}
+		deployErr = fmt.Sprintf("%v\n%s", err, out)
+		time.Sleep(1 * time.Second)
+	}
+	if deployErr != "" {
+		t.Fatalf("piper deploy: %s", deployErr)
+	}
+
+	// ---- Per-app custom domain via the control API (#231) ----
+	custom := "myshop.localhost"
+	api := func(method, path, body string) (int, string) {
+		t.Helper()
+		var rd io.Reader
+		if body != "" {
+			rd = strings.NewReader(body)
+		}
+		req, _ := http.NewRequest(method, "http://127.0.0.1:8088"+path, rd)
+		req.Header.Set("Authorization", "Bearer "+apiToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+	attachAndWaitActive := func() {
+		t.Helper()
+		if code, body := api(http.MethodPost, "/v1/apps/blog/domains", `{"domain":"`+custom+`"}`); code != http.StatusCreated {
+			t.Fatalf("POST domains = %d: %s", code, body)
+		}
+		deadline := time.Now().Add(30 * time.Second)
+		var listBody string
+		for time.Now().Before(deadline) {
+			_, listBody = api(http.MethodGet, "/v1/apps/blog/domains", "")
+			if strings.Contains(listBody, `"status":"active"`) {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if !strings.Contains(listBody, `"status":"active"`) {
+			t.Fatalf("domain never became active: %s", listBody)
+		}
+		if !strings.Contains(listBody, `"dns_records"`) || !strings.Contains(listBody, `"name":"`+custom+`"`) {
+			t.Fatalf("GET domains missing guided-setup record: %s", listBody)
+		}
+	}
+	attachAndWaitActive()
+
+	// Visitor on the exact-host domain: TLS SNI myshop.localhost → relay:8443
+	// splices passthrough → box :443 terminates.
+	curlCustom := func() string {
+		d := &tls.Dialer{Config: &tls.Config{ServerName: custom, InsecureSkipVerify: true}}
+		conn, err := d.DialContext(ctx, "tcp", "127.0.0.1:8443")
+		if err != nil {
+			return ""
+		}
+		fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", custom)
+		cb, _ := io.ReadAll(conn)
+		conn.Close()
+		return string(cb)
+	}
+	var customResp string
+	deadline = time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if customResp = curlCustom(); customResp != "" {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if customResp == "" {
+		t.Fatal("no response on the per-app custom domain through the relay")
+	}
+
+	// Coexistence: the shared-domain URL still serves.
+	hostname := terminatedHostname(t, relayData)
+	d := &tls.Dialer{Config: &tls.Config{ServerName: hostname, InsecureSkipVerify: true}}
+	conn, err := d.DialContext(ctx, "tcp", "127.0.0.1:8443")
+	if err != nil {
+		t.Fatalf("shared-domain dial after custom domain: %v", err)
+	}
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", hostname)
+	sb, _ := io.ReadAll(conn)
+	conn.Close()
+	if len(sb) == 0 {
+		t.Fatal("shared-domain URL broke after adding the per-app domain")
+	}
+
+	// DELETE tears down: row gone from the list, cert dir removed, and the
+	// relay stops routing the domain.
+	certDir := filepath.Join(piperdData, "appdomains", custom)
+	if _, err := os.Stat(certDir); err != nil {
+		t.Fatalf("cert dir missing while active: %v", err)
+	}
+	if code, body := api(http.MethodDelete, "/v1/apps/blog/domains/"+custom, ""); code != http.StatusNoContent {
+		t.Fatalf("DELETE domain = %d: %s", code, body)
+	}
+	if _, body := api(http.MethodGet, "/v1/apps/blog/domains", ""); strings.TrimSpace(body) != "[]" {
+		t.Fatalf("domains after DELETE = %s, want []", body)
+	}
+	if _, err := os.Stat(certDir); !os.IsNotExist(err) {
+		t.Fatalf("cert dir survived DELETE: %v", err)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if curlCustom() == "" {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if resp := curlCustom(); resp != "" {
+		t.Fatalf("custom domain still served after DELETE: %q", resp)
+	}
+
+	// #267: deleting the app itself tears down its re-attached domain too.
+	attachAndWaitActive()
+	if code, body := api(http.MethodDelete, "/v1/apps/blog", ""); code != http.StatusNoContent {
+		t.Fatalf("DELETE app = %d: %s", code, body)
+	}
+	if _, err := os.Stat(certDir); !os.IsNotExist(err) {
+		t.Fatalf("cert dir survived app delete: %v", err)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if curlCustom() == "" {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if resp := curlCustom(); resp != "" {
+		t.Fatalf("custom domain still served after app delete: %q", resp)
+	}
+}
