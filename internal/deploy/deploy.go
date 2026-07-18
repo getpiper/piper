@@ -341,6 +341,12 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 		return store.Deployment{}, err
 	}
 	if err := d.routes.UpsertRoute(d.hostForPreview(appName, pr), run.HostPort); err != nil {
+		// The container is running and the row is "running", but with no route
+		// it's unreachable. Unwind rather than leak both: best-effort stop the
+		// container and mark the row "failed" (mirrors failFinish on the Deploy
+		// path, #157).
+		d.stopPartial(ctx, run.ContainerID)
+		_ = d.store.UpdateDeploymentStatus(dep.ID, "failed")
 		return store.Deployment{}, fmt.Errorf("route: %w", err)
 	}
 	if previous.ContainerID != "" && previous.ContainerID != run.ContainerID {
@@ -350,20 +356,33 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 	return dep, nil
 }
 
-func (d *Deployer) TeardownPreview(ctx context.Context, appName string, pr int) error {
+// TeardownPreview retires PR pr's running preview: stop its container, drop its
+// route, mark the row "stopped". retired reports whether a running preview was
+// actually retired — false when nothing was running — so the caller only posts
+// an "inactive" deployment status for a preview that existed. When the store row
+// is already gone the route may have outlived it (e.g. a crash between routing
+// and the row write), so RemoveRoute is still attempted best-effort; Caddy's
+// RemoveRoute tolerates a missing route, so a genuinely absent one is a no-op.
+func (d *Deployer) TeardownPreview(ctx context.Context, appName string, pr int) (retired bool, err error) {
 	defer d.lockApp(appName)()
 	dep, err := d.store.PreviewRunning(appName, pr)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil
+		if rerr := d.routes.RemoveRoute(d.hostForPreview(appName, pr)); rerr != nil {
+			log.Printf("teardown %s PR %d: remove orphan route: %v", appName, pr, rerr)
+		}
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	_ = d.runtime.Stop(ctx, dep.ContainerID)
 	if err := d.routes.RemoveRoute(d.hostForPreview(appName, pr)); err != nil {
-		return fmt.Errorf("unroute: %w", err)
+		return false, fmt.Errorf("unroute: %w", err)
 	}
-	return d.store.UpdateDeploymentStatus(dep.ID, "stopped")
+	if err := d.store.UpdateDeploymentStatus(dep.ID, "stopped"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // primaryHost resolves the app's routed production host: the relay-assigned

@@ -22,7 +22,7 @@ const maxBody = 5 << 20 // 5 MiB
 type Deployer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
 	DeployPreview(ctx context.Context, app string, pr int, srcDir string) (store.Deployment, error)
-	TeardownPreview(ctx context.Context, app string, pr int) error
+	TeardownPreview(ctx context.Context, app string, pr int) (retired bool, err error)
 }
 
 type Handler struct {
@@ -265,7 +265,8 @@ func (h *Handler) processPRClosed(ctx context.Context, ev source.Event) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := h.deploy.TeardownPreview(ctx, app.Name, ev.PR); err != nil {
+	retired, err := h.deploy.TeardownPreview(ctx, app.Name, ev.PR)
+	if err != nil {
 		log.Printf("webhook: teardown %s PR %d: %v", app.Name, ev.PR, err)
 		return
 	}
@@ -274,5 +275,11 @@ func (h *Handler) processPRClosed(ctx context.Context, ev source.Event) {
 	delete(h.lastSHA, fmt.Sprintf("%s#%d", app.Name, ev.PR))
 	h.mu.Unlock()
 
-	_ = h.prov.Report(ctx, ev, source.StatusInactive, "")
+	// Only report the preview deployment inactive when a preview was actually
+	// retired. With no running preview there's no pr-<N> deployment to mark, so
+	// reporting would trigger a wasted deployments lookup whose "no deployment"
+	// error is then swallowed.
+	if retired {
+		_ = h.prov.Report(ctx, ev, source.StatusInactive, "")
+	}
 }
