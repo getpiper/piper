@@ -331,6 +331,58 @@ func (m *Manager) reissueApp(row store.AppDomain) error {
 	return m.st.UpdateAppDomainStatus(row.Domain, StatusActive, "", notAfter)
 }
 
+// AppDomainStatus is the wire state of one per-app custom domain (#231).
+type AppDomainStatus struct {
+	Domain       string      `json:"domain"`
+	App          string      `json:"app"`
+	Status       string      `json:"status"` // "pending" | "issuing" | "active" | "failed"
+	Error        string      `json:"error"`
+	CertNotAfter *time.Time  `json:"cert_not_after,omitempty"`
+	DNSRecords   []DNSRecord `json:"dns_records"`
+	DNSOK        bool        `json:"dns_ok"`
+}
+
+// AppDomainStatuses assembles the wire state of every domain attached to app
+// (GET /v1/apps/<app>/domains). Read-only over the store rows the lifecycle
+// loops maintain.
+func (m *Manager) AppDomainStatuses(app string) ([]AppDomainStatus, error) {
+	rows, err := m.st.ListAppDomains(app)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AppDomainStatus, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, m.appDomainStatus(row))
+	}
+	return out, nil
+}
+
+// AppDomainStatus assembles one domain's wire state (the POST response), or
+// store.ErrNotFound.
+func (m *Manager) AppDomainStatus(domain string) (AppDomainStatus, error) {
+	row, err := m.st.GetAppDomain(domain)
+	if err != nil {
+		return AppDomainStatus{}, err
+	}
+	return m.appDomainStatus(row), nil
+}
+
+// appDomainStatus converts one row: the guided-setup CNAME (exact host → the
+// relay) and a best-effort, cached dns_ok — a field, never an error.
+func (m *Manager) appDomainStatus(row store.AppDomain) AppDomainStatus {
+	st := AppDomainStatus{
+		Domain: row.Domain, App: row.App,
+		Status: row.Status, Error: row.Error,
+		DNSRecords: []DNSRecord{{Type: "CNAME", Name: row.Domain, Value: m.relayHost}},
+		DNSOK:      m.cachedDNSPointsAt(row.Domain),
+	}
+	if !row.CertNotAfter.IsZero() {
+		t := row.CertNotAfter
+		st.CertNotAfter = &t
+	}
+	return st
+}
+
 func (m *Manager) appCertDir(domain string) string {
 	return filepath.Join(m.dataDir, "appdomains", domain)
 }

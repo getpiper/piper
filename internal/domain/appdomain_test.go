@@ -659,3 +659,91 @@ func TestBoxWideAndAppCertsCoexist(t *testing.T) {
 		t.Fatalf("loaded certs after app renewal = %d, want 2", got)
 	}
 }
+
+// AppDomainStatuses assembles the wire state (#231) straight from the store
+// rows: per-domain status/error/expiry plus the guided-setup CNAME record and
+// the exact-host dns_ok check against the relay.
+func TestAppDomainStatuses(t *testing.T) {
+	m, st, _, _, _, _ := newAppTestManager(t, &fakeIssuer{})
+	for _, a := range []string{"blog", "api"} {
+		if _, err := st.CreateApp(a, 8080); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No domains yet: empty, not nil (the handler serves it as JSON []).
+	sts, err := m.AppDomainStatuses("blog")
+	if err != nil || sts == nil || len(sts) != 0 {
+		t.Fatalf("empty statuses = %v (err %v), want []", sts, err)
+	}
+
+	// Rows written directly: status assembly is read-only over the store.
+	notAfter := time.Now().Add(60 * 24 * time.Hour).UTC().Truncate(time.Second)
+	for _, d := range []struct{ dom, app string }{
+		{"a.example.com", "blog"}, {"b.example.com", "blog"}, {"other.example.com", "api"},
+	} {
+		if err := st.AddAppDomain(d.dom, d.app); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.UpdateAppDomainStatus("a.example.com", StatusActive, "", notAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateAppDomainStatus("b.example.com", StatusFailed, "acme: boom", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	sts, err = m.AppDomainStatuses("blog")
+	if err != nil {
+		t.Fatalf("AppDomainStatuses: %v", err)
+	}
+	if len(sts) != 2 || sts[0].Domain != "a.example.com" || sts[1].Domain != "b.example.com" {
+		t.Fatalf("statuses = %+v, want blog's two domains ordered", sts)
+	}
+	a := sts[0]
+	if a.App != "blog" || a.Status != StatusActive || a.Error != "" {
+		t.Fatalf("a = %+v", a)
+	}
+	if a.CertNotAfter == nil || !a.CertNotAfter.Equal(notAfter) {
+		t.Fatalf("a.CertNotAfter = %v, want %v", a.CertNotAfter, notAfter)
+	}
+	wantRec := DNSRecord{Type: "CNAME", Name: "a.example.com", Value: "relay.example.net"}
+	if len(a.DNSRecords) != 1 || a.DNSRecords[0] != wantRec {
+		t.Fatalf("a.DNSRecords = %+v, want [%+v]", a.DNSRecords, wantRec)
+	}
+	if !a.DNSOK { // the test resolver points every name at the relay
+		t.Fatal("a.DNSOK = false, want true")
+	}
+	b := sts[1]
+	if b.Status != StatusFailed || b.Error != "acme: boom" || b.CertNotAfter != nil {
+		t.Fatalf("b = %+v", b)
+	}
+}
+
+func TestAppDomainStatusSingle(t *testing.T) {
+	m, st, _, _, _, _ := newAppTestManager(t, &fakeIssuer{})
+	if _, err := st.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AppDomainStatus("ghost.example.com"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing domain err = %v, want ErrNotFound", err)
+	}
+
+	if err := st.AddAppDomain("shop.example.com", "blog"); err != nil {
+		t.Fatal(err)
+	}
+	// DNS pointing elsewhere: dns_ok false, never an error.
+	m.resolve = func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "shop.example.com" {
+			return []net.IP{net.ParseIP("198.51.100.9")}, nil
+		}
+		return []net.IP{net.ParseIP("203.0.113.7")}, nil
+	}
+	got, err := m.AppDomainStatus("shop.example.com")
+	if err != nil {
+		t.Fatalf("AppDomainStatus: %v", err)
+	}
+	if got.Domain != "shop.example.com" || got.App != "blog" || got.DNSOK {
+		t.Fatalf("status = %+v, want shop.example.com/blog with dns_ok false", got)
+	}
+}
