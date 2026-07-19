@@ -28,7 +28,7 @@
 - Consumes: `(*client.Client).App(name string) (api.App, error)` and `client.StatusError.Code`.
 - Produces: `assertRouteGone(t *testing.T, req *http.Request)`, an e2e-only assertion helper.
 
-- [ ] **Step 1: Add the route-gone helper and stop/delete assertions with deliberate mutations**
+- [x] **Step 1: Add the route-gone helper and stop/delete assertions with deliberate mutations**
 
 Add `errors` to the imports. Replace the weak post-stop response-body comparison with `assertRouteGone(t, req)`. After the existing empty-list assertion, require `c.App("blog")` to produce `*client.StatusError`, but deliberately compare against `http.StatusGone` for the red run. Call `assertRouteGone(t, req)` after the API assertion.
 
@@ -63,7 +63,7 @@ Use this deleted-app assertion, deliberately expecting 410 for its red run:
 	assertRouteGone(t, req)
 ```
 
-- [ ] **Step 2: Run the focused e2e test and verify the route mutation fails**
+- [x] **Step 2: Run the focused e2e test and verify the route mutation fails**
 
 Run:
 
@@ -73,7 +73,7 @@ RUN_E2E=1 go test ./test/e2e/... -run '^TestEndToEndDeploy$' -count=1 -v
 
 Expected: FAIL from `assertRouteGone`; Caddy returns status 200 with an empty body rather than the deliberately expected 404.
 
-- [ ] **Step 3: Correct the route expectation but retain the API mutation**
+- [x] **Step 3: Correct the route expectation but retain the API mutation**
 
 Change the helper condition and failure message to the intended public no-route contract:
 
@@ -83,7 +83,7 @@ Change the helper condition and failure message to the intended public no-route 
 	}
 ```
 
-- [ ] **Step 4: Run the focused e2e test and verify the API mutation fails**
+- [x] **Step 4: Run the focused e2e test and verify the API mutation fails**
 
 Run:
 
@@ -93,7 +93,7 @@ RUN_E2E=1 go test ./test/e2e/... -run '^TestEndToEndDeploy$' -count=1 -v
 
 Expected: FAIL after deletion because `c.App("blog")` returns a `*client.StatusError` with code 404 rather than the deliberately expected 410.
 
-- [ ] **Step 5: Correct the deleted-app expectation**
+- [x] **Step 5: Correct the deleted-app expectation**
 
 Replace the mutated assertion with:
 
@@ -106,7 +106,7 @@ Replace the mutated assertion with:
 	assertRouteGone(t, req)
 ```
 
-- [ ] **Step 6: Format and run the focused e2e test green**
+- [x] **Step 6: Format and run the focused e2e test green**
 
 Run:
 
@@ -117,7 +117,7 @@ RUN_E2E=1 go test ./test/e2e/... -run '^TestEndToEndDeploy$' -count=1 -v
 
 Expected: PASS. The test deploys the sample app, proves stop removes its public response, proves delete returns API 404, and proves the hostname remains unrouted.
 
-- [ ] **Step 7: Run the full repository verification sequence**
+- [x] **Step 7: Run the full repository verification sequence**
 
 Run each command and require success:
 
@@ -130,7 +130,7 @@ make cross
 
 Expected: `gofmt -l .` prints nothing; every remaining command exits 0.
 
-- [ ] **Step 8: Commit the implementation**
+- [x] **Step 8: Commit the implementation**
 
 ```bash
 git add test/e2e/deploy_test.go docs/superpowers/plans/2026-07-19-issue-123-e2e-assertions.md
