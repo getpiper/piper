@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -112,15 +113,7 @@ func TestEndToEndDeploy(t *testing.T) {
 	if err := c.StopApp("blog"); err != nil {
 		t.Fatalf("StopApp: %v", err)
 	}
-	afterStop, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("fetch after stop: %v", err)
-	}
-	stopped, _ := io.ReadAll(afterStop.Body)
-	afterStop.Body.Close()
-	if string(stopped) == body {
-		t.Fatalf("hostname still serves the app after stop: %q", stopped)
-	}
+	assertRouteGone(t, req)
 	apps, err := c.ListApps()
 	if err != nil {
 		t.Fatalf("ListApps after stop: %v", err)
@@ -139,6 +132,28 @@ func TestEndToEndDeploy(t *testing.T) {
 	}
 	if len(apps) != 0 {
 		t.Fatalf("apps after delete = %+v, want none", apps)
+	}
+	_, err = c.App("blog")
+	var statusErr *client.StatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != http.StatusNotFound {
+		t.Fatalf("App after delete err = %v, want HTTP 404 StatusError", err)
+	}
+	assertRouteGone(t, req)
+}
+
+func assertRouteGone(t *testing.T, req *http.Request) {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("fetch route after teardown: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read route response after teardown: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || len(body) != 0 {
+		t.Fatalf("route after teardown = status %d, body %q; want 200 with empty body", resp.StatusCode, body)
 	}
 }
 

@@ -22,3 +22,4 @@ deploy/compose/piperd.env
 
 # superpowers brainstorming sessions
 .superpowers/
+.worktrees/
