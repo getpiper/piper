@@ -191,6 +191,11 @@ func (c *Client) App(name string) (api.App, error) {
 	return a, nil
 }
 
+// followMaxConsecutiveErrors is how many poll cycles in a row may fail before
+// FollowDeploy gives up: a follow runs for minutes against a busy box, and one
+// transient failure must not end the watch while the build runs on (#282).
+const followMaxConsecutiveErrors = 5
+
 // FollowDeploy polls until the deployment finishes, writing new log output as
 // it appears. If the stored tail rotates after reaching its cap, it prints the
 // current snapshot again. It stops when ctx is cancelled or times out, returning
@@ -199,32 +204,40 @@ func (c *Client) App(name string) (api.App, error) {
 func (c *Client) FollowDeploy(ctx context.Context, name, id string, progress io.Writer) (store.Deployment, error) {
 	lastLogs := ""
 	var last store.Deployment
+	failures := 0
 	for {
 		logs, err := c.DeploymentLogs(name, id)
-		if err != nil {
-			return store.Deployment{}, err
-		}
-		if strings.HasPrefix(logs, lastLogs) {
-			_, _ = io.WriteString(progress, logs[len(lastLogs):])
-		} else {
-			// Tail-cap dropped the front (log exceeded the cap): reprint whole.
-			_, _ = io.WriteString(progress, logs)
-		}
-		lastLogs = logs
+		if err == nil {
+			if strings.HasPrefix(logs, lastLogs) {
+				_, _ = io.WriteString(progress, logs[len(lastLogs):])
+			} else {
+				// Tail-cap dropped the front (log exceeded the cap): reprint whole.
+				_, _ = io.WriteString(progress, logs)
+			}
+			lastLogs = logs
 
-		deps, err := c.Deployments(name)
-		if err != nil {
-			return store.Deployment{}, err
+			var deps []store.Deployment
+			deps, err = c.Deployments(name)
+			if err == nil {
+				for _, d := range deps {
+					if d.ID != id {
+						continue
+					}
+					last = d
+					switch d.Status {
+					case "running", "failed", "stopped":
+						return d, nil
+					}
+				}
+			}
 		}
-		for _, d := range deps {
-			if d.ID != id {
-				continue
+		if err != nil {
+			failures++
+			if failures >= followMaxConsecutiveErrors {
+				return store.Deployment{}, err
 			}
-			last = d
-			switch d.Status {
-			case "running", "failed", "stopped":
-				return d, nil
-			}
+		} else {
+			failures = 0
 		}
 
 		select {

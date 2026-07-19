@@ -323,6 +323,56 @@ func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
 	}
 }
 
+func TestFollowDeploySurvivesTransientPollErrors(t *testing.T) {
+	var polls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/apps/web/deployments/dep1/logs":
+			n := atomic.AddInt32(&polls, 1)
+			if n == 2 || n == 3 {
+				// A momentarily unhappy box (e.g. store busy mid-build) must
+				// not end a minutes-long follow.
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			io.WriteString(w, "line1\n")
+		case "/v1/apps/web/deployments":
+			status := "building"
+			if atomic.LoadInt32(&polls) >= 4 {
+				status = "running"
+			}
+			writeJSONTest(w, []store.Deployment{{ID: "dep1", App: "web", Status: status}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	c.pollInterval = time.Millisecond
+	var progress bytes.Buffer
+	dep, err := c.FollowDeploy(context.Background(), "web", "dep1", &progress)
+	if err != nil {
+		t.Fatalf("FollowDeploy: %v", err)
+	}
+	if dep.Status != "running" {
+		t.Fatalf("status = %q, want running", dep.Status)
+	}
+}
+
+func TestFollowDeployGivesUpAfterPersistentErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	c.pollInterval = time.Millisecond
+	if _, err := c.FollowDeploy(context.Background(), "web", "dep1", io.Discard); err == nil {
+		t.Fatal("FollowDeploy = nil error, want failure after persistent errors")
+	}
+}
+
 func TestFollowDeployReprintsRotatedTail(t *testing.T) {
 	const first = "[log truncated]\nold tail\n"
 	const second = "[log truncated]\nnew tail\n"
