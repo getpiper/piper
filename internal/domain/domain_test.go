@@ -911,6 +911,71 @@ func TestOnRelayConnectSkipsActive(t *testing.T) {
 	}
 }
 
+// A reconnect kick racing a Set-replace must not strand the replacement
+// domain: the kick reads the config and bumps the generation without
+// coordinating with Set, so if it reads old domain A, a concurrent Set can
+// store B and start B's generation, and the kick's bump can then land on top —
+// B's loop exits as superseded, the kick's loop exits on the domain mismatch,
+// and B is left in "issuing" until the next reconnect. The genBumpHook seam
+// parks the kick between its (stale) read and its bump so the replace lands
+// deterministically in between; the assertion is the observable end state —
+// once the tunnel comes up, a live current-generation loop must drive B to
+// active, which no surviving loop can do after the buggy interleaving.
+func TestOnRelayConnectDoesNotStrandReplacement(t *testing.T) {
+	iss := &fakeIssuer{}
+	m, st, _, relay, _ := newTestManager(t, iss)
+	// Every relay claim waits on the tunnel, so no issuance can complete on
+	// its own; loops park in the not-connected wait and retry.
+	relay.failAdd = agent.ErrNotConnected
+	if err := st.SetDomainConfig("a.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Park the first generation bump after arming (the kick's) until the test
+	// releases it; later bumps (the replace's) pass straight through.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var hooked int32
+	m.genBumpHook = func() {
+		if atomic.CompareAndSwapInt32(&hooked, 0, 1) {
+			close(entered)
+			<-release
+		}
+	}
+
+	go m.OnRelayConnect()
+	<-entered // the kick has read a.dev and is parked just before its bump
+
+	var setErr error
+	setDone := make(chan struct{})
+	go func() {
+		_, setErr = m.Set("b.dev", "cloudflare", "tok")
+		close(setDone)
+	}()
+	// Without the fix the replace completes while the kick is parked; with it
+	// Set queues behind the kick's issueMu critical section until release.
+	select {
+	case <-setDone:
+	case <-time.After(2 * time.Second):
+	}
+	close(release)
+	<-setDone
+	if setErr != nil {
+		t.Fatalf("replace Set: %v", setErr)
+	}
+
+	// The tunnel comes up: a live loop for b.dev must now drive it to active.
+	// The buggy interleaving superseded B's loop and the kick's loop exited on
+	// the domain mismatch, so nothing ever retries B — it strands in issuing.
+	relay.mu.Lock()
+	relay.failAdd = nil
+	relay.mu.Unlock()
+	dc := waitStatus(t, st, StatusActive)
+	if dc.Domain != "b.dev" {
+		t.Fatalf("active domain = %q, want b.dev", dc.Domain)
+	}
+}
+
 // Repeated Status polls within the TTL must not re-run the live DNS lookups;
 // after the TTL they must. #114.
 func TestStatusDNSOKCachedWithinTTL(t *testing.T) {

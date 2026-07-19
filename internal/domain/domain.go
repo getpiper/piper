@@ -150,6 +150,10 @@ type Manager struct {
 	dnsWait    time.Duration // pending poll while waiting for the user's DNS
 	resolve    func(ctx context.Context, host string) ([]net.IP, error)
 	now        func() time.Time
+	// genBumpHook runs at the top of nextGenFor, before the bump: a test-only
+	// seam for scripting interleavings that must pause a caller between its
+	// config read and its generation bump.
+	genBumpHook func()
 }
 
 // dnsCacheEntry memoizes one host's dns-points-at-relay result so a polling
@@ -194,6 +198,9 @@ func New(o Options) *Manager {
 // with this value drives issuance until a later start for the same key
 // supersedes it.
 func (m *Manager) nextGenFor(key string) int {
+	if m.genBumpHook != nil {
+		m.genBumpHook()
+	}
 	m.genMu.Lock()
 	defer m.genMu.Unlock()
 	m.gens[key]++
