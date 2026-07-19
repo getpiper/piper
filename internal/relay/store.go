@@ -183,7 +183,7 @@ func dnsOverlap(a, b string) bool {
 // domainClaimable rejects a custom domain that would collide with the relay's
 // own namespace: the apex (which also covers api.<apex> and every assigned
 // hostname under it) or ANY enrolled agent's base domain, in either suffix
-// direction. The set-domain op is authenticated but its Domain value is
+// direction. Domain control ops are authenticated but their Domain value is
 // attacker-controlled on a compromised box; without this check an agent could
 // splice another agent's SNI — or the relay control plane — to itself.
 func (s *Store) domainClaimable(domain string) error {
