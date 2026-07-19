@@ -234,64 +234,40 @@ func TestControlProvisionRejectsEmptyToken(t *testing.T) {
 	}
 }
 
-func TestSetDomainControlOp(t *testing.T) {
+func TestSetDomainControlOpRemoved(t *testing.T) {
 	sess, _, _, base, st := startTestRelay(t, nil, nil)
 
-	cs, err := sess.OpenKind(tunnel.KindControl)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "set-domain", Domain: "shop.dev"}); err != nil {
-		t.Fatal(err)
-	}
-	var resp tunnel.ControlResponse
-	if err := tunnel.ReadMsg(cs, &resp); err != nil {
-		t.Fatal(err)
-	}
-	cs.Close()
-	if resp.Error != "" {
-		t.Fatalf("set-domain error: %s", resp.Error)
-	}
-	if got, _ := st.CustomDomains(base); len(got) != 1 || got[0] != "shop.dev" {
-		t.Fatalf("stored custom domains = %v", got)
-	}
-}
-
-// A hostile set-domain over the tunnel must be rejected with the error
-// surfaced in ControlResponse.Error — claiming another agent's base domain
-// (or the apex) would splice that victim's traffic to the attacker's box.
-func TestSetDomainControlOpRejectsHijack(t *testing.T) {
-	sess, _, _, base, st := startTestRelay(t, nil, nil)
-	if _, err := st.Enroll("victim", "victim.example.com"); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, d := range []string{
-		"victim.example.com",      // another agent's base domain
-		"blog.victim.example.com", // subdomain of it
-		"public.getpiper.co",      // the relay apex
-		"api.public.getpiper.co",  // the relay's own control host
-		base,                      // the requester's own base domain
-		"Bad_Domain",              // malformed
-	} {
+	control := func(op, domain string) tunnel.ControlResponse {
+		t.Helper()
 		cs, err := sess.OpenKind(tunnel.KindControl)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "set-domain", Domain: d}); err != nil {
+		defer cs.Close()
+		if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: op, Domain: domain}); err != nil {
 			t.Fatal(err)
 		}
 		var resp tunnel.ControlResponse
 		if err := tunnel.ReadMsg(cs, &resp); err != nil {
 			t.Fatal(err)
 		}
-		cs.Close()
-		if resp.Error == "" {
-			t.Errorf("set-domain %q accepted, want rejection", d)
+		return resp
+	}
+	for _, domain := range []string{"blog.dev", "shop.dev"} {
+		if resp := control("add-domain", domain); resp.Error != "" {
+			t.Fatalf("add-domain %q error: %s", domain, resp.Error)
+		}
+		if resp := control("domain-active", domain); resp.Error != "" {
+			t.Fatalf("domain-active %q error: %s", domain, resp.Error)
 		}
 	}
-	if got, _ := st.CustomDomains(base); len(got) != 0 {
-		t.Fatalf("custom domains = %v after rejected claims, want none", got)
+
+	resp := control("set-domain", "replace.dev")
+	if resp.Error != "unknown op" {
+		t.Fatalf("set-domain error = %q, want unknown op", resp.Error)
+	}
+	if got, _ := st.CustomDomains(base); len(got) != 2 || got[0] != "blog.dev" || got[1] != "shop.dev" {
+		t.Fatalf("stored custom domains = %v, want [blog.dev shop.dev]", got)
 	}
 }
 

@@ -42,7 +42,7 @@ func TestAddCustomDomainClaimAndList(t *testing.T) {
 	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
 		t.Fatalf("rival claim: err = %v, want ErrDomainTaken", err)
 	}
-	// Validation and identity errors mirror SetCustomDomain's.
+	// Validation and identity errors are enforced on every claim.
 	if err := st.AddCustomDomain("alice.example.com", "Bad_Domain"); !errors.Is(err, ErrInvalidDomain) {
 		t.Fatalf("malformed: %v", err)
 	}
@@ -51,6 +51,33 @@ func TestAddCustomDomainClaimAndList(t *testing.T) {
 	}
 	if err := st.AddCustomDomain("nobody.example.com", "x.dev"); !errors.Is(err, ErrBadToken) {
 		t.Fatalf("unknown agent: %v", err)
+	}
+}
+
+func TestAddCustomDomainRejectsDisabledAccount(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	acc, err := st.UpsertAccount("sub-1", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, err := st.EnrollForAccount(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddCustomDomain(en.BaseDomain, "shop.dev"); err != nil {
+		t.Fatalf("healthy account rejected: %v", err)
+	}
+	if err := st.DisableAccount(acc.Username); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddCustomDomain(en.BaseDomain, "other.dev"); !errors.Is(err, ErrBadCredential) {
+		t.Fatalf("disabled account: err = %v, want ErrBadCredential", err)
+	}
+	if got, err := st.CustomDomains(en.BaseDomain); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 1 || got[0] != "shop.dev" {
+		t.Fatalf("domains after rejected claim = %v, want [shop.dev]", got)
 	}
 }
 

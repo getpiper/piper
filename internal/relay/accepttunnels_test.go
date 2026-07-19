@@ -50,14 +50,14 @@ func TestAcceptTunnelsRebindsCustomDomainOnReconnect(t *testing.T) {
 		return sess
 	}
 
-	setDomain := func(sess *tunnel.Session, domain string) {
+	controlDomain := func(sess *tunnel.Session, op, domain string) {
 		t.Helper()
 		cs, err := sess.OpenKind(tunnel.KindControl)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer cs.Close()
-		if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "set-domain", Domain: domain}); err != nil {
+		if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: op, Domain: domain}); err != nil {
 			t.Fatal(err)
 		}
 		var resp tunnel.ControlResponse
@@ -65,7 +65,7 @@ func TestAcceptTunnelsRebindsCustomDomainOnReconnect(t *testing.T) {
 			t.Fatal(err)
 		}
 		if resp.Error != "" {
-			t.Fatalf("set-domain %q error: %s", domain, resp.Error)
+			t.Fatalf("%s %q error: %s", op, domain, resp.Error)
 		}
 	}
 
@@ -82,7 +82,8 @@ func TestAcceptTunnelsRebindsCustomDomainOnReconnect(t *testing.T) {
 	}
 
 	sess1 := connect()
-	setDomain(sess1, customDomain)
+	controlDomain(sess1, "add-domain", customDomain)
+	controlDomain(sess1, "domain-active", customDomain)
 	waitFor("custom domain on first session", func() bool {
 		s, ok := router.Lookup(customDomain)
 		return ok && s.BaseDomain == en.BaseDomain
