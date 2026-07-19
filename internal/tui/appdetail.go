@@ -35,7 +35,19 @@ func (v appDetailView) Init() tea.Cmd { return nil }
 func (v appDetailView) title() string { return v.name }
 
 func (v appDetailView) footer() string {
-	return "d deploy · s stop · x delete · l link · ↵ logs · r refresh · esc back · ? help"
+	if _, ok := v.selectedDomain(); ok {
+		return "a add domain · x remove · ↵ details · d deploy · r refresh · esc back · ? help"
+	}
+	return "d deploy · s stop · x delete · l link · a domain · ↵ logs · r refresh · esc back · ? help"
+}
+
+// selectedDomain returns the domain row under the cursor, if the cursor is in
+// the domains section (past the deployments).
+func (v appDetailView) selectedDomain() (domain.AppDomainStatus, bool) {
+	if i := v.cursor - len(v.deps); i >= 0 && i < len(v.domains) {
+		return v.domains[i], true
+	}
+	return domain.AppDomainStatus{}, false
 }
 
 func (v appDetailView) refresh(c API) tea.Cmd {
@@ -73,7 +85,7 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.cursor--
 			}
 		case "down", "j":
-			if v.cursor < len(v.deps)-1 {
+			if v.cursor < len(v.deps)+len(v.domains)-1 {
 				v.cursor++
 			}
 		case "enter":
@@ -89,6 +101,10 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			return v, func() tea.Msg { return pushMsg{newStopConfirm(v.name)} }
 		case "x":
+			if d, ok := v.selectedDomain(); ok {
+				app := v.name
+				return v, func() tea.Msg { return pushMsg{newRemoveDomainConfirm(app, d.Domain)} }
+			}
 			return v, func() tea.Msg { return pushMsg{newDeleteConfirm(v.name)} }
 		case "l":
 			return v, func() tea.Msg { return pushMsg{newLinkForm(v.name)} }

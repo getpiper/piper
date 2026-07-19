@@ -47,6 +47,15 @@ func newRemoveBoxConfirm(name string) confirmView {
 	}
 }
 
+func newRemoveDomainConfirm(app, dom string) confirmView {
+	return confirmView{
+		name:   dom,
+		prompt: fmt.Sprintf("Remove %s from %s? Its certificate and route are torn down.", dom, app),
+		mode:   confirmYesNo,
+		intent: func(d string) tea.Msg { return removeDomainMsg{app: app, domain: d} },
+	}
+}
+
 func newDeleteConfirm(name string) confirmView {
 	in := textinput.New()
 	in.Placeholder = name

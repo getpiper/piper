@@ -199,6 +199,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case linkAppMsg:
 		name, repo, branch, c := msg.name, msg.repo, msg.branch, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch), popLevels: 1} }
+	case removeDomainMsg:
+		app, dom, c := msg.app, msg.domain, m.client
+		return m, func() tea.Msg { return actionResultMsg{err: c.RemoveAppDomain(app, dom), popLevels: 1} }
 	case githubStartMsg:
 		org, c := msg.org, m.client
 		ctx, cancel := context.WithCancel(context.Background())

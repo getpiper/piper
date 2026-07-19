@@ -50,6 +50,18 @@ func TestDeleteConfirmGatesOnTypedName(t *testing.T) {
 	}
 }
 
+func TestRemoveDomainConfirmYesEmitsRemove(t *testing.T) {
+	v := newRemoveDomainConfirm("blog", "blog.example.com")
+	if !strings.Contains(v.View(), "Remove blog.example.com") {
+		t.Fatalf("prompt missing:\n%s", v.View())
+	}
+	_, cmd := v.Update(keyRunes('y'))
+	rm, ok := cmd().(removeDomainMsg)
+	if !ok || rm.app != "blog" || rm.domain != "blog.example.com" {
+		t.Fatalf("want removeDomainMsg{blog, blog.example.com}, got %#v", cmd())
+	}
+}
+
 // typeInto2 feeds each rune of s into a confirmView's text input.
 func typeInto2(v confirmView, s string) confirmView {
 	for _, r := range s {

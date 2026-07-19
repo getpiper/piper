@@ -320,3 +320,17 @@ func TestModalViewsRenderNoFooterLegend(t *testing.T) {
 		t.Fatalf("modal must have no footer, got %q", got)
 	}
 }
+
+func TestRootRemoveDomainCallsClientAndPops(t *testing.T) {
+	rec := &apiCalls{}
+	m := NewModel("b", "a", false, fakeAPI{rec: rec})
+	m.stack = append(m.stack, newAppDetailView("blog", false), newRemoveDomainConfirm("blog", "blog.example.com"))
+	_, cmd := m.Update(removeDomainMsg{app: "blog", domain: "blog.example.com"})
+	res, ok := cmd().(actionResultMsg)
+	if !ok || res.err != nil || res.popLevels != 1 {
+		t.Fatalf("want actionResultMsg{nil, 1}, got %#v", cmd())
+	}
+	if rec.removedApp != "blog" || rec.removedDomain != "blog.example.com" {
+		t.Fatalf("client not called with app+domain: %#v", rec)
+	}
+}

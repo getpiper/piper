@@ -72,6 +72,52 @@ func TestAppDetailDomainsRenderWithoutDeployments(t *testing.T) {
 	}
 }
 
+func TestAppDetailCursorSpansDomainsAndXRemoves(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	// two deployments first: j, j lands on the first domain row
+	m, _ = m.Update(keyRunes('j'))
+	m, _ = m.Update(keyRunes('j'))
+	_, cmd := m.Update(keyRunes('x'))
+	if cmd == nil {
+		t.Fatal("x on a domain row should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if !strings.Contains(pm.view.View(), "Remove blog.example.com") {
+		t.Fatalf("want remove-domain confirm, got:\n%s", pm.view.View())
+	}
+}
+
+func TestAppDetailXOnDeploymentStillDeletesApp(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	_, cmd := m.Update(keyRunes('x'))
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if !strings.Contains(pm.view.View(), "Delete blog") {
+		t.Fatalf("want delete-app confirm, got:\n%s", pm.view.View())
+	}
+}
+
+func TestAppDetailCursorStopsAtLastDomain(t *testing.T) {
+	v, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	for range 10 {
+		v, _ = v.Update(keyRunes('j'))
+	}
+	if c := v.(appDetailView).cursor; c != 3 { // 2 deps + 2 domains - 1
+		t.Fatalf("cursor overran: %d", c)
+	}
+}
+
 func TestAppDetailRefreshIncludesDomains(t *testing.T) {
 	msg := newAppDetailView("blog", false).refresh(fakeAPI{domains: fixtureDomains()})()
 	loaded, ok := msg.(appDetailLoadedMsg)

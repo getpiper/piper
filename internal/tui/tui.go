@@ -113,6 +113,10 @@ type (
 	// thread and reports via actionResultMsg (pop back to app detail on success).
 	linkAppMsg struct{ name, repo, branch string }
 
+	// removeDomainMsg is the remove-domain confirm's intent; the root runs
+	// RemoveAppDomain and pops back to app detail via actionResultMsg.
+	removeDomainMsg struct{ app, domain string }
+
 	// actionResultMsg is a mutating action's outcome. On success the root pops
 	// popLevels views and refreshes; on error it banners the top overlay.
 	actionResultMsg struct {
