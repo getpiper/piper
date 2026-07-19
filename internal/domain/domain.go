@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/getpiper/piper/internal/agent"
 	"github.com/getpiper/piper/internal/caddy"
 	"github.com/getpiper/piper/internal/certs"
 	"github.com/getpiper/piper/internal/store"
@@ -149,6 +150,10 @@ type Manager struct {
 	dnsWait    time.Duration // pending poll while waiting for the user's DNS
 	resolve    func(ctx context.Context, host string) ([]net.IP, error)
 	now        func() time.Time
+	// genBumpHook runs at the top of nextGenFor, before the bump: a test-only
+	// seam for scripting interleavings that must pause a caller between its
+	// config read and its generation bump.
+	genBumpHook func()
 }
 
 // dnsCacheEntry memoizes one host's dns-points-at-relay result so a polling
@@ -193,6 +198,9 @@ func New(o Options) *Manager {
 // with this value drives issuance until a later start for the same key
 // supersedes it.
 func (m *Manager) nextGenFor(key string) int {
+	if m.genBumpHook != nil {
+		m.genBumpHook()
+	}
 	m.genMu.Lock()
 	defer m.genMu.Unlock()
 	m.gens[key]++
@@ -337,6 +345,12 @@ func (m *Manager) issueLoop(domain string, gen int) {
 			return
 		} else if errors.Is(err, errStaleConfig) {
 			return // replaced or removed; the successor owns the state now
+		} else if errors.Is(err, agent.ErrNotConnected) {
+			// The tunnel is down — a wait, not an issuance failure: stay
+			// "issuing" so a restart never reports "failed" just because the
+			// relay wasn't connected yet (#166). The OnConnect kick drives the
+			// immediate retry; the backoff below is only the fallback.
+			_ = m.st.UpdateDomainStatus(dc.Domain, StatusIssuing, "waiting for relay connection", time.Time{})
 		} else {
 			_ = m.st.UpdateDomainStatus(dc.Domain, StatusFailed, err.Error(), time.Time{})
 		}
