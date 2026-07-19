@@ -106,6 +106,22 @@ func TestAppDetailXOnDeploymentStillDeletesApp(t *testing.T) {
 	}
 }
 
+func TestAppDetailEnterOnDomainPushesDetail(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	m, _ = m.Update(keyRunes('j'))
+	m, _ = m.Update(keyRunes('j'))
+	_, cmd := m.Update(keyEnter())
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "domain" {
+		t.Fatalf("want domain detail pushed, got title %q", pm.view.title())
+	}
+}
+
 func TestAppDetailCursorStopsAtLastDomain(t *testing.T) {
 	v, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
 		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),

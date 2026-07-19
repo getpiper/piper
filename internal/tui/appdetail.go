@@ -89,7 +89,11 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.cursor++
 			}
 		case "enter":
-			if len(v.deps) > 0 {
+			if d, ok := v.selectedDomain(); ok {
+				app := v.name
+				return v, func() tea.Msg { return pushMsg{newDomainDetailView(app, d)} }
+			}
+			if len(v.deps) > 0 && v.cursor < len(v.deps) {
 				d := v.deps[v.cursor]
 				return v, func() tea.Msg { return pushMsg{newLogsView(v.name, d.ID, d.Status)} }
 			}

@@ -61,6 +61,14 @@ type (
 		status string
 	}
 
+	// domainDetailLoadedMsg is the domain detail view's poll result. found is
+	// false when the domain no longer exists; the view keeps its last-known
+	// state (the box answered, so it still counts as reachable).
+	domainDetailLoadedMsg struct {
+		st    domain.AppDomainStatus
+		found bool
+	}
+
 	// boxesLoadedMsg carries the client config the boxes view renders. It is a
 	// local-config load, not a piperd poll, so it does not implement pollResult
 	// (the status bar keeps its last-known reachability while browsing boxes).
@@ -163,7 +171,8 @@ type (
 // poll, so the root updates reachability without knowing the view type.
 type pollResult interface{ reachable() bool }
 
-func (appsLoadedMsg) reachable() bool      { return true }
-func (errMsg) reachable() bool             { return false }
-func (appDetailLoadedMsg) reachable() bool { return true }
-func (logsLoadedMsg) reachable() bool      { return true }
+func (appsLoadedMsg) reachable() bool         { return true }
+func (errMsg) reachable() bool                { return false }
+func (appDetailLoadedMsg) reachable() bool    { return true }
+func (logsLoadedMsg) reachable() bool         { return true }
+func (domainDetailLoadedMsg) reachable() bool { return true }
