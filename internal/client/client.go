@@ -17,6 +17,8 @@ import (
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/moby/patternmatcher"
+	"github.com/moby/patternmatcher/ignorefile"
 )
 
 type Client struct {
@@ -381,19 +383,48 @@ func responseError(action string, resp *http.Response) error {
 	return &StatusError{Action: action, Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(body))}
 }
 
-// TarDir writes the regular files under dir to w using relative, slash-separated names.
+// TarDir writes the regular files under dir to w using relative, slash-separated
+// names. It honors dir's .dockerignore with docker's semantics — docker build
+// would drop the matched files from the context anyway; skipping them here keeps
+// the bytes off the wire. Dockerfile and .dockerignore always ship, as docker's
+// own CLI does.
 func TarDir(dir string, w io.Writer) error {
+	pm, err := loadDockerignore(dir)
+	if err != nil {
+		return err
+	}
 	tw := tar.NewWriter(w)
 	walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
+		}
+		if info.IsDir() {
+			// Skip a matched subtree wholesale — unless a ! pattern exists,
+			// which could re-include something under it.
+			if pm != nil && rel != "." && !pm.Exclusions() {
+				if ignored, err := pm.MatchesOrParentMatches(rel); err != nil {
+					return err
+				} else if ignored {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		if pm != nil && rel != "Dockerfile" && rel != ".dockerignore" {
+			ignored, err := pm.MatchesOrParentMatches(rel)
+			if err != nil {
+				return err
+			}
+			if ignored {
+				return nil
+			}
 		}
 		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
@@ -419,4 +450,22 @@ func TarDir(dir string, w io.Writer) error {
 		return walkErr
 	}
 	return closeErr
+}
+
+// loadDockerignore parses dir's .dockerignore into a matcher, or nil when the
+// file is absent.
+func loadDockerignore(dir string) (*patternmatcher.PatternMatcher, error) {
+	f, err := os.Open(filepath.Join(dir, ".dockerignore"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	patterns, err := ignorefile.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	return patternmatcher.New(patterns)
 }
