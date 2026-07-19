@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -22,6 +23,11 @@ type apiCalls struct {
 	linkName   string
 	linkRepo   string
 	linkBranch string
+
+	addedApp      string
+	addedDomain   string
+	removedApp    string
+	removedDomain string
 }
 
 type fakeAPI struct {
@@ -42,6 +48,11 @@ type fakeAPI struct {
 	manifest    string
 	manifestErr error
 	exchangeErr error
+
+	domains   []domain.AppDomainStatus
+	addSt     domain.AppDomainStatus
+	addErr    error
+	removeErr error
 }
 
 func (f fakeAPI) ListApps() ([]api.App, error)                   { return f.apps, f.err }
@@ -86,6 +97,22 @@ func (f fakeAPI) LinkApp(name, repo, branch string) error {
 
 func (f fakeAPI) Manifest(string) (string, error) { return f.manifest, f.manifestErr }
 func (f fakeAPI) ExchangeGitHub(string) error     { return f.exchangeErr }
+
+func (f fakeAPI) AppDomains(string) ([]domain.AppDomainStatus, error) { return f.domains, f.err }
+
+func (f fakeAPI) AddAppDomain(app, dom string) (domain.AppDomainStatus, error) {
+	if f.rec != nil {
+		f.rec.addedApp, f.rec.addedDomain = app, dom
+	}
+	return f.addSt, f.addErr
+}
+
+func (f fakeAPI) RemoveAppDomain(app, dom string) error {
+	if f.rec != nil {
+		f.rec.removedApp, f.rec.removedDomain = app, dom
+	}
+	return f.removeErr
+}
 
 func keyRunes(r rune) tea.KeyMsg { return tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune{r}}) }
 func keyEnter() tea.KeyMsg       { return tea.KeyMsg(tea.Key{Type: tea.KeyEnter}) }

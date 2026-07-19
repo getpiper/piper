@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -15,13 +16,14 @@ import (
 // It re-polls every tick while on top, so a deploy started elsewhere surfaces
 // live. Read-only; actions arrive in phase 4.
 type appDetailView struct {
-	name   string
-	remote bool
-	app    api.App
-	deps   []store.Deployment
-	cursor int
-	loaded bool
-	err    error
+	name    string
+	remote  bool
+	app     api.App
+	deps    []store.Deployment
+	domains []domain.AppDomainStatus
+	cursor  int
+	loaded  bool
+	err     error
 }
 
 func newAppDetailView(name string, remote bool) appDetailView {
@@ -47,16 +49,20 @@ func (v appDetailView) refresh(c API) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return appDetailLoadedMsg{app: app, deps: deps}
+		domains, err := c.AppDomains(name)
+		if err != nil {
+			return errMsg{err}
+		}
+		return appDetailLoadedMsg{app: app, deps: deps, domains: domains}
 	}
 }
 
 func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case appDetailLoadedMsg:
-		v.app, v.deps, v.loaded, v.err = msg.app, msg.deps, true, nil
-		if v.cursor >= len(v.deps) {
-			v.cursor = max(0, len(v.deps)-1)
+		v.app, v.deps, v.domains, v.loaded, v.err = msg.app, msg.deps, msg.domains, true, nil
+		if total := len(v.deps) + len(v.domains); v.cursor >= total {
+			v.cursor = max(0, total-1)
 		}
 	case errMsg:
 		v.err = msg.err
@@ -106,21 +112,40 @@ func (v appDetailView) View() string {
 		return b.String()
 	}
 	if len(v.deps) == 0 {
-		b.WriteString(" no deployments yet")
-		return b.String()
+		b.WriteString(" no deployments yet\n")
+	} else {
+		fmt.Fprintf(&b, "  %-14s %-12s %-10s %s\n", "DEPLOYMENT", "STATUS", "CREATED", "PR")
+		for i, d := range v.deps {
+			cursor := "  "
+			if i == v.cursor {
+				cursor = "▸ "
+			}
+			status := strings.TrimSpace(statusIcon(d.Status) + " " + d.Status)
+			pr := ""
+			if d.PR > 0 {
+				pr = fmt.Sprintf("#%d", d.PR)
+			}
+			fmt.Fprintf(&b, "%s%-14s %-12s %-10s %s\n", cursor, shortID(d.ID), status, relTime(d.CreatedAt), pr)
+		}
 	}
-	fmt.Fprintf(&b, "  %-14s %-12s %-10s %s\n", "DEPLOYMENT", "STATUS", "CREATED", "PR")
-	for i, d := range v.deps {
-		cursor := "  "
-		if i == v.cursor {
-			cursor = "▸ "
+	if len(v.domains) > 0 {
+		fmt.Fprintf(&b, "\n  %-24s %-12s %-13s %s\n", "DOMAIN", "STATUS", "CERT EXPIRES", "DNS")
+		for i, d := range v.domains {
+			cursor := "  "
+			if v.cursor == len(v.deps)+i {
+				cursor = "▸ "
+			}
+			expires := "-"
+			if d.CertNotAfter != nil {
+				expires = d.CertNotAfter.Format("2006-01-02")
+			}
+			dns := "no"
+			if d.DNSOK {
+				dns = "ok"
+			}
+			status := strings.TrimSpace(domainStatusIcon(d.Status) + " " + d.Status)
+			fmt.Fprintf(&b, "%s%-24s %-12s %-13s %s\n", cursor, d.Domain, status, expires, dns)
 		}
-		status := strings.TrimSpace(statusIcon(d.Status) + " " + d.Status)
-		pr := ""
-		if d.PR > 0 {
-			pr = fmt.Sprintf("#%d", d.PR)
-		}
-		fmt.Fprintf(&b, "%s%-14s %-12s %-10s %s\n", cursor, shortID(d.ID), status, relTime(d.CreatedAt), pr)
 	}
 	return b.String()
 }

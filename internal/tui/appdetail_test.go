@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -33,6 +34,52 @@ func TestAppDetailRendersHeaderAndDeployments(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("view missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func fixtureDomains() []domain.AppDomainStatus {
+	exp := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	return []domain.AppDomainStatus{
+		{Domain: "blog.example.com", App: "blog", Status: "pending",
+			DNSRecords: []domain.DNSRecord{{Type: "CNAME", Name: "blog.example.com", Value: "relay.getpiper.dev"}}},
+		{Domain: "www.example.com", App: "blog", Status: "active", CertNotAfter: &exp, DNSOK: true},
+	}
+}
+
+func TestAppDetailRendersDomainsSection(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	out := m.View()
+	for _, want := range []string{
+		"DOMAIN", "CERT EXPIRES", "DNS",
+		"blog.example.com", "◌ pending",
+		"www.example.com", "● active", "2026-10-01", "ok",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestAppDetailDomainsRenderWithoutDeployments(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, domains: fixtureDomains(),
+	})
+	out := m.View()
+	if !strings.Contains(out, "no deployments yet") || !strings.Contains(out, "blog.example.com") {
+		t.Fatalf("want empty deployments plus domains table:\n%s", out)
+	}
+}
+
+func TestAppDetailRefreshIncludesDomains(t *testing.T) {
+	msg := newAppDetailView("blog", false).refresh(fakeAPI{domains: fixtureDomains()})()
+	loaded, ok := msg.(appDetailLoadedMsg)
+	if !ok {
+		t.Fatalf("want appDetailLoadedMsg, got %T", msg)
+	}
+	if len(loaded.domains) != 2 {
+		t.Fatalf("want 2 domains, got %d", len(loaded.domains))
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -22,6 +23,9 @@ type API interface {
 	StopApp(name string) error
 	DeleteApp(name string) error
 	LinkApp(name, repo, branch string) error
+	AppDomains(app string) ([]domain.AppDomainStatus, error)
+	AddAppDomain(app, dom string) (domain.AppDomainStatus, error)
+	RemoveAppDomain(app, dom string) error
 	Manifest(redirectURL string) (string, error)
 	ExchangeGitHub(code string) error
 }
@@ -48,8 +52,9 @@ type (
 	tickMsg            struct{}
 	pushMsg            struct{ view view }
 	appDetailLoadedMsg struct {
-		app  api.App
-		deps []store.Deployment
+		app     api.App
+		deps    []store.Deployment
+		domains []domain.AppDomainStatus
 	}
 	logsLoadedMsg struct {
 		logs   string
