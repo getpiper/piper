@@ -40,6 +40,37 @@ func (m *Manager) Resume() {
 	go m.issueLoop(dc.Domain, m.nextGen())
 }
 
+// OnRelayConnect re-kicks issuance for a non-active box-wide config when the
+// tunnel (re)connects, so a restart's not-connected wait retries on the
+// connect event instead of waiting out its backoff (#166); wired from the
+// tunnel client's OnConnect in cmd/piperd.
+func (m *Manager) OnRelayConnect() {
+	if m.envDomain != "" {
+		return
+	}
+	// issueMu spans the config read and the generation bump so a concurrent
+	// Set can't land its replace between them: a bump from a stale read (old
+	// domain) arriving after the replace's own bump would supersede the new
+	// domain's loop while this loop exits on the domain mismatch, stranding
+	// the replacement in "issuing" until the next reconnect. The lock is
+	// released before the goroutine starts — issueOnce re-acquires issueMu
+	// for the duration of the ACME run, so holding it here would only
+	// serialize the kick against in-flight issuance, never cover the run.
+	m.issueMu.Lock()
+	dc, err := m.st.GetDomainConfig()
+	if err != nil {
+		m.issueMu.Unlock()
+		return
+	}
+	if dc.Status == StatusActive {
+		m.issueMu.Unlock()
+		return // arm-only: the relay re-derives the mapping at session registration
+	}
+	gen := m.nextGen()
+	m.issueMu.Unlock()
+	go m.issueLoop(dc.Domain, gen)
+}
+
 // setEnvStatus records the env-managed (PIPER_BASE_DOMAIN) path's real state so
 // GET /v1/domain reflects issued/failed + expiry instead of a constant "active"
 // (#116). No-op fields are zeroed by the caller (e.g. notAfter on failure).
