@@ -64,6 +64,100 @@ func TestTarDirWritesRelativeFiles(t *testing.T) {
 	}
 }
 
+// tarEntries tars dir and returns the entry names it produced.
+func tarEntries(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := TarDir(dir, &buf); err != nil {
+		t.Fatalf("TarDir: %v", err)
+	}
+	got := make(map[string]bool)
+	tr := tar.NewReader(&buf)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		got[hdr.Name] = true
+	}
+	return got
+}
+
+func writeTree(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, contents := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+}
+
+func TestTarDirHonorsDockerignore(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"Dockerfile":                "FROM alpine\n",
+		".dockerignore":             "node_modules\n.git\n",
+		"app.js":                    "app\n",
+		"node_modules/pkg/index.js": "dep\n",
+		".git/HEAD":                 "ref\n",
+		"public/logo.svg":           "svg\n",
+	})
+
+	got := tarEntries(t, dir)
+	for _, want := range []string{"Dockerfile", ".dockerignore", "app.js", "public/logo.svg"} {
+		if !got[want] {
+			t.Errorf("missing %q; entries = %v", want, got)
+		}
+	}
+	for _, banned := range []string{"node_modules/pkg/index.js", ".git/HEAD"} {
+		if got[banned] {
+			t.Errorf("shipped ignored file %q", banned)
+		}
+	}
+}
+
+func TestTarDirDockerignoreNegation(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"Dockerfile":    "FROM alpine\n",
+		".dockerignore": "dist\n!dist/keep.txt\n",
+		"dist/keep.txt": "keep\n",
+		"dist/drop.txt": "drop\n",
+	})
+
+	got := tarEntries(t, dir)
+	if !got["dist/keep.txt"] {
+		t.Errorf("negated file dropped; entries = %v", got)
+	}
+	if got["dist/drop.txt"] {
+		t.Errorf("shipped ignored file dist/drop.txt")
+	}
+}
+
+func TestTarDirAlwaysShipsDockerfileAndIgnorefile(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"Dockerfile":    "FROM alpine\n",
+		".dockerignore": "*\n",
+		"app.js":        "app\n",
+	})
+
+	got := tarEntries(t, dir)
+	if !got["Dockerfile"] || !got[".dockerignore"] {
+		t.Errorf("Dockerfile/.dockerignore must always ship; entries = %v", got)
+	}
+	if got["app.js"] {
+		t.Errorf("shipped ignored file app.js")
+	}
+}
+
 func TestListApps(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/apps" {
@@ -164,6 +258,28 @@ func TestDeploy(t *testing.T) {
 		t.Fatalf("Deploy: %v", err)
 	}
 	if dep.ID != "dep1" || dep.Status != "building" {
+		t.Errorf("deployment = %+v", dep)
+	}
+}
+
+func TestDeployNotBoundByClientTimeout(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Outlive the client's overall timeout, like a big upload to a slow box.
+		time.Sleep(250 * time.Millisecond)
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
+	}))
+	defer srv.Close()
+
+	dep, err := New(srv.URL, "").WithTimeout(50*time.Millisecond).Deploy("blog", srcDir)
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if dep.ID != "dep1" {
 		t.Errorf("deployment = %+v", dep)
 	}
 }
