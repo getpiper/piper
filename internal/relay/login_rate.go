@@ -3,6 +3,7 @@ package relay
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ type loginBucket struct {
 
 // allow reports whether ip may make another login request at this moment.
 func (l *loginLimiter) allow(ip string) bool {
+	key := rateLimitKey(ip)
 	now := time.Now()
 	if l.now != nil {
 		now = l.now()
@@ -48,16 +50,37 @@ func (l *loginLimiter) allow(ip string) bool {
 			delete(l.buckets, k)
 		}
 	}
-	b, ok := l.buckets[ip]
+	b, ok := l.buckets[key]
 	if !ok {
 		if l.buckets == nil {
 			l.buckets = map[string]*loginBucket{}
 		}
 		b = &loginBucket{lim: rate.NewLimiter(rate.Every(time.Minute/loginLimitPerMin), loginLimitBurst)}
-		l.buckets[ip] = b
+		l.buckets[key] = b
 	}
 	b.seen = now
 	return b.lim.AllowN(now, 1)
+}
+
+// rateLimitKey normalizes ip into the login rate limiter's bucket key. A
+// typical residential IPv6 allocation is a /64, and an attacker on one
+// machine can otherwise source each login attempt from a fresh address
+// within their prefix — a fresh burst-10 bucket every time. Native IPv6
+// addresses are therefore masked to their /64 prefix; IPv4 (including
+// IPv4-mapped IPv6, e.g. ::ffff:a.b.c.d) is keyed on the address as-is,
+// since a /64 mask carries no meaning there. Malformed input (should not
+// occur — ip comes from clientIP or a test) is used unmasked rather than
+// dropped, so the limiter fails safe rather than exempting bad input from
+// rate limiting entirely.
+func rateLimitKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	if addr.Is4() || addr.Is4In6() {
+		return ip
+	}
+	return netip.PrefixFrom(addr, 64).Masked().String()
 }
 
 // clientIP derives the rate-limit key from the request's direct peer. The
