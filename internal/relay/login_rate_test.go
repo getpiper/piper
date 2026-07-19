@@ -106,6 +106,77 @@ func TestLoginRateLimitRefills(t *testing.T) {
 	}
 }
 
+// rateLimitKey masks native IPv6 addresses to their /64 prefix so an
+// attacker can't dodge the limiter by cycling addresses within their own
+// allocation. IPv4 (including IPv4-mapped IPv6) is left as-is, and
+// malformed input passes through unmasked rather than being dropped.
+func TestRateLimitKey(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		want string
+	}{
+		{"ipv4 unchanged", "203.0.113.1", "203.0.113.1"},
+		{"ipv4 unchanged, different address", "198.51.100.9", "198.51.100.9"},
+		{"ipv4-mapped ipv6 unchanged", "::ffff:203.0.113.1", "::ffff:203.0.113.1"},
+		{"ipv6 masked to /64", "2001:db8:1234:5678::1", "2001:db8:1234:5678::/64"},
+		{"ipv6 masked to /64, second address in same prefix", "2001:db8:1234:5678:aaaa:bbbb:cccc:dddd", "2001:db8:1234:5678::/64"},
+		{"malformed input passes through unmasked", "not-an-ip", "not-an-ip"},
+		{"empty string passes through unmasked", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rateLimitKey(tt.ip); got != tt.want {
+				t.Fatalf("rateLimitKey(%q) = %q, want %q", tt.ip, got, tt.want)
+			}
+		})
+	}
+}
+
+// Two IPv6 addresses in the same /64 share a bucket: the second address
+// exhausts the burst the first one started.
+func TestLoginRateLimitIPv6SamePrefixSharesBucket(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	a := &api{st: st, v: NewFakeVerifier(), webStates: map[string]webState{}}
+	fakeNow := time.Now()
+	a.loginLimit.now = func() time.Time { return fakeNow }
+
+	for i := 0; i < loginLimitBurst; i++ {
+		if !a.loginLimit.allow("2001:db8:1234:5678::1") {
+			t.Fatalf("request #%d from first address rejected before burst exhausted", i+1)
+		}
+	}
+	// A different address in the same /64 prefix shares the bucket, so it
+	// finds the burst already exhausted.
+	if a.loginLimit.allow("2001:db8:1234:5678:ffff:ffff:ffff:ffff") {
+		t.Fatal("second address in same /64 allowed, want limited (shared bucket)")
+	}
+}
+
+// Two IPv6 addresses in different /64 prefixes get independent buckets.
+func TestLoginRateLimitIPv6DifferentPrefixIndependent(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	a := &api{st: st, v: NewFakeVerifier(), webStates: map[string]webState{}}
+	fakeNow := time.Now()
+	a.loginLimit.now = func() time.Time { return fakeNow }
+
+	for i := 0; i < loginLimitBurst; i++ {
+		if !a.loginLimit.allow("2001:db8:1111:1111::1") {
+			t.Fatalf("request #%d from first prefix rejected before burst exhausted", i+1)
+		}
+	}
+	if a.loginLimit.allow("2001:db8:1111:1111::1") {
+		t.Fatal("request past burst allowed for first prefix, want limited")
+	}
+	// A different /64 prefix is unaffected by the first prefix's exhausted
+	// burst.
+	if !a.loginLimit.allow("2001:db8:2222:2222::1") {
+		t.Fatal("request from a different /64 prefix rejected, want allowed")
+	}
+}
+
 // Idle buckets are evicted inline, mirroring the web-state sweep: after the
 // idle TTL, a stale entry is gone and the map holds only active IPs.
 func TestLoginRateLimitSweepsIdleBuckets(t *testing.T) {
