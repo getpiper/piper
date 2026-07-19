@@ -17,6 +17,8 @@ import (
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
+	"github.com/moby/patternmatcher"
+	"github.com/moby/patternmatcher/ignorefile"
 )
 
 type Client struct {
@@ -36,7 +38,8 @@ func New(base, token string) *Client {
 // WithTimeout sets an overall per-request timeout on the client's HTTP
 // transport and returns the client for chaining. The interactive TUI uses
 // it so a blackholed box surfaces as unreachable instead of hanging the
-// poll. Not for streaming calls (it would abort a long response).
+// poll. Not for streaming calls (it would abort a long response); the
+// deploy upload is exempt (see Deploy).
 func (c *Client) WithTimeout(d time.Duration) *Client {
 	c.http.Timeout = d
 	return c
@@ -45,6 +48,10 @@ func (c *Client) WithTimeout(d time.Duration) *Client {
 // do builds a request to c.base+path, attaches the auth header (when set) and
 // the content type (when non-empty), and sends it.
 func (c *Client) do(method, path, contentType string, body io.Reader) (*http.Response, error) {
+	return c.doWith(c.http, method, path, contentType, body)
+}
+
+func (c *Client) doWith(h *http.Client, method, path, contentType string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(method, c.base+path, body)
 	if err != nil {
 		return nil, err
@@ -55,7 +62,7 @@ func (c *Client) do(method, path, contentType string, body io.Reader) (*http.Res
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	return c.http.Do(req)
+	return h.Do(req)
 }
 
 func (c *Client) CreateApp(name string, port int) error {
@@ -120,7 +127,11 @@ func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 	if err := TarDir(srcDir, &body); err != nil {
 		return store.Deployment{}, err
 	}
-	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
+	// The upload ships the whole source tar in one POST; the overall request
+	// timeout (the TUI's poll guard) must not cut it short on a slow link.
+	noTimeout := *c.http
+	noTimeout.Timeout = 0
+	resp, err := c.doWith(&noTimeout, http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -180,6 +191,11 @@ func (c *Client) App(name string) (api.App, error) {
 	return a, nil
 }
 
+// followMaxConsecutiveErrors is how many poll cycles in a row may fail before
+// FollowDeploy gives up: a follow runs for minutes against a busy box, and one
+// transient failure must not end the watch while the build runs on (#282).
+const followMaxConsecutiveErrors = 5
+
 // FollowDeploy polls until the deployment finishes, writing new log output as
 // it appears. If the stored tail rotates after reaching its cap, it prints the
 // current snapshot again. It stops when ctx is cancelled or times out, returning
@@ -188,32 +204,40 @@ func (c *Client) App(name string) (api.App, error) {
 func (c *Client) FollowDeploy(ctx context.Context, name, id string, progress io.Writer) (store.Deployment, error) {
 	lastLogs := ""
 	var last store.Deployment
+	failures := 0
 	for {
 		logs, err := c.DeploymentLogs(name, id)
-		if err != nil {
-			return store.Deployment{}, err
-		}
-		if strings.HasPrefix(logs, lastLogs) {
-			_, _ = io.WriteString(progress, logs[len(lastLogs):])
-		} else {
-			// Tail-cap dropped the front (log exceeded the cap): reprint whole.
-			_, _ = io.WriteString(progress, logs)
-		}
-		lastLogs = logs
+		if err == nil {
+			if strings.HasPrefix(logs, lastLogs) {
+				_, _ = io.WriteString(progress, logs[len(lastLogs):])
+			} else {
+				// Tail-cap dropped the front (log exceeded the cap): reprint whole.
+				_, _ = io.WriteString(progress, logs)
+			}
+			lastLogs = logs
 
-		deps, err := c.Deployments(name)
-		if err != nil {
-			return store.Deployment{}, err
+			var deps []store.Deployment
+			deps, err = c.Deployments(name)
+			if err == nil {
+				for _, d := range deps {
+					if d.ID != id {
+						continue
+					}
+					last = d
+					switch d.Status {
+					case "running", "failed", "stopped":
+						return d, nil
+					}
+				}
+			}
 		}
-		for _, d := range deps {
-			if d.ID != id {
-				continue
+		if err != nil {
+			failures++
+			if failures >= followMaxConsecutiveErrors {
+				return store.Deployment{}, err
 			}
-			last = d
-			switch d.Status {
-			case "running", "failed", "stopped":
-				return d, nil
-			}
+		} else {
+			failures = 0
 		}
 
 		select {
@@ -372,19 +396,48 @@ func responseError(action string, resp *http.Response) error {
 	return &StatusError{Action: action, Code: resp.StatusCode, Status: resp.Status, Body: strings.TrimSpace(string(body))}
 }
 
-// TarDir writes the regular files under dir to w using relative, slash-separated names.
+// TarDir writes the regular files under dir to w using relative, slash-separated
+// names. It honors dir's .dockerignore with docker's semantics — docker build
+// would drop the matched files from the context anyway; skipping them here keeps
+// the bytes off the wire. Dockerfile and .dockerignore always ship, as docker's
+// own CLI does.
 func TarDir(dir string, w io.Writer) error {
+	pm, err := loadDockerignore(dir)
+	if err != nil {
+		return err
+	}
 	tw := tar.NewWriter(w)
 	walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
+		}
+		if info.IsDir() {
+			// Skip a matched subtree wholesale — unless a ! pattern exists,
+			// which could re-include something under it.
+			if pm != nil && rel != "." && !pm.Exclusions() {
+				if ignored, err := pm.MatchesOrParentMatches(rel); err != nil {
+					return err
+				} else if ignored {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		if pm != nil && rel != "Dockerfile" && rel != ".dockerignore" {
+			ignored, err := pm.MatchesOrParentMatches(rel)
+			if err != nil {
+				return err
+			}
+			if ignored {
+				return nil
+			}
 		}
 		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
@@ -410,4 +463,22 @@ func TarDir(dir string, w io.Writer) error {
 		return walkErr
 	}
 	return closeErr
+}
+
+// loadDockerignore parses dir's .dockerignore into a matcher, or nil when the
+// file is absent.
+func loadDockerignore(dir string) (*patternmatcher.PatternMatcher, error) {
+	f, err := os.Open(filepath.Join(dir, ".dockerignore"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	patterns, err := ignorefile.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	return patternmatcher.New(patterns)
 }

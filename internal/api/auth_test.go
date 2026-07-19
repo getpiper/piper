@@ -45,6 +45,28 @@ func TestRequireTokenRejectsAndAccepts(t *testing.T) {
 	}
 }
 
+func TestRequireTokenStoreErrorIs500Not401(t *testing.T) {
+	s := newTestStore(t)
+	tok, err := s.CreateToken("cli", "admin")
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	// A failing store (here: closed DB) is a box problem, not a credential
+	// problem — it must not be reported to the client as "invalid token".
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	h := RequireToken(s, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req := httptest.NewRequest(http.MethodGet, "/v1/apps", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("code = %d, want 500", rec.Code)
+	}
+}
+
 func TestDeploymentEndpointsRequireToken(t *testing.T) {
 	s := newTestStore(t)
 	h := RequireToken(s, New(s, &fakeDeployer{}, "piper.localhost", "", nil, nil))

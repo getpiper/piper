@@ -550,7 +550,14 @@ func RequireToken(s *store.Store, next http.Handler) http.Handler {
 			return
 		}
 		if _, err := s.AuthenticateToken(tok); err != nil {
-			http.Error(w, "invalid token", http.StatusUnauthorized)
+			if errors.Is(err, store.ErrBadToken) {
+				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
+			}
+			// A failing store is a box problem, not a credential problem —
+			// reporting it as 401 sends the user chasing their token (#281).
+			log.Printf("api: %s %s: authenticate token: %v", r.Method, r.URL.Path, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		next.ServeHTTP(w, r)
