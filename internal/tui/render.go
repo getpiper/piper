@@ -44,6 +44,22 @@ func statusIcon(status string) string {
 	return "—"
 }
 
+// domainStatusIcon maps a per-app custom-domain status (#285) to its one-glyph
+// indicator; unknown values render as "—".
+func domainStatusIcon(status string) string {
+	switch status {
+	case "active":
+		return "●"
+	case "issuing":
+		return "◐"
+	case "pending":
+		return "◌"
+	case "failed":
+		return "✗"
+	}
+	return "—"
+}
+
 // relTime renders a compact "time ago" for the deployments table.
 func relTime(t time.Time) string {
 	if t.IsZero() {

@@ -91,3 +91,12 @@ func TestHelpOverlayIncludesWizardKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpListsDomainKeys(t *testing.T) {
+	out := helpView{}.View()
+	for _, want := range []string{"a add domain", "x delete app / remove domain", "Domain"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help missing %q:\n%s", want, out)
+		}
+	}
+}

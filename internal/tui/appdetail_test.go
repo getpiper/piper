@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/api"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -33,6 +34,128 @@ func TestAppDetailRendersHeaderAndDeployments(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("view missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func fixtureDomains() []domain.AppDomainStatus {
+	exp := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	return []domain.AppDomainStatus{
+		{Domain: "blog.example.com", App: "blog", Status: "pending",
+			DNSRecords: []domain.DNSRecord{{Type: "CNAME", Name: "blog.example.com", Value: "relay.getpiper.dev"}}},
+		{Domain: "www.example.com", App: "blog", Status: "active", CertNotAfter: &exp, DNSOK: true},
+	}
+}
+
+func TestAppDetailRendersDomainsSection(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	out := m.View()
+	for _, want := range []string{
+		"DOMAIN", "CERT EXPIRES", "DNS",
+		"blog.example.com", "◌ pending",
+		"www.example.com", "● active", "2026-10-01", "ok",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestAppDetailDomainsRenderWithoutDeployments(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, domains: fixtureDomains(),
+	})
+	out := m.View()
+	if !strings.Contains(out, "no deployments yet") || !strings.Contains(out, "blog.example.com") {
+		t.Fatalf("want empty deployments plus domains table:\n%s", out)
+	}
+}
+
+func TestAppDetailCursorSpansDomainsAndXRemoves(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	// two deployments first: j, j lands on the first domain row
+	m, _ = m.Update(keyRunes('j'))
+	m, _ = m.Update(keyRunes('j'))
+	_, cmd := m.Update(keyRunes('x'))
+	if cmd == nil {
+		t.Fatal("x on a domain row should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if !strings.Contains(pm.view.View(), "Remove blog.example.com") {
+		t.Fatalf("want remove-domain confirm, got:\n%s", pm.view.View())
+	}
+}
+
+func TestAppDetailXOnDeploymentStillDeletesApp(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	_, cmd := m.Update(keyRunes('x'))
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if !strings.Contains(pm.view.View(), "Delete blog") {
+		t.Fatalf("want delete-app confirm, got:\n%s", pm.view.View())
+	}
+}
+
+func TestAppDetailAKeyPushesDomainForm(t *testing.T) {
+	_, cmd := newAppDetailView("blog", false).Update(keyRunes('a'))
+	if cmd == nil {
+		t.Fatal("a should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "add domain" {
+		t.Fatalf("want the domain form, got title %q", pm.view.title())
+	}
+}
+
+func TestAppDetailEnterOnDomainPushesDetail(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	m, _ = m.Update(keyRunes('j'))
+	m, _ = m.Update(keyRunes('j'))
+	_, cmd := m.Update(keyEnter())
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "domain" {
+		t.Fatalf("want domain detail pushed, got title %q", pm.view.title())
+	}
+}
+
+func TestAppDetailCursorStopsAtLastDomain(t *testing.T) {
+	v, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),
+	})
+	for range 10 {
+		v, _ = v.Update(keyRunes('j'))
+	}
+	if c := v.(appDetailView).cursor; c != 3 { // 2 deps + 2 domains - 1
+		t.Fatalf("cursor overran: %d", c)
+	}
+}
+
+func TestAppDetailRefreshIncludesDomains(t *testing.T) {
+	msg := newAppDetailView("blog", false).refresh(fakeAPI{domains: fixtureDomains()})()
+	loaded, ok := msg.(appDetailLoadedMsg)
+	if !ok {
+		t.Fatalf("want appDetailLoadedMsg, got %T", msg)
+	}
+	if len(loaded.domains) != 2 {
+		t.Fatalf("want 2 domains, got %d", len(loaded.domains))
 	}
 }
 

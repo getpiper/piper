@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -22,6 +23,9 @@ type API interface {
 	StopApp(name string) error
 	DeleteApp(name string) error
 	LinkApp(name, repo, branch string) error
+	AppDomains(app string) ([]domain.AppDomainStatus, error)
+	AddAppDomain(app, dom string) (domain.AppDomainStatus, error)
+	RemoveAppDomain(app, dom string) error
 	Manifest(redirectURL string) (string, error)
 	ExchangeGitHub(code string) error
 }
@@ -48,12 +52,21 @@ type (
 	tickMsg            struct{}
 	pushMsg            struct{ view view }
 	appDetailLoadedMsg struct {
-		app  api.App
-		deps []store.Deployment
+		app     api.App
+		deps    []store.Deployment
+		domains []domain.AppDomainStatus
 	}
 	logsLoadedMsg struct {
 		logs   string
 		status string
+	}
+
+	// domainDetailLoadedMsg is the domain detail view's poll result. found is
+	// false when the domain no longer exists; the view keeps its last-known
+	// state (the box answered, so it still counts as reachable).
+	domainDetailLoadedMsg struct {
+		st    domain.AppDomainStatus
+		found bool
 	}
 
 	// boxesLoadedMsg carries the client config the boxes view renders. It is a
@@ -108,6 +121,23 @@ type (
 	// thread and reports via actionResultMsg (pop back to app detail on success).
 	linkAppMsg struct{ name, repo, branch string }
 
+	// removeDomainMsg is the remove-domain confirm's intent; the root runs
+	// RemoveAppDomain and pops back to app detail via actionResultMsg.
+	removeDomainMsg struct{ app, domain string }
+
+	// addDomainMsg is the domain form's intent; the root runs AddAppDomain off
+	// the UI thread and reports via domainAddedMsg.
+	addDomainMsg struct{ app, domain string }
+
+	// domainAddedMsg is the add's outcome. On success the root replaces the
+	// form with the domain detail view (CNAME + live status); on error it
+	// banners the form.
+	domainAddedMsg struct {
+		app string
+		st  domain.AppDomainStatus
+		err error
+	}
+
 	// actionResultMsg is a mutating action's outcome. On success the root pops
 	// popLevels views and refreshes; on error it banners the top overlay.
 	actionResultMsg struct {
@@ -154,7 +184,8 @@ type (
 // poll, so the root updates reachability without knowing the view type.
 type pollResult interface{ reachable() bool }
 
-func (appsLoadedMsg) reachable() bool      { return true }
-func (errMsg) reachable() bool             { return false }
-func (appDetailLoadedMsg) reachable() bool { return true }
-func (logsLoadedMsg) reachable() bool      { return true }
+func (appsLoadedMsg) reachable() bool         { return true }
+func (errMsg) reachable() bool                { return false }
+func (appDetailLoadedMsg) reachable() bool    { return true }
+func (logsLoadedMsg) reachable() bool         { return true }
+func (domainDetailLoadedMsg) reachable() bool { return true }
