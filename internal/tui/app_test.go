@@ -334,3 +334,39 @@ func TestRootRemoveDomainCallsClientAndPops(t *testing.T) {
 		t.Fatalf("client not called with app+domain: %#v", rec)
 	}
 }
+
+func TestRootAddDomainCallsClient(t *testing.T) {
+	rec := &apiCalls{}
+	m := NewModel("b", "a", false, fakeAPI{rec: rec, addSt: fixtureDomains()[0]})
+	_, cmd := m.Update(addDomainMsg{app: "blog", domain: "blog.example.com"})
+	added, ok := cmd().(domainAddedMsg)
+	if !ok || added.err != nil || added.st.Domain != "blog.example.com" {
+		t.Fatalf("want domainAddedMsg with status, got %#v", cmd())
+	}
+	if rec.addedApp != "blog" || rec.addedDomain != "blog.example.com" {
+		t.Fatalf("client not called with app+domain: %#v", rec)
+	}
+}
+
+func TestRootDomainAddedReplacesFormWithDetail(t *testing.T) {
+	m := NewModel("b", "a", false, fakeAPI{})
+	m.stack = append(m.stack, newAppDetailView("blog", false), newDomainForm("blog"))
+	next, _ := m.Update(domainAddedMsg{app: "blog", st: fixtureDomains()[0]})
+	nm := next.(Model)
+	if nm.top().title() != "domain" {
+		t.Fatalf("want the domain detail view on top, got %q", nm.top().title())
+	}
+	if !strings.Contains(nm.top().View(), "CNAME") {
+		t.Fatalf("detail should show the CNAME:\n%s", nm.top().View())
+	}
+}
+
+func TestRootDomainAddedErrorBannersForm(t *testing.T) {
+	m := NewModel("b", "a", false, fakeAPI{})
+	m.stack = append(m.stack, newAppDetailView("blog", false), newDomainForm("blog"))
+	next, _ := m.Update(domainAddedMsg{app: "blog", err: errors.New("invalid domain")})
+	nm := next.(Model)
+	if nm.top().title() != "add domain" || !strings.Contains(nm.top().View(), "invalid domain") {
+		t.Fatalf("want bannered form, got %q:\n%s", nm.top().title(), nm.top().View())
+	}
+}

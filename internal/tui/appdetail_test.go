@@ -106,6 +106,20 @@ func TestAppDetailXOnDeploymentStillDeletesApp(t *testing.T) {
 	}
 }
 
+func TestAppDetailAKeyPushesDomainForm(t *testing.T) {
+	_, cmd := newAppDetailView("blog", false).Update(keyRunes('a'))
+	if cmd == nil {
+		t.Fatal("a should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "add domain" {
+		t.Fatalf("want the domain form, got title %q", pm.view.title())
+	}
+}
+
 func TestAppDetailEnterOnDomainPushesDetail(t *testing.T) {
 	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
 		app: api.App{App: store.App{Name: "blog"}}, deps: fixtureDeps(), domains: fixtureDomains(),

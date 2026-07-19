@@ -125,6 +125,19 @@ type (
 	// RemoveAppDomain and pops back to app detail via actionResultMsg.
 	removeDomainMsg struct{ app, domain string }
 
+	// addDomainMsg is the domain form's intent; the root runs AddAppDomain off
+	// the UI thread and reports via domainAddedMsg.
+	addDomainMsg struct{ app, domain string }
+
+	// domainAddedMsg is the add's outcome. On success the root replaces the
+	// form with the domain detail view (CNAME + live status); on error it
+	// banners the form.
+	domainAddedMsg struct {
+		app string
+		st  domain.AppDomainStatus
+		err error
+	}
+
 	// actionResultMsg is a mutating action's outcome. On success the root pops
 	// popLevels views and refreshes; on error it banners the top overlay.
 	actionResultMsg struct {

@@ -112,6 +112,8 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, func() tea.Msg { return pushMsg{newDeleteConfirm(v.name)} }
 		case "l":
 			return v, func() tea.Msg { return pushMsg{newLinkForm(v.name)} }
+		case "a":
+			return v, func() tea.Msg { return pushMsg{newDomainForm(v.name)} }
 		}
 	}
 	return v, nil

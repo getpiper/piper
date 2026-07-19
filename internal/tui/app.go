@@ -202,6 +202,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case removeDomainMsg:
 		app, dom, c := msg.app, msg.domain, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.RemoveAppDomain(app, dom), popLevels: 1} }
+	case addDomainMsg:
+		app, dom, c := msg.app, msg.domain, m.client
+		return m, func() tea.Msg {
+			st, err := c.AddAppDomain(app, dom)
+			return domainAddedMsg{app: app, st: st, err: err}
+		}
+	case domainAddedMsg:
+		if _, ok := m.top().(domainFormView); !ok {
+			return m, nil // user navigated away before the add returned
+		}
+		if msg.err != nil {
+			next, _ := m.top().Update(errMsg{msg.err})
+			m.stack[len(m.stack)-1] = next.(view)
+			return m, nil
+		}
+		m.stack[len(m.stack)-1] = newDomainDetailView(msg.app, msg.st)
+		if m.width > 0 {
+			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.stack[len(m.stack)-1] = seeded.(view)
+		}
+		return m, m.refresh()
 	case githubStartMsg:
 		org, c := msg.org, m.client
 		ctx, cancel := context.WithCancel(context.Background())
