@@ -23,21 +23,34 @@ func (m *Manager) Resume() {
 	if m.envDomain != "" {
 		return
 	}
+	// issueMu spans the config read and the generation bump so a concurrent
+	// Set can't land its replace between them: a bump from a stale read (old
+	// domain) arriving after the replace's own bump would supersede the new
+	// domain's loop while this loop exits on the domain mismatch, stranding
+	// the replacement in "issuing" from boot (#275). The lock is released
+	// before the goroutine starts — issueOnce re-acquires issueMu for the
+	// duration of the ACME run, so holding it here would only serialize the
+	// kick against in-flight issuance, never cover the run.
+	m.issueMu.Lock()
 	dc, err := m.st.GetDomainConfig()
 	if err != nil {
+		m.issueMu.Unlock()
 		return
 	}
 	if dc.Status == StatusActive {
 		certPEM, keyPEM, err := m.readCert()
 		if err == nil && certCovers(certPEM, dc.Domain, time.Now()) {
 			if err := m.arm(dc, certPEM, keyPEM); err == nil {
+				m.issueMu.Unlock()
 				return
 			}
 		}
 		// Damaged or missing disk cert: degrade to re-issuance, not a crash.
 		_ = m.st.UpdateDomainStatus(dc.Domain, StatusIssuing, "", time.Time{})
 	}
-	go m.issueLoop(dc.Domain, m.nextGen())
+	gen := m.nextGen()
+	m.issueMu.Unlock()
+	go m.issueLoop(dc.Domain, gen)
 }
 
 // OnRelayConnect re-kicks issuance for a non-active box-wide config when the
