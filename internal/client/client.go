@@ -36,7 +36,8 @@ func New(base, token string) *Client {
 // WithTimeout sets an overall per-request timeout on the client's HTTP
 // transport and returns the client for chaining. The interactive TUI uses
 // it so a blackholed box surfaces as unreachable instead of hanging the
-// poll. Not for streaming calls (it would abort a long response).
+// poll. Not for streaming calls (it would abort a long response); the
+// deploy upload is exempt (see Deploy).
 func (c *Client) WithTimeout(d time.Duration) *Client {
 	c.http.Timeout = d
 	return c
@@ -45,6 +46,10 @@ func (c *Client) WithTimeout(d time.Duration) *Client {
 // do builds a request to c.base+path, attaches the auth header (when set) and
 // the content type (when non-empty), and sends it.
 func (c *Client) do(method, path, contentType string, body io.Reader) (*http.Response, error) {
+	return c.doWith(c.http, method, path, contentType, body)
+}
+
+func (c *Client) doWith(h *http.Client, method, path, contentType string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(method, c.base+path, body)
 	if err != nil {
 		return nil, err
@@ -55,7 +60,7 @@ func (c *Client) do(method, path, contentType string, body io.Reader) (*http.Res
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	return c.http.Do(req)
+	return h.Do(req)
 }
 
 func (c *Client) CreateApp(name string, port int) error {
@@ -120,7 +125,11 @@ func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 	if err := TarDir(srcDir, &body); err != nil {
 		return store.Deployment{}, err
 	}
-	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
+	// The upload ships the whole source tar in one POST; the overall request
+	// timeout (the TUI's poll guard) must not cut it short on a slow link.
+	noTimeout := *c.http
+	noTimeout.Timeout = 0
+	resp, err := c.doWith(&noTimeout, http.MethodPost, "/v1/apps/"+name+"/deploy", "application/x-tar", &body)
 	if err != nil {
 		return store.Deployment{}, err
 	}

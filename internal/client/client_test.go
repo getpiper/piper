@@ -168,6 +168,28 @@ func TestDeploy(t *testing.T) {
 	}
 }
 
+func TestDeployNotBoundByClientTimeout(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Outlive the client's overall timeout, like a big upload to a slow box.
+		time.Sleep(250 * time.Millisecond)
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
+	}))
+	defer srv.Close()
+
+	dep, err := New(srv.URL, "").WithTimeout(50 * time.Millisecond).Deploy("blog", srcDir)
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if dep.ID != "dep1" {
+		t.Errorf("deployment = %+v", dep)
+	}
+}
+
 func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
 	var polls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
