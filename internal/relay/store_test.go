@@ -100,71 +100,10 @@ func TestControlTokenRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSetCustomDomain(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if _, err := st.Enroll("alice", "alice.example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Enroll("bob", "bob.example.com"); err != nil {
-		t.Fatal(err)
-	}
-
-	prev, err := st.SetCustomDomain("alice.example.com", "shop.dev")
-	if err != nil || prev != "" {
-		t.Fatalf("first set = %q, %v", prev, err)
-	}
-	got, err := st.CustomDomains("alice.example.com")
-	if err != nil || len(got) != 1 || got[0] != "shop.dev" {
-		t.Fatalf("CustomDomains = %v, %v", got, err)
-	}
-
-	// Uniqueness: bob may not claim alice's domain.
-	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); !errors.Is(err, ErrDomainTaken) {
-		t.Fatalf("bob claiming shop.dev: err = %v, want ErrDomainTaken", err)
-	}
-	// Re-setting your own domain is fine.
-	if prev, err := st.SetCustomDomain("alice.example.com", "shop.dev"); err != nil || prev != "shop.dev" {
-		t.Fatalf("re-set = %q, %v", prev, err)
-	}
-	// Clearing frees it for others.
-	if _, err := st.SetCustomDomain("alice.example.com", ""); err != nil {
-		t.Fatalf("clear: %v", err)
-	}
-	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); err != nil {
-		t.Fatalf("bob after clear: %v", err)
-	}
-	// Unknown agent.
-	if _, err := st.SetCustomDomain("nobody.example.com", "x.dev"); !errors.Is(err, ErrBadToken) {
-		t.Fatalf("unknown agent: err = %v, want ErrBadToken", err)
-	}
-
-	// The shim replaces ALL rows: per-app claims vanish when set-domain lands.
-	if err := st.AddCustomDomain("alice.example.com", "extra.dev"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.SetCustomDomain("alice.example.com", "final.dev"); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := st.CustomDomains("alice.example.com"); len(got) != 1 || got[0] != "final.dev" {
-		t.Fatalf("after shim replace-all: %v", got)
-	}
-	// Shim rows are active immediately (DNS-01 proof predates the call): a
-	// rival cannot evict them even after the pending TTL.
-	var status string
-	if err := st.db.QueryRow(
-		`SELECT status FROM custom_domains WHERE domain='final.dev'`).Scan(&status); err != nil || status != "active" {
-		t.Fatalf("shim row status = %q, %v, want active", status, err)
-	}
-}
-
 // A modified agent must not be able to claim relay-managed names as its
 // "custom domain": another agent's base domain (SNI hijack), the apex, a
 // DNS-label parent/child of either, or its own base domain.
-func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
+func TestAddCustomDomainRejectsRelayNamespace(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -187,8 +126,8 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 		"x.public.getpiper.co",   // subdomain of the apex (incl. api.<apex>)
 		"getpiper.co",            // parent of the apex
 	} {
-		if _, err := st.SetCustomDomain("bob.example.com", d); !errors.Is(err, ErrDomainReserved) {
-			t.Errorf("SetCustomDomain(%q) err = %v, want ErrDomainReserved", d, err)
+		if err := st.AddCustomDomain("bob.example.com", d); !errors.Is(err, ErrDomainReserved) {
+			t.Errorf("AddCustomDomain(%q) err = %v, want ErrDomainReserved", d, err)
 		}
 	}
 	for _, d := range []string{
@@ -197,8 +136,8 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 		"-bad.example.dev",
 		"shop..dev",
 	} {
-		if _, err := st.SetCustomDomain("bob.example.com", d); !errors.Is(err, ErrInvalidDomain) {
-			t.Errorf("SetCustomDomain(%q) err = %v, want ErrInvalidDomain", d, err)
+		if err := st.AddCustomDomain("bob.example.com", d); !errors.Is(err, ErrInvalidDomain) {
+			t.Errorf("AddCustomDomain(%q) err = %v, want ErrInvalidDomain", d, err)
 		}
 	}
 	// Nothing above may have stuck.
@@ -206,37 +145,13 @@ func TestSetCustomDomainRejectsRelayNamespace(t *testing.T) {
 		t.Fatalf("custom domains = %v after rejected claims, want none", got)
 	}
 	// A legitimate unrelated domain still works.
-	if _, err := st.SetCustomDomain("bob.example.com", "shop.dev"); err != nil {
+	if err := st.AddCustomDomain("bob.example.com", "shop.dev"); err != nil {
 		t.Fatalf("legit domain rejected: %v", err)
 	}
 	// "Suffix" means DNS labels, not raw strings: xalice.example.comx shares a
 	// raw suffix with alice.example.com but is a different DNS name.
-	if _, err := st.SetCustomDomain("bob.example.com", "xalice.example.comx"); err != nil {
+	if err := st.AddCustomDomain("bob.example.com", "xalice.example.comx"); err != nil {
 		t.Fatalf("raw-suffix lookalike rejected: %v", err)
-	}
-}
-
-func TestSetCustomDomainRejectsDisabledAccount(t *testing.T) {
-	st := openTestStore(t)
-	st.Configure("public.getpiper.co", 3, 10, 5)
-	acc, err := st.UpsertAccount("sub-1", "alice")
-	if err != nil {
-		t.Fatal(err)
-	}
-	en, err := st.EnrollForAccount(acc.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A healthy account may set its custom domain.
-	if _, err := st.SetCustomDomain(en.BaseDomain, "shop.dev"); err != nil {
-		t.Fatalf("healthy account rejected: %v", err)
-	}
-	// Once disabled, it may not re-route to a new domain.
-	if err := st.DisableAccount(acc.Username); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.SetCustomDomain(en.BaseDomain, "other.dev"); !errors.Is(err, ErrBadCredential) {
-		t.Fatalf("disabled account: err = %v, want ErrBadCredential", err)
 	}
 }
 

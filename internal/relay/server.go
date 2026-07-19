@@ -248,22 +248,6 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 			return
 		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
-	case "set-domain":
-		// BYO custom domain (#102). Rides the authenticated session, so it can
-		// only ever set the session agent's own domain. The box already proved
-		// domain control by obtaining its DNS-01 cert before asking.
-		prev, err := st.SetCustomDomain(sess.BaseDomain, req.Domain)
-		if err != nil {
-			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
-			return
-		}
-		if prev != "" && prev != req.Domain {
-			router.UnregisterCustom(prev)
-		}
-		if req.Domain != "" {
-			router.RegisterCustom(req.Domain, sess)
-		}
-		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
 	case "add-domain":
 		// Per-app custom domain claim (#227): pending, routable immediately —
 		// that is what lets the TLS-ALPN-01 challenge reach the box before any
