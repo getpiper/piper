@@ -50,6 +50,20 @@ func TestVerifySignature(t *testing.T) {
 	}
 }
 
+func TestNewGitHubAppRequiresWebhookSecret(t *testing.T) {
+	if _, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t),
+	}); err == nil {
+		t.Fatal("expected error when WebhookSecret is empty")
+	}
+
+	if _, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s3cret",
+	}); err != nil {
+		t.Fatalf("unexpected error with a webhook secret set: %v", err)
+	}
+}
+
 func TestRepoTokenIsScopedToOneRepo(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any

@@ -44,6 +44,12 @@ type GitHubApp struct {
 }
 
 func NewGitHubApp(cfg GitHubAppConfig) (*GitHubApp, error) {
+	// VerifySignature HMACs with this secret; an empty one is a key anyone can
+	// compute, letting an attacker forge webhook deliveries (e.g. rebind an
+	// installation to their own account). An App is unsafe to serve without it.
+	if cfg.WebhookSecret == "" {
+		return nil, fmt.Errorf("github app: PIPER_RELAY_GITHUB_WEBHOOK_SECRET is required (empty webhook secret makes /gh forgeable)")
+	}
 	key, err := ghjwt.ParseKey(cfg.PrivateKeyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("parse app private key: %w", err)
