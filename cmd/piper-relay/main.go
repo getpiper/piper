@@ -212,7 +212,7 @@ func main() {
 	}
 
 	router := relay.NewRouter()
-	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
+	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects, ghApp)
 
 	ctrl := apiHandler
 	var delivery *relay.TunnelDelivery

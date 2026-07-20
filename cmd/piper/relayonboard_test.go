@@ -96,9 +96,10 @@ func TestConnectEnrollsAndWritesRelayFile(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"enrollment_token": "enr-1", "base_domain": "ab12-alice.public.getpiper.co",
 			"tunnel_endpoint": "relay.getpiper.co:7000",
+			"webhook_secret":  "whsec-1", "github_app": true,
 		})
 	}))
 	defer srv.Close()
@@ -122,7 +123,7 @@ func TestConnectEnrollsAndWritesRelayFile(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("relay file: found=%v err=%v", found, err)
 	}
-	want := config.RelayFile{RelayAddr: "relay.getpiper.co:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co", Terminated: true}
+	want := config.RelayFile{RelayAddr: "relay.getpiper.co:7000", RelayToken: "enr-1", BaseDomain: "ab12-alice.public.getpiper.co", Terminated: true, WebhookSecret: "whsec-1", GitHubBrokered: true}
 	if rf != want {
 		t.Fatalf("relay file = %+v, want %+v", rf, want)
 	}
@@ -137,9 +138,10 @@ func TestConnectWritesTerminated(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"enrollment_token": "enr-1", "base_domain": "aaaa-alice.public.getpiper.co",
 			"tunnel_endpoint": "relay.getpiper.co:7000",
+			"webhook_secret":  "whsec-1", "github_app": true,
 		})
 	}))
 	defer srv.Close()
@@ -194,9 +196,10 @@ func TestConnectOffBoxFailsLoudly(t *testing.T) {
 	var enrolls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		enrolls++
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"enrollment_token": "enr-1", "base_domain": "ab12-alice.public.getpiper.co",
 			"tunnel_endpoint": "relay.getpiper.co:7000",
+			"webhook_secret":  "whsec-1", "github_app": true,
 		})
 	}))
 	defer srv.Close()
@@ -286,9 +289,10 @@ func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"enrollment_token": "enr-1", "base_domain": "ab12-alice.public.getpiper.co",
 			"tunnel_endpoint": "relay.getpiper.co:7000",
+			"webhook_secret":  "whsec-1", "github_app": true,
 		})
 	}))
 	defer srv.Close()
@@ -322,6 +326,8 @@ func TestConnectSystemManagedGuidesEnvInstall(t *testing.T) {
 		"PIPER_RELAY_TOKEN=enr-1",
 		"PIPER_BASE_DOMAIN=ab12-alice.public.getpiper.co",
 		"PIPER_RELAY_TERMINATED=1",
+		"PIPER_WEBHOOK_SECRET=whsec-1",
+		"PIPER_GITHUB_BROKERED=1",
 	} {
 		if !bytes.Contains(out.Bytes(), []byte(want)) {
 			t.Fatalf("stdout missing %q; got:\n%s", want, out.String())
@@ -428,9 +434,10 @@ func TestConnectPrintsUserUnitRestartHint(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"enrollment_token": "enr-1", "base_domain": "ab12-alice.public.getpiper.co",
 			"tunnel_endpoint": "relay.getpiper.co:7000",
+			"webhook_secret":  "whsec-1", "github_app": true,
 		})
 	}))
 	defer srv.Close()

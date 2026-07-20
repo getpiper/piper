@@ -79,7 +79,7 @@ func TestLoginPollUnknownHandle(t *testing.T) {
 func TestEnrollWithAccountCredential(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
-	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil, nil)
 
 	acc, _ := st.UpsertAccount("sub-1", "judy")
 	cred, _ := st.MintAccountCredential(acc.ID)
@@ -110,10 +110,46 @@ func TestEnrollWithAccountCredential(t *testing.T) {
 	}
 }
 
+func TestEnrollReturnsWebhookSecretAndAppFlag(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil, app)
+
+	acc, _ := st.UpsertAccount("sub-1", "judy")
+	cred, _ := st.MintAccountCredential(acc.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
+	req.Header.Set("Authorization", "Bearer "+cred)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enroll status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		WebhookSecret string `json:"webhook_secret"`
+		GitHubApp     bool   `json:"github_app"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.WebhookSecret == "" {
+		t.Fatal("enroll returned no webhook_secret")
+	}
+	if !out.GitHubApp {
+		t.Fatal("github_app flag not advertised despite a configured App")
+	}
+}
+
 func TestEnrollRejectsBadCredential(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
-	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
 	req.Header.Set("Authorization", "Bearer nope")
@@ -127,7 +163,7 @@ func TestEnrollRejectsBadCredential(t *testing.T) {
 func TestEnrollOverCapReturns429(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 1, 10, 5)
-	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil, nil)
 	acc, _ := st.UpsertAccount("sub-1", "ken")
 	cred, _ := st.MintAccountCredential(acc.ID)
 
@@ -184,7 +220,7 @@ func newWebTestAPI(t *testing.T) (http.Handler, *FakeVerifier) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
 	fv := NewFakeVerifier()
-	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"})
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, nil)
 	return api, fv
 }
 

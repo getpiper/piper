@@ -35,6 +35,8 @@ type Enrollment struct {
 	EnrollmentToken string `json:"enrollment_token"`
 	BaseDomain      string `json:"base_domain"`
 	TunnelEndpoint  string `json:"tunnel_endpoint"`
+	WebhookSecret   string `json:"webhook_secret"`
+	GitHubApp       bool   `json:"github_app"`
 }
 
 // ErrAuthPending means the user has not yet completed the device flow.

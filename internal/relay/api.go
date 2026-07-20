@@ -15,15 +15,17 @@ import (
 
 // NewAPI returns the account API without a tunnel endpoint, control proxy, or
 // web login (tests / LAN). Use NewAPIWithTunnel in production.
-func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "", nil, nil) }
+func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "", nil, nil, nil) }
 
 // NewAPIWithTunnel is the full account-facing API: device login, browser
 // (authorization-code) login, enroll, and — when router is non-nil — the
 // /agents/ control proxy (#73). webRedirects is the allowlist of redirect_uri
-// prefixes for the browser flow; empty disables web login (503).
-func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Router, webRedirects []string) http.Handler {
+// prefixes for the browser flow; empty disables web login (503). ghApp is nil
+// when the relay holds no GitHub App, in which case enroll advertises
+// "github_app": false and boxes stay on the BYO path.
+func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Router, webRedirects []string, ghApp *GitHubApp) http.Handler {
 	a := &api{st: st, v: v, tunnelEndpoint: tunnelEndpoint,
-		webRedirects: webRedirects, webStates: map[string]webState{}}
+		webRedirects: webRedirects, webStates: map[string]webState{}, ghApp: ghApp}
 	if wv, ok := v.(WebVerifier); ok {
 		a.webv = wv
 	}
@@ -50,7 +52,8 @@ type api struct {
 	v              Verifier
 	webv           WebVerifier // nil ⇒ web login disabled
 	tunnelEndpoint string
-	webRedirects   []string // allowed redirect_uri prefixes; empty ⇒ web login disabled
+	webRedirects   []string   // allowed redirect_uri prefixes; empty ⇒ web login disabled
+	ghApp          *GitHubApp // nil ⇒ relay serves BYO users only
 
 	mu        sync.Mutex
 	webStates map[string]webState // state → pending browser flow
@@ -265,10 +268,12 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "enroll error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"enrollment_token": en.Token,
 		"base_domain":      en.BaseDomain,
 		"tunnel_endpoint":  a.tunnelEndpoint,
+		"webhook_secret":   en.WebhookSecret,
+		"github_app":       a.ghApp != nil,
 	})
 }
 

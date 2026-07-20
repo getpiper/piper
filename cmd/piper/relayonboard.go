@@ -136,19 +136,25 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "box claimed: %s\n", en.BaseDomain)
 		fmt.Fprintln(stdout, "\npiperd runs as a systemd DynamicUser; store the enrollment in its EnvironmentFile.")
 		fmt.Fprintln(stdout, "\nNext step:")
+		githubBrokered := 0
+		if en.GitHubApp {
+			githubBrokered = 1
+		}
 		fmt.Fprintf(stdout, "\n    sudo sh -c 'f=%s; \\\n"+
-			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN|PIPER_RELAY_TERMINATED)=/d\" \"$f\"; \\\n"+
-			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; } >> \"$f\"'\n",
-			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
+			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN|PIPER_RELAY_TERMINATED|PIPER_WEBHOOK_SECRET|PIPER_GITHUB_BROKERED)=/d\" \"$f\"; \\\n"+
+			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; echo PIPER_WEBHOOK_SECRET=%s; echo PIPER_GITHUB_BROKERED=%d; } >> \"$f\"'\n",
+			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain, en.WebhookSecret, githubBrokered)
 		fmt.Fprintln(stdout, "\nthen: sudo systemctl restart piperd")
 		return 0
 	}
 
 	if err := config.SaveRelayFile(o.dataDir, config.RelayFile{
-		RelayAddr:  en.TunnelEndpoint,
-		RelayToken: en.EnrollmentToken,
-		BaseDomain: en.BaseDomain,
-		Terminated: true,
+		RelayAddr:      en.TunnelEndpoint,
+		RelayToken:     en.EnrollmentToken,
+		BaseDomain:     en.BaseDomain,
+		Terminated:     true,
+		WebhookSecret:  en.WebhookSecret,
+		GitHubBrokered: en.GitHubApp,
 	}); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
