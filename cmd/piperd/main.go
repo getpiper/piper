@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -471,12 +472,16 @@ func main() {
 		go domMgr.StartRenewals(ctx)
 
 		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken)
-		if _, err := st.GetGitHubApp(); err == nil {
+		_, err := st.GetGitHubApp()
+		switch decideWebhookProvider(err, cfg, wh.ghToken != nil) {
+		case webhookProviderNone:
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				log.Printf("github app lookup: %v; webhook listener not started", err)
+			} else {
+				log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
+			}
+		default:
 			wh.start()
-		} else if cfg.GitHubBrokered {
-			wh.start()
-		} else {
-			log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
 		}
 	}
 
@@ -597,15 +602,45 @@ func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRun
 	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken}
 }
 
+// webhookProvider is the outcome of applying the BYO-over-brokered
+// precedence rule: which GitHub credential source, if any, the webhook
+// listener should use.
+type webhookProvider int
+
+const (
+	webhookProviderNone webhookProvider = iota
+	webhookProviderBYO
+	webhookProviderBrokered
+)
+
+// decideWebhookProvider is the one place the precedence rule lives, so the
+// boot gate and webhookStarter.run can't drift apart on it (they both call
+// this instead of each re-deriving their own guard). ghErr is the error from
+// st.GetGitHubApp(): a locally stored App is an explicit BYO override and
+// always wins over the relay's offer, so ghErr == nil (a row exists) wins
+// regardless of cfg. Only store.ErrNotFound means "no local row, brokered
+// may proceed" — any other error means we could not determine whether this
+// box has its own credentials, so we fail closed rather than silently
+// switching it to trusting the relay.
+func decideWebhookProvider(ghErr error, cfg config.Config, hasGHToken bool) webhookProvider {
+	switch {
+	case ghErr == nil:
+		return webhookProviderBYO
+	case errors.Is(ghErr, store.ErrNotFound) && cfg.GitHubBrokered && cfg.WebhookSecret != "" && hasGHToken:
+		return webhookProviderBrokered
+	default:
+		return webhookProviderNone
+	}
+}
+
 func (w *webhookStarter) start() { w.once.Do(w.run) }
 
 func (w *webhookStarter) run() {
 	var prov source.Provider
 
-	// A locally stored App is an explicit BYO override and wins over the
-	// relay's offer, so a box that ran `piper github setup` keeps its own
-	// credentials and its own trust boundary.
-	if gh, err := w.st.GetGitHubApp(); err == nil {
+	gh, err := w.st.GetGitHubApp()
+	switch decideWebhookProvider(err, w.cfg, w.ghToken != nil) {
+	case webhookProviderBYO:
 		p, err := github.New(github.Config{
 			AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
 		})
@@ -615,14 +650,18 @@ func (w *webhookStarter) run() {
 		}
 		prov = p
 		log.Printf("webhook: using this box's own GitHub App %d", gh.AppID)
-	} else if w.cfg.GitHubBrokered && w.cfg.WebhookSecret != "" && w.ghToken != nil {
+	case webhookProviderBrokered:
 		prov = github.NewWithTokens(
 			github.Config{WebhookSecret: w.cfg.WebhookSecret},
 			github.RelayTokens{Ask: w.ghToken},
 		)
 		log.Printf("webhook: using the relay's GitHub App (brokered)")
-	} else {
-		log.Printf("webhook: no GitHub App configured")
+	default:
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("webhook: local GitHub App lookup: %v; not starting a listener", err)
+		} else {
+			log.Printf("webhook: no GitHub App configured")
+		}
 		return
 	}
 
