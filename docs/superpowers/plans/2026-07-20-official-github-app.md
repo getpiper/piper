@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a relay hold one GitHub App on behalf of its users, so a newcomer on a public relay reaches `git push` → deploy with one browser trip and no manual App creation, while BYO per-box Apps keep working unchanged.
+**Goal:** Let a relay hold one GitHub App on behalf of its users, so a newcomer on a public relay reaches `git push` → deploy with a single GitHub consent screen and no manual App creation, while BYO per-box Apps keep working unchanged. (`piper login` stays device-flow: two short browser stops; the one-trip CLI login is follow-up [#291](https://github.com/getpiper/piper/issues/291).)
 
 **Architecture:** Two provider modes behind the existing `source.Provider` seam. BYO is today's path. In brokered mode the relay verifies GitHub's webhook, resolves `installation → account → repo binding → agent`, re-signs the payload with a per-agent secret, and delivers it over a `tunnel.KindHTTP` stream to the box's Caddy `:80`, which routes `hooks.<base>` to the existing webhook listener. The agent, holding no GitHub credentials, asks the relay for repo-scoped installation tokens over the existing `KindControl` op protocol.
 
@@ -19,8 +19,8 @@
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Defaults:** control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, webhook listener `127.0.0.1:8089`, app container port `8080`.
 - **Every task ends with `make verify` passing** (gofmt → vet → test → cross-compile) before its commit.
-- **Commits** are conventional-commit style, one per task, ending with:
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+- **Commits** are conventional-commit style, one per task, ending with a co-author trailer naming the model doing the work (the commit blocks below show the current one):
+  `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
 - **Branch:** all work lands on a branch off `main` via PR. Never commit to `main`.
 
 ## Scope note: org installs
@@ -306,7 +306,7 @@ interface that Fetch and Report call. BYO behavior is unchanged.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -338,22 +338,11 @@ package relay
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 )
 
-func testStore(t *testing.T) *Store {
-	t.Helper()
-	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	return st
-}
-
 func TestLinkInstallationBindsToSenderAccount(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	acc, err := st.UpsertAccount("1001", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -381,7 +370,7 @@ func TestLinkInstallationBindsToSenderAccount(t *testing.T) {
 }
 
 func TestLinkInstallationIsIdempotent(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	if _, err := st.UpsertAccount("1001", "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +382,7 @@ func TestLinkInstallationIsIdempotent(t *testing.T) {
 }
 
 func TestLinkInstallationUnknownSender(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	err := st.LinkInstallation("55", "9999", "user", "nobody")
 	if !errors.Is(err, ErrUnknownAccount) {
 		t.Fatalf("err = %v, want ErrUnknownAccount", err)
@@ -401,7 +390,7 @@ func TestLinkInstallationUnknownSender(t *testing.T) {
 }
 
 func TestAccountForInstallationUnknown(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, err := st.AccountForInstallation("404")
 	if !errors.Is(err, ErrNoInstallation) {
 		t.Fatalf("err = %v, want ErrNoInstallation", err)
@@ -409,7 +398,7 @@ func TestAccountForInstallationUnknown(t *testing.T) {
 }
 
 func TestUnlinkInstallation(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	if _, err := st.UpsertAccount("1001", "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +414,7 @@ func TestUnlinkInstallation(t *testing.T) {
 }
 ```
 
-If `internal/relay` already defines a `testStore` helper, drop this file's copy and use the existing one.
+The package's store helper already exists: `openTestStore` (`internal/relay/accounts_test.go:9`) — use it, don't define a new one. `EnrollForAccount` works on an unconfigured store (`apexOrDefault`/`maxAgentsOrDefault` supply defaults), so no `Configure` call is needed in these tests.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -543,7 +532,7 @@ so the OAuth redirect and the installation webhook may arrive in either order.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -593,7 +582,7 @@ func enrolledAgent(t *testing.T, st *Store, githubID, login string) (string, str
 }
 
 func TestBindRepoAndLookupByRepo(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	accID, agent := enrolledAgent(t, st, "1001", "alice")
 
 	if err := st.BindRepo(agent, "blog", "Alice/Blog", "main"); err != nil {
@@ -615,7 +604,7 @@ func TestBindRepoAndLookupByRepo(t *testing.T) {
 }
 
 func TestBindRepoReplacesPerApp(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	accID, agent := enrolledAgent(t, st, "1001", "alice")
 
 	if err := st.BindRepo(agent, "blog", "alice/old", "main"); err != nil {
@@ -635,7 +624,7 @@ func TestBindRepoReplacesPerApp(t *testing.T) {
 }
 
 func TestBindingsForRepoIsAccountScoped(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, aliceAgent := enrolledAgent(t, st, "1001", "alice")
 	bobID, _ := enrolledAgent(t, st, "2002", "bob")
 
@@ -653,7 +642,7 @@ func TestBindingsForRepoIsAccountScoped(t *testing.T) {
 }
 
 func TestAgentBoundToRepo(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, aliceAgent := enrolledAgent(t, st, "1001", "alice")
 	_, bobAgent := enrolledAgent(t, st, "2002", "bob")
 
@@ -672,7 +661,7 @@ func TestAgentBoundToRepo(t *testing.T) {
 }
 
 func TestUnbindRepo(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	accID, agent := enrolledAgent(t, st, "1001", "alice")
 	if err := st.BindRepo(agent, "blog", "alice/blog", "main"); err != nil {
 		t.Fatal(err)
@@ -807,7 +796,7 @@ are account-scoped so a repo name can never cross tenants.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1312,7 +1301,7 @@ the agent's provider package.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1341,7 +1330,7 @@ The box needs to tell the relay about its bindings and ask for tokens. Both ride
   - `func (c *TunnelClient) GitHubToken(repo string) (string, error)`
   - `func (s *Store) GitHubTokenFor(ctx context.Context, app *GitHubApp, agentName, repo string) (string, time.Time, error)`
 
-Use the exact receiver type name already in `internal/agent/tunnelclient.go` — if it is not `TunnelClient`, keep that file's name and adjust these signatures to match.
+The receiver type is confirmed: `TunnelClient` (`internal/agent/tunnelclient.go:33`).
 
 - [ ] **Step 1: Write the failing relay test**
 
@@ -1410,7 +1399,7 @@ func TestGHTokenControlOpRejectsUnboundRepo(t *testing.T) {
 }
 ```
 
-`startTestRelay` returns `(sess, ..., ..., baseDomain, store)`. Match the existing helper's arity and ordering at its definition in `internal/relay/server_test.go`; adjust the destructuring above if it differs.
+`startTestRelay` is confirmed to return `(sess *tunnel.Session, tlsAddr, httpAddr, baseDomain string, st *Store)` (`internal/relay/server_test.go:21`), so the five-value destructuring above is right as written. (Task 7 widens the helper to also return the `*Router`; these call sites gain a trailing `_` then.) The test relay carries no `*GitHubApp`, which is fine: Step 4 deliberately orders the binding check before the nil-App guard, so `TestGHTokenControlOpRejectsUnboundRepo` genuinely exercises the authz path rather than passing on the missing App.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1469,15 +1458,18 @@ var ErrRepoNotBound = errors.New("repo not bound to this agent")
 // Without the binding check a single compromised box could read every
 // repository its account granted the App.
 func (s *Store) GitHubTokenFor(ctx context.Context, app *GitHubApp, agentName, repo string) (string, time.Time, error) {
-	if app == nil {
-		return "", time.Time{}, ErrNoGitHubApp
-	}
+	// Binding check first — it is the authz boundary, and keeping it ahead of
+	// the nil-App guard means a relay without App credentials still exercises
+	// it (the control-op test would otherwise pass with the check deleted).
 	bound, err := s.AgentBoundToRepo(agentName, repo)
 	if err != nil {
 		return "", time.Time{}, err
 	}
 	if !bound {
 		return "", time.Time{}, ErrRepoNotBound
+	}
+	if app == nil {
+		return "", time.Time{}, ErrNoGitHubApp
 	}
 	accountID, _, err := s.AgentAccount(agentName)
 	if err != nil {
@@ -1491,11 +1483,11 @@ func (s *Store) GitHubTokenFor(ctx context.Context, app *GitHubApp, agentName, r
 }
 ```
 
-If `AgentAccount` returns a different arity than `(accountID, _, error)`, match its definition (see `internal/relay/proxy.go:183` for its call shape).
+`AgentAccount` is confirmed: `(accountID, username string, err error)` (`internal/relay/hostnames.go:30`). It returns `ErrBadCredential` when the owning account is disabled, so the operator kill-switch blocks token minting here for free.
 
 - [ ] **Step 5: Dispatch the new ops**
 
-In `internal/relay/server.go`, inside the `switch req.Op` at line 225, add three cases before the `default`. `sess.BaseDomain` is the agent's `agents.name`. The relay's `*GitHubApp` must be reachable here — thread it through the same struct/closure that already carries `st`; if the control handler is a method, add a `ghApp *GitHubApp` field to its receiver and set it where the server is constructed.
+The op switch lives in `handleControl` (`internal/relay/server.go:219`), a plain function reached via `Serve` → `serveTunnel` → `serveControl`. Add three cases before the `default`; `sess.BaseDomain` is the agent's `agents.name`. There is no server struct — thread a `ghApp *GitHubApp` parameter through `Serve` → `serveTunnel` → `serveControl` → `handleControl`, updating the `relay.Serve` call in `cmd/piper-relay/main.go:207` (pass Task 4's `ghApp`) and the inline accept loop in `startTestRelay` (`internal/relay/server_test.go`, pass `nil`).
 
 ```go
 	case "bind-repo":
@@ -1569,11 +1561,81 @@ func (c *TunnelClient) GitHubToken(repo string) (string, error) {
 }
 ```
 
-Check `control`'s return shape at `internal/agent/tunnelclient.go:87` — if it returns `(string, error)` rather than `(tunnel.ControlResponse, error)`, widen it to return the full response so `GitHubToken` can read `Token`, and update the existing call sites accordingly.
+`control` is confirmed to return `(string, error)` (`internal/agent/tunnelclient.go:125`) — widen it to `(tunnel.ControlResponse, error)` so `GitHubToken` can read `Token`, and update the six existing helper methods at lines 86-123 (`Register` keeps returning `resp.Hostname`; the others discard the response).
 
 - [ ] **Step 7: Add the agent-side test**
 
-Append to `internal/agent/tunnelclient_test.go` a test in the same style as its existing op tests: start the fake relay side, call `c.BindRepo("blog", "alice/blog", "main")`, and assert the relay received `ControlRequest{Op: "bind-repo", App: "blog", Repo: "alice/blog", Branch: "main"}`. Then have the fake relay reply `ControlResponse{Token: "ghs_x"}` and assert `c.GitHubToken("alice/blog")` returns `"ghs_x"`.
+Append to `internal/agent/tunnelclient_test.go`, cribbing the fake-relay shape of `TestTunnelClientDomainOps` (line 300):
+
+```go
+func TestTunnelClientRepoOps(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
+		return nil, errors.New("no local dials expected")
+	})
+	relaySess := <-sessCh
+
+	got := make(chan tunnel.ControlRequest, 3)
+	go func() {
+		for {
+			kind, stream, err := relaySess.AcceptKind()
+			if err != nil {
+				return
+			}
+			if kind != tunnel.KindControl {
+				stream.Close()
+				continue
+			}
+			var req tunnel.ControlRequest
+			_ = tunnel.ReadMsg(stream, &req)
+			got <- req
+			resp := tunnel.ControlResponse{}
+			if req.Op == "gh-token" {
+				resp.Token = "ghs_x"
+			}
+			_ = tunnel.WriteMsg(stream, resp)
+			stream.Close()
+		}
+	}()
+
+	// Retry until the session is up, exactly as TestTunnelClientDomainOps does.
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err = c.BindRepo("blog", "alice/blog", "main"); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("BindRepo: %v", err)
+	}
+	if req := <-got; req.Op != "bind-repo" || req.App != "blog" || req.Repo != "alice/blog" || req.Branch != "main" {
+		t.Fatalf("BindRepo sent %+v", req)
+	}
+
+	tok, err := c.GitHubToken("alice/blog")
+	if err != nil {
+		t.Fatalf("GitHubToken: %v", err)
+	}
+	if tok != "ghs_x" {
+		t.Fatalf("token = %q, want ghs_x", tok)
+	}
+	if req := <-got; req.Op != "gh-token" || req.Repo != "alice/blog" {
+		t.Fatalf("GitHubToken sent %+v", req)
+	}
+
+	if err := c.UnbindRepo("blog"); err != nil {
+		t.Fatalf("UnbindRepo: %v", err)
+	}
+	if req := <-got; req.Op != "unbind-repo" || req.App != "blog" {
+		t.Fatalf("UnbindRepo sent %+v", req)
+	}
+}
+```
 
 - [ ] **Step 8: Run tests to verify they pass**
 
@@ -1595,7 +1657,7 @@ actually deploys, and only through its own account's installation.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1681,7 +1743,7 @@ func newTestIngress(t *testing.T, st *Store, d Deliverer) http.Handler {
 }
 
 func TestIngressRejectsBadSignature(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	d := &capturingDeliverer{}
 	h := newTestIngress(t, st, d)
 
@@ -1695,7 +1757,7 @@ func TestIngressRejectsBadSignature(t *testing.T) {
 }
 
 func TestIngressRoutesPushToBinding(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, agent := enrolledAgent(t, st, "1001", "alice")
 	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
 		t.Fatal(err)
@@ -1720,7 +1782,7 @@ func TestIngressRoutesPushToBinding(t *testing.T) {
 }
 
 func TestIngressDropsUnlinkedInstallation(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	d := &capturingDeliverer{}
 	h := newTestIngress(t, st, d)
 
@@ -1735,7 +1797,7 @@ func TestIngressDropsUnlinkedInstallation(t *testing.T) {
 }
 
 func TestIngressLinksAndUnlinksInstallation(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	if _, err := st.UpsertAccount("1001", "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -1761,7 +1823,7 @@ func TestIngressLinksAndUnlinksInstallation(t *testing.T) {
 }
 
 func TestIngressPongsPing(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	h := newTestIngress(t, st, &capturingDeliverer{})
 	body := `{"zen":"hi"}`
 	rec := postEvent(t, h, "ping", signed("s3cret", []byte(body)), body)
@@ -1937,13 +1999,19 @@ Expected: PASS — six tests, no race reports.
 
 - [ ] **Step 5: Mount it in the relay binary**
 
-In `cmd/piper-relay/main.go`, where the account API mux is built, add the ingress route when `ghApp != nil` (this consumes the variable Task 4 left dangling):
+There is no mux in `cmd/piper-relay/main.go` — the account API mux lives inside `NewAPIWithTunnel` (`internal/relay/api.go:24`), and main passes the finished `apiHandler` straight to `relay.Serve` (`main.go:189,207`). Mount the ingress by wrapping in main, when `ghApp != nil` (this consumes the variable Task 4 left dangling):
 
 ```go
+	ctrl := apiHandler
 	if ghApp != nil {
-		mux.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
+		outer := http.NewServeMux()
+		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
+		outer.Handle("/", apiHandler)
+		ctrl = outer
 	}
 ```
+
+and pass `ctrl` (not `apiHandler`) to `relay.Serve`. The account API is served under the host `api.<apex>` on the TLS listener, so the App's webhook URL is `https://api.<apex>/gh` — that is what gets registered on the GitHub App (see the checklist at the bottom).
 
 `delivery` does not exist yet — Task 7 creates it. Until then pass a placeholder that logs and returns nil, and delete it in Task 7:
 
@@ -1980,7 +2048,7 @@ An event whose installation is not linked is acknowledged and dropped.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2028,7 +2096,7 @@ import (
 )
 
 func TestDeliverySignsWithAgentSecretAndDropsGitHubs(t *testing.T) {
-	sess, _, router, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st, router := startTestRelay(t, nil, nil)
 
 	secret, err := st.AgentWebhookSecret(base)
 	if err != nil {
@@ -2098,7 +2166,7 @@ func TestDeliverySignsWithAgentSecretAndDropsGitHubs(t *testing.T) {
 }
 
 func TestDeliveryOfflineAgent(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, base := enrolledAgent(t, st, "1001", "alice")
 	d := NewTunnelDelivery(st, NewRouter())
 
@@ -2109,7 +2177,7 @@ func TestDeliveryOfflineAgent(t *testing.T) {
 }
 ```
 
-`startTestRelay` must return the `*Router` — if its current signature does not, add it, or look the router up however the existing tests reach it.
+Confirmed: `startTestRelay` currently returns five values — `(sess, tlsAddr, httpAddr, baseDomain, st)` (`internal/relay/server_test.go:21`) — and does *not* return the router. Widen it to also return the `router` it builds at `server_test.go:35` as a sixth value, and add a trailing `_` to every existing call site (including the tests added in Task 5).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -2313,7 +2381,7 @@ not treated as authenticating on its own.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2346,7 +2414,7 @@ package relay
 import "testing"
 
 func TestParkEventCoalescesByRef(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, agent := enrolledAgent(t, st, "1001", "alice")
 
 	if err := st.ParkEvent(agent, "blog", "main", "push", []byte(`{"after":"old"}`)); err != nil {
@@ -2372,7 +2440,7 @@ func TestParkEventCoalescesByRef(t *testing.T) {
 }
 
 func TestParkEventKeepsDistinctRefs(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, agent := enrolledAgent(t, st, "1001", "alice")
 
 	if err := st.ParkEvent(agent, "blog", "main", "push", []byte(`{}`)); err != nil {
@@ -2391,7 +2459,7 @@ func TestParkEventKeepsDistinctRefs(t *testing.T) {
 }
 
 func TestDrainEventsEmptiesTheSlot(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, agent := enrolledAgent(t, st, "1001", "alice")
 	if err := st.ParkEvent(agent, "blog", "main", "push", []byte(`{}`)); err != nil {
 		t.Fatal(err)
@@ -2409,7 +2477,7 @@ func TestDrainEventsEmptiesTheSlot(t *testing.T) {
 }
 
 func TestParkEventCapsPerAgent(t *testing.T) {
-	st := testStore(t)
+	st := openTestStore(t)
 	_, agent := enrolledAgent(t, st, "1001", "alice")
 
 	for i := 0; i < maxPendingPerAgent+10; i++ {
@@ -2484,8 +2552,14 @@ type PendingEvent struct {
 // newer event for the same ref replaces the older one. Deploys are
 // last-write-wins, so replaying intermediate commits on reconnect would be
 // actively wrong — a box that was off overnight should deploy the tip, once.
+// pendingTimeLayout is fixed-width, unlike RFC3339Nano (which trims trailing
+// fractional zeros, so "…:05Z" sorts lexicographically *after* "…:05.4Z").
+// The eviction and drain ordering below compare created_at as strings and
+// depend on lexicographic == chronological.
+const pendingTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
 func (s *Store) ParkEvent(agentName, app, ref, event string, payload []byte) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(pendingTimeLayout)
 	if _, err := s.db.Exec(
 		`INSERT INTO pending_events(agent_name, app, ref, event, payload, created_at)
 		 VALUES(?,?,?,?,?,?)
@@ -2504,9 +2578,18 @@ func (s *Store) ParkEvent(agentName, app, ref, event string, payload []byte) err
 	return err
 }
 
-// DrainEvents returns and removes every parked event for agentName.
+// DrainEvents returns and removes every parked event for agentName. Read and
+// delete share one immediate transaction (see Open's _txlock): a concurrent
+// ParkEvent either commits before it and is returned, or blocks until after
+// the delete and survives for the next drain — the blanket DELETE can never
+// destroy a row this call did not return.
 func (s *Store) DrainEvents(agentName string) ([]PendingEvent, error) {
-	rows, err := s.db.Query(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(
 		`SELECT app, ref, event, payload FROM pending_events
 		  WHERE agent_name=? ORDER BY created_at`, agentName)
 	if err != nil {
@@ -2525,14 +2608,22 @@ func (s *Store) DrainEvents(agentName string) ([]PendingEvent, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if _, err := s.db.Exec(`DELETE FROM pending_events WHERE agent_name=?`, agentName); err != nil {
+	if _, err := tx.Exec(`DELETE FROM pending_events WHERE agent_name=?`, agentName); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out, tx.Commit()
 }
 
-// DrainFor replays every parked event for a box that just reconnected.
+// DrainFor replays every parked event for agentName. Called on reconnect, and
+// after a park to close the race where the box came back between a delivery
+// failing and the park landing. It bails while the agent is offline — the
+// destructive drain must not run when nothing can be delivered — and a replay
+// that fails is re-parked, never dropped: GitHub already got its 202, so a
+// lost event here would never be retried by anyone.
 func (t *TunnelDelivery) DrainFor(ctx context.Context, agentName string) {
+	if _, ok := t.router.Lookup(agentName); !ok {
+		return // events stay parked for the reconnect drain
+	}
 	events, err := t.st.DrainEvents(agentName)
 	if err != nil {
 		log.Printf("relay: drain pending for %s: %v", agentName, err)
@@ -2541,7 +2632,10 @@ func (t *TunnelDelivery) DrainFor(ctx context.Context, agentName string) {
 	for _, ev := range events {
 		b := Binding{AgentName: ev.AgentName, App: ev.App}
 		if err := t.Deliver(ctx, b, ev.Event, ev.Payload); err != nil {
-			log.Printf("relay: replay %s to %s/%s: %v", ev.Event, ev.AgentName, ev.App, err)
+			log.Printf("relay: replay %s to %s/%s: %v (re-parking)", ev.Event, ev.AgentName, ev.App, err)
+			if perr := t.st.ParkEvent(ev.AgentName, ev.App, ev.Ref, ev.Event, ev.Payload); perr != nil {
+				log.Printf("relay: re-park %s for %s/%s: %v", ev.Event, ev.AgentName, ev.App, perr)
+			}
 		}
 	}
 }
@@ -2567,11 +2661,16 @@ and:
 ```go
 		for _, b := range bindings {
 			go func(b Binding) {
-				if err := d.Deliver(context.Background(), b, event, body); err == nil {
+				err := d.Deliver(context.Background(), b, event, body)
+				if err == nil {
 					return
-				} else if !errors.Is(err, ErrAgentOffline) {
-					log.Printf("relay: deliver %s to %s/%s: %v", event, b.AgentName, b.App, err)
-					return
+				}
+				// Park on ANY failure, not just offline: GitHub already got its
+				// 202, so an event dropped here would never be retried by
+				// anyone. Parking is coalescing and idempotent, so this is
+				// safe for transient box-side errors too.
+				if !errors.Is(err, ErrAgentOffline) {
+					log.Printf("relay: deliver %s to %s/%s: %v (parking)", event, b.AgentName, b.App, err)
 				}
 				ref := strings.TrimPrefix(env.Ref, "refs/heads/")
 				if env.Number > 0 {
@@ -2579,12 +2678,18 @@ and:
 				}
 				if err := st.ParkEvent(b.AgentName, b.App, ref, event, body); err != nil {
 					log.Printf("relay: park %s for %s/%s: %v", event, b.AgentName, b.App, err)
+					return
 				}
+				// Close the park/drain race: the box may have reconnected while
+				// the delivery was failing, in which case its reconnect drain
+				// already ran and missed this event. DrainFor no-ops while the
+				// agent is still offline.
+				d.DrainFor(context.Background(), b.AgentName)
 			}(b)
 		}
 ```
 
-Add `"errors"` and `"strings"` to that file's imports.
+Add `"errors"` and `"strings"` to that file's imports. For the re-drain to be reachable from here, widen `Deliverer` (Task 6) with `DrainFor(ctx context.Context, agentName string)`: add a no-op `DrainFor` to `capturingDeliverer` in `ingress_test.go`, and delete the `DeliverFunc` adapter if Task 7 left it behind — a bare func no longer satisfies the widened interface.
 
 - [ ] **Step 6: Drain on reconnect**
 
@@ -2596,7 +2701,7 @@ In `internal/relay/server.go`, immediately after the accepted session is registe
 		}
 ```
 
-Thread the `*TunnelDelivery` to that point the same way `ghApp` was threaded in Task 5 — a field on the server struct, set in `cmd/piper-relay/main.go`. A relay with no App configured leaves it nil and the drain is skipped.
+The registration happens in `serveTunnel` (`internal/relay/server.go:145`). As with `ghApp` in Task 5 there is no server struct — thread a `delivery *TunnelDelivery` parameter through `Serve` → `serveTunnel`, passing the one `cmd/piper-relay/main.go` builds in Task 7 and `nil` from any caller without an App; the drain is skipped when nil. (`startTestRelay`'s inline accept loop needs no drain wiring — the delivery tests call `DrainFor` directly.)
 
 - [ ] **Step 7: Prove the replay carries the newer commit**
 
@@ -2605,7 +2710,7 @@ receives exactly one delivery with the *newer* SHA. Append to `internal/relay/de
 
 ```go
 func TestDrainForReplaysOnlyTheNewestPerRef(t *testing.T) {
-	sess, _, router, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st, router := startTestRelay(t, nil, nil)
 
 	if err := st.ParkEvent(base, "blog", "main", "push", []byte(`{"after":"old"}`)); err != nil {
 		t.Fatal(err)
@@ -2686,7 +2791,7 @@ missed. Capped per agent so a PR-heavy repo cannot grow the table unbounded.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2698,8 +2803,9 @@ EOF
 **Files:**
 - Modify: `internal/relay/api.go:231-273` (the `enroll` handler)
 - Modify: `internal/relay/api_test.go`
-- Modify: `internal/config/config.go` (`RelayFile`)
-- Modify: `cmd/piper/relayonboard.go` (persist the new fields)
+- Modify: `internal/relayclient/relayclient.go` (the `Enrollment` struct that decodes the enroll response lives here, lines 34-38 — not in `relayonboard.go`)
+- Modify: `internal/config/config.go` (`RelayFile`, `Config`, `Load`)
+- Modify: `cmd/piper/relayonboard.go` (persist the new fields — **both** install flavors)
 - Modify: `cmd/piper/relayonboard_test.go`
 
 **Interfaces:**
@@ -2707,28 +2813,46 @@ EOF
 - Produces:
   - enroll response gains `"webhook_secret"` and `"github_app": true|false`
   - `config.RelayFile` gains `WebhookSecret string \`json:"webhook_secret,omitempty"\`` and `GitHubBrokered bool \`json:"github_brokered,omitempty"\``
+  - `config.Config` gains the same two fields, populated env-first in `Load` (`PIPER_WEBHOOK_SECRET`, `PIPER_GITHUB_BROKERED=1`) with `relay.json` fallback — the shipped systemd install carries enrollment *only* via env (`relayonboard.go:135-144` never writes `relay.json` there), so without the env path brokered mode is dead on that flavor
+  - `relayclient.Enrollment` gains `WebhookSecret string \`json:"webhook_secret"\`` and `GitHubApp bool \`json:"github_app"\``
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `internal/relay/api_test.go`, following the file's existing enroll test for setup:
+Add to `internal/relay/api_test.go`, cribbing `TestEnrollWithAccountCredential` (line 79):
 
 ```go
 func TestEnrollReturnsWebhookSecretAndAppFlag(t *testing.T) {
-	// Build the API exactly as the existing enroll test does, but with a
-	// GitHub App configured, then enroll and decode the response.
-	// (Use whatever constructor the existing enroll test uses; pass the App.)
-	var body struct {
-		EnrollmentToken string `json:"enrollment_token"`
-		BaseDomain      string `json:"base_domain"`
-		WebhookSecret   string `json:"webhook_secret"`
-		GitHubApp       bool   `json:"github_app"`
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	// ... perform POST /v1/enroll with a valid account credential, decode into body
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil, app)
 
-	if body.WebhookSecret == "" {
+	acc, _ := st.UpsertAccount("sub-1", "judy")
+	cred, _ := st.MintAccountCredential(acc.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
+	req.Header.Set("Authorization", "Bearer "+cred)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enroll status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		WebhookSecret string `json:"webhook_secret"`
+		GitHubApp     bool   `json:"github_app"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.WebhookSecret == "" {
 		t.Fatal("enroll returned no webhook_secret")
 	}
-	if !body.GitHubApp {
+	if !out.GitHubApp {
 		t.Fatal("github_app flag not advertised despite a configured App")
 	}
 }
@@ -2750,7 +2874,7 @@ type api struct {
 }
 ```
 
-Set it wherever `NewAPIWithTunnel` is called from `cmd/piper-relay/main.go`; add a `ghApp *GitHubApp` parameter to `NewAPIWithTunnel` and pass `nil` from `NewAPI`.
+Add a `ghApp *GitHubApp` parameter to `NewAPIWithTunnel` (currently five parameters, `api.go:24`), pass Task 4's `ghApp` from `cmd/piper-relay/main.go:189`, `nil` from `NewAPI` (`api.go:18`), and a trailing `nil` at every existing `NewAPIWithTunnel` call in `api_test.go`.
 
 Then extend the response at `internal/relay/api.go:268`:
 
@@ -2764,7 +2888,7 @@ Then extend the response at `internal/relay/api.go:268`:
 	})
 ```
 
-- [ ] **Step 4: Persist on the box**
+- [ ] **Step 4: Persist on the box — both install flavors**
 
 In `internal/config/config.go`, extend `RelayFile`:
 
@@ -2784,23 +2908,37 @@ type RelayFile struct {
 }
 ```
 
-In `cmd/piper/relayonboard.go`, extend the struct the enroll response decodes into with `WebhookSecret string \`json:"webhook_secret"\`` and `GitHubApp bool \`json:"github_app"\``, and carry both into the `config.RelayFile` it saves.
+add the same two fields to `Config`, and populate them in `Load` env-first, matching the existing relay lines at `config.go:58-60`:
+
+```go
+		WebhookSecret:  firstNonEmpty(os.Getenv("PIPER_WEBHOOK_SECRET"), rf.WebhookSecret),
+		GitHubBrokered: os.Getenv("PIPER_GITHUB_BROKERED") == "1" || rf.GitHubBrokered,
+```
+
+The env path is not optional: the shipped systemd install carries enrollment *only* in `/etc/piper/piperd.env` — `connect` writes no `relay.json` on that flavor.
+
+In `internal/relayclient/relayclient.go`, extend `Enrollment` (lines 34-38) with `WebhookSecret string \`json:"webhook_secret"\`` and `GitHubApp bool \`json:"github_app"\``.
+
+In `cmd/piper/relayonboard.go`, carry both through each `connect` branch:
+
+- non-systemd: add `WebhookSecret: en.WebhookSecret, GitHubBrokered: en.GitHubApp` to the `config.RelayFile` literal at line 147;
+- systemd: extend the printed env upsert (lines 139-142) — add `PIPER_WEBHOOK_SECRET|PIPER_GITHUB_BROKERED` to the `sed` delete pattern, and `echo PIPER_WEBHOOK_SECRET=%s; echo PIPER_GITHUB_BROKERED=%d;` (1 when `en.GitHubApp`) to the append list.
 
 - [ ] **Step 5: Update the CLI test fixtures**
 
-In `cmd/piper/relayonboard_test.go`, add `"webhook_secret": "whsec-1", "github_app": true` to each stubbed enroll response body, and assert in one test that the saved `relay.json` carries both values.
+In `cmd/piper/relayonboard_test.go`, add `"webhook_secret": "whsec-1", "github_app": true` to each stubbed enroll response body, extend the `want := config.RelayFile{...}` literal in `TestConnectEnrollsAndWritesRelayFile` (line 125) with both values, and extend `TestConnectSystemManagedGuidesEnvInstall` (line 279) to assert the printed command contains `PIPER_WEBHOOK_SECRET=whsec-1` and `PIPER_GITHUB_BROKERED=1`.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `go test ./internal/relay/ ./internal/config/ ./cmd/piper/ -v`
+Run: `go test ./internal/relay/ ./internal/relayclient/ ./internal/config/ ./cmd/piper/ -v`
 Expected: PASS
 
 - [ ] **Step 7: Verify and commit**
 
 ```bash
 make verify
-git add internal/relay/api.go internal/relay/api_test.go internal/config/config.go \
-        cmd/piper/relayonboard.go cmd/piper/relayonboard_test.go cmd/piper-relay/main.go
+git add internal/relay/api.go internal/relay/api_test.go internal/relayclient/relayclient.go \
+        internal/config/config.go cmd/piper/relayonboard.go cmd/piper/relayonboard_test.go cmd/piper-relay/main.go
 git commit -m "$(cat <<'EOF'
 feat(relay): enroll mints a per-agent webhook secret and advertises the App
 
@@ -2810,7 +2948,7 @@ false and their boxes stay on the BYO path.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2825,7 +2963,7 @@ EOF
 - Modify: `cmd/piperd/main.go:580-625` (`webhookStarter`)
 
 **Interfaces:**
-- Consumes: `TokenSource`, `NewWithTokens` (Task 1); `TunnelClient.GitHubToken` (Task 5); `RelayFile.WebhookSecret`/`GitHubBrokered` (Task 9).
+- Consumes: `TokenSource`, `NewWithTokens` (Task 1); `TunnelClient.GitHubToken` (Task 5); `config.Config.WebhookSecret`/`GitHubBrokered` (Task 9 — already merged env-first in `Load`).
 - Produces:
   - `type RelayTokens struct { Ask func(repo string) (string, error) }`
   - `func (r RelayTokens) Token(ctx context.Context, ev source.Event) (string, error)`
@@ -2911,7 +3049,6 @@ type webhookStarter struct {
 	cfg     config.Config
 	st      *store.Store
 	rt      *runtime.DockerRuntime
-	relay   config.RelayFile              // brokered secret + flag, zero when LAN-only
 	ghToken func(repo string) (string, error) // nil unless brokered
 	once    sync.Once
 	srv     *http.Server
@@ -2934,9 +3071,9 @@ func (w *webhookStarter) run() {
 		}
 		prov = p
 		log.Printf("webhook: using this box's own GitHub App %d", gh.AppID)
-	} else if w.relay.GitHubBrokered && w.relay.WebhookSecret != "" && w.ghToken != nil {
+	} else if w.cfg.GitHubBrokered && w.cfg.WebhookSecret != "" && w.ghToken != nil {
 		prov = github.NewWithTokens(
-			github.Config{WebhookSecret: w.relay.WebhookSecret},
+			github.Config{WebhookSecret: w.cfg.WebhookSecret},
 			github.RelayTokens{Ask: w.ghToken},
 		)
 		log.Printf("webhook: using the relay's GitHub App (brokered)")
@@ -2962,7 +3099,18 @@ func (w *webhookStarter) run() {
 }
 ```
 
-Update `newWebhookStarter` to take the `config.RelayFile` and the token func, and at the call site pass the loaded relay file plus the tunnel client's `GitHubToken` method. In brokered mode call `start()` at boot — the box needs no `github_app` row.
+Update `newWebhookStarter` to take just the token func — `cfg` already carries the brokered flag and secret after Task 9 — and rework the boot gate at `cmd/piperd/main.go:472-477` so brokered mode starts without a `github_app` row:
+
+```go
+		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken)
+		if _, err := st.GetGitHubApp(); err == nil {
+			wh.start()
+		} else if cfg.GitHubBrokered {
+			wh.start()
+		} else {
+			log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
+		}
+```
 
 Add `"github.com/getpiper/piper/internal/source"` to the file's imports.
 
@@ -2985,7 +3133,7 @@ gh-token op. A locally stored App remains an explicit override and wins.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -3019,24 +3167,39 @@ func (f *fakeBinder) BindRepo(app, repo, branch string) error {
 }
 
 func TestLinkRegistersBindingWithRelay(t *testing.T) {
-	// Build the API server as the existing link test does, additionally
-	// injecting fb as the binder.
+	s := newTestStore(t)
+	s.CreateApp("blog", 8080)
 	fb := &fakeBinder{}
-	// ... POST /v1/apps/blog/link with {"repo":"alice/blog","branch":"main"}
-
-	if fb.calls != 1 {
-		t.Fatalf("binder called %d times, want 1", fb.calls)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, fb)
+	body := strings.NewReader(`{"repo":"alice/blog","branch":"main"}`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code = %d", rec.Code)
 	}
-	if fb.app != "blog" || fb.repo != "alice/blog" || fb.branch != "main" {
+	if fb.calls != 1 || fb.app != "blog" || fb.repo != "alice/blog" || fb.branch != "main" {
 		t.Fatalf("binder got %+v", fb)
 	}
 }
 
 func TestLinkSucceedsWithoutABinder(t *testing.T) {
-	// Same request against an API built with a nil binder (LAN-only box).
-	// Assert the link still returns 2xx and the app row records the repo.
+	s := newTestStore(t)
+	s.CreateApp("blog", 8080)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil)
+	body := strings.NewReader(`{"repo":"alice/blog","branch":"main"}`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	got, _ := s.AppByRepo("alice/blog")
+	if got.Name != "blog" || got.Branch != "main" {
+		t.Fatalf("link not persisted: %+v", got)
+	}
 }
 ```
+
+(Crib `TestLinkApp` at `internal/api/api_test.go:324`; these are that test with a seventh `New` argument.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -3055,7 +3218,7 @@ type RepoBinder interface {
 }
 ```
 
-Add a `binder RepoBinder` field to the API struct and a setter or constructor parameter, mirroring however the package already injects optional dependencies. In the link handler at `api.go:208`, after the app row is updated successfully:
+The package injects dependencies through `New` (`api.go:64`, currently six parameters) — add `binder RepoBinder` as a seventh, passing `nil` at every existing call site. In the link handler (`api.go:208`), after the app row is updated successfully:
 
 ```go
 	if s.binder != nil {
@@ -3068,11 +3231,11 @@ Add a `binder RepoBinder` field to the API struct and a setter or constructor pa
 	}
 ```
 
-In `cmd/piperd/main.go`, pass the tunnel client as the binder when running in relay mode, and nil otherwise.
+In `cmd/piperd/main.go`, the API handler is built (line 405) *before* the tunnel client exists (line 451) — hoist the client: declare `var binder api.RepoBinder`, and when `cfg.RelayAddr != ""` create `tc := &agent.TunnelClient{}` ahead of `api.New` and assign `binder = tc` (creating it early is harmless; `Run` still starts later in the relay block). Do not pass a possibly-nil `*agent.TunnelClient` directly — a typed-nil interface would defeat the `s.binder != nil` guard.
 
 - [ ] **Step 4: Re-push bindings on reconnect**
 
-In `cmd/piperd/main.go`, where the tunnel client re-registers app hostnames after a reconnect, also re-push every linked app's binding:
+There is no agent-side hostname re-registration on reconnect (the relay restores routing from its own store when a session registers), so the re-push needs its own home: `tc.OnConnect` (`cmd/piperd/main.go:455`), which already runs on every (re)connect. Append to that callback:
 
 ```go
 	apps, err := st.ListApps()
@@ -3088,7 +3251,7 @@ In `cmd/piperd/main.go`, where the tunnel client re-registers app hostnames afte
 	}
 ```
 
-Use the store's actual app-listing method name and `App` field names; check `internal/store/store.go` for `ListApps` and the `Repo`/`Branch` fields.
+Confirmed: `ListApps` (`internal/store/store.go:150`) and the `App.Repo`/`App.Branch` fields (`store.go:27-28`) exist as named.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -3109,7 +3272,7 @@ link: the local row is authoritative and bindings are re-pushed on reconnect.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -3129,6 +3292,8 @@ EOF
 - Consumes: `Store.LinkInstallation` (Task 2); `GitHubApp` (Task 4).
 - Produces:
   - `GitHubVerifier` gains an `AppSlug string` field; `AuthCodeURL` returns the App's install-and-authorize URL when it is set.
+  - `GitHubAppConfig` gains `Slug string`; `func (g *GitHubApp) InstallURL() string` returns `https://github.com/apps/<slug>/installations/new` (empty when no slug).
+  - the login-poll success response gains `"install_url"` when an App with a slug is configured — Task 13's `waitForInstall` reads it there, because the poll response is the only relay reply the CLI has seen before enrolling.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3157,15 +3322,38 @@ func TestAuthCodeURLFallsBackToPlainOAuth(t *testing.T) {
 }
 ```
 
-Add to `internal/relay/api_test.go` a test that a callback carrying `installation_id` links the installation:
+Add to `internal/relay/api_test.go` a test that a callback carrying `installation_id` links the installation, cribbing `TestWebLoginCallbackHappyPath` (line 191) but keeping its own `st` in scope:
 
 ```go
 func TestLoginCallbackLinksInstallation(t *testing.T) {
-	// Drive the existing web-login callback test, but append
-	// "&installation_id=55&setup_action=install" to the callback URL.
-	// After the redirect, assert:
-	//   accountID := <the account the callback created>
-	//   inst, err := st.InstallationForAccount(accountID)  // want "55", nil
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	fv := NewFakeVerifier()
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, nil)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-1", Identity{Subject: "583231", Login: "ivan"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-1&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	acc, err := st.UpsertAccount("583231", "ivan") // idempotent: fetches the row the callback created
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.InstallationForAccount(acc.ID)
+	if err != nil {
+		t.Fatalf("InstallationForAccount: %v", err)
+	}
+	if inst != "55" {
+		t.Fatalf("installation = %q, want 55", inst)
+	}
 }
 ```
 
@@ -3214,13 +3402,28 @@ In `internal/relay/api.go`'s `loginCallback`, after `UpsertAccount` succeeds (li
 
 - [ ] **Step 5: Configure the slug**
 
-In `cmd/piper-relay/main.go`, read `PIPER_RELAY_GITHUB_APP_SLUG` and set it on the verifier when a GitHub verifier is in use:
+In `cmd/piper-relay/main.go`, read `PIPER_RELAY_GITHUB_APP_SLUG` and set it on the verifier (the variable is `v`, `main.go:165-167`) and on the App config in the Task 4 block:
 
 ```go
-	if v, ok := verifier.(*relay.GitHubVerifier); ok {
-		v.AppSlug = os.Getenv("PIPER_RELAY_GITHUB_APP_SLUG")
+	if gv, ok := v.(*relay.GitHubVerifier); ok {
+		gv.AppSlug = os.Getenv("PIPER_RELAY_GITHUB_APP_SLUG")
 	}
 ```
+
+Add `Slug` to `GitHubAppConfig`, store it on `GitHubApp`, and expose the install page:
+
+```go
+// InstallURL is the App's install-and-authorize page. Empty when the operator
+// configured no slug; the CLI then prints no install link.
+func (g *GitHubApp) InstallURL() string {
+	if g.slug == "" {
+		return ""
+	}
+	return "https://github.com/apps/" + url.PathEscape(g.slug) + "/installations/new"
+}
+```
+
+Then extend the login-poll success response (`internal/relay/api.go:225`) with `"install_url": a.ghApp.InstallURL()` when `a.ghApp != nil` — this is where Task 13's `waitForInstall` gets the URL, since the poll response is the only relay reply the CLI sees before enrolling.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -3242,7 +3445,7 @@ waiting for the webhook. Relays without an App slug keep the plain OAuth flow.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -3254,8 +3457,8 @@ EOF
 **Files:**
 - Modify: `internal/relay/api.go` (`GET /v1/github/repos`)
 - Modify: `internal/relay/api_test.go`
-- Modify: `internal/client/client.go` (client call)
-- Modify: `cmd/piper/main.go` (`piper github repos`)
+- Modify: `internal/relayclient/relayclient.go` (client call — the CLI's relay-API calls live here, *not* in `internal/client`, which is the piperd loopback client)
+- Modify: `cmd/piper/main.go` and `cmd/piper/relayonboard.go` (`piper github repos`, install polling)
 - Modify: `docs/runbooks/git-deploy-e2e.md`
 - Modify: `docs/getting-started.md`
 - Modify: `PROGRESS.md`
@@ -3264,7 +3467,8 @@ EOF
 - Consumes: `GitHubApp.Repos` (Task 4), `Store.InstallationForAccount` (Task 2), `api.authAccount` (`internal/relay/api.go:277`).
 - Produces:
   - `GET /v1/github/repos` → `{"repos":["owner/name", ...]}`
-  - `func (c *Client) GitHubRepos() ([]string, error)`
+  - `var relayclient.ErrNoInstallation = errors.New("github app not installed for this account")`
+  - `func (c *relayclient.Client) GitHubRepos(ctx context.Context, accountCredential string) ([]string, error)` — the relay's 404 maps to `ErrNoInstallation`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3313,7 +3517,7 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
 
-	st := testStore(t)
+	st := openTestStore(t)
 	acc, err := st.UpsertAccount("1001", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -3344,7 +3548,7 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 func TestGitHubReposRequiresCredential(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
-	rec := getRepos(t, reposAPI(t, testStore(t), gh), "")
+	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
@@ -3354,7 +3558,7 @@ func TestGitHubReposWithoutInstallation(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
 
-	st := testStore(t)
+	st := openTestStore(t)
 	acc, err := st.UpsertAccount("1001", "alice")
 	if err != nil {
 		t.Fatal(err)
@@ -3423,7 +3627,7 @@ func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
 
 - [ ] **Step 4: Add the CLI command**
 
-In `internal/client/client.go`, add `GitHubRepos()` following the shape of the existing relay-API calls (e.g. `Manifest` at `client.go:340`), hitting `GET /v1/github/repos` with the stored account credential.
+The CLI's relay-API calls live in `internal/relayclient` — not `internal/client`, whose `Manifest` (`client.go:340`) is a *piperd* call. Add `GitHubRepos(ctx, accountCredential)` to `relayclient` following the shape of `Enroll` (`relayclient.go:121`), sending the credential as `Bearer` and mapping the relay's 404 to a new `ErrNoInstallation` sentinel, so the poll loop below retries only on "not installed yet".
 
 In `cmd/piper/main.go`, register `piper github repos` alongside `cmdGithub` at line 459, printing one `owner/name` per line, and a one-line hint when the relay answers 404:
 
@@ -3433,43 +3637,49 @@ No repositories yet — run `piper login` to install the Piper GitHub App on the
 
 - [ ] **Step 5: Close the headless install loop**
 
-A headless box completes device flow but cannot receive the install redirect, so
-nothing links its installation until the user opens the install page on another
-device. Give `piper login` that ending. In `cmd/piper/main.go`, after a device-flow
-login succeeds against a relay that advertised an App, print the install URL and poll
-until the installation appears:
+Device flow can authorize but cannot install, so nothing links the installation until
+the user opens the install page (another tab on desktop, another device for a headless
+box). Give `piper login` that ending. In `cmd/piper/relayonboard.go`, print the
+install URL after the credential is saved and poll until the installation appears:
 
 ```go
 // waitForInstall polls the relay until the account's GitHub App installation is
-// on record. A headless box gets no install redirect, so this is how the CLI
-// learns the user finished the install page on another device.
-func waitForInstall(c *client.Client, installURL string) error {
+// on record. Device flow cannot install, so this is how `piper login` learns
+// the user finished the install page — in another tab, or on another device
+// for a headless box. A one-trip browser login for the CLI is follow-up #291.
+func waitForInstall(rc *relayclient.Client, cred, installURL string) error {
 	fmt.Printf("Install the Piper GitHub App on the repos you want to deploy:\n  %s\n\nWaiting…", installURL)
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
-		repos, err := c.GitHubRepos()
+		repos, err := rc.GitHubRepos(context.Background(), cred)
 		if err == nil {
 			fmt.Printf("\rInstalled — %d repo(s) available.\n", len(repos))
 			return nil
 		}
-		if !errors.Is(err, client.ErrNotFound) {
+		if !errors.Is(err, relayclient.ErrNoInstallation) {
 			return err
 		}
 		fmt.Print(".")
-		time.Sleep(3 * time.Second)
+		pollSleep(3 * time.Second)
 	}
 	return errors.New("timed out waiting for the GitHub App install")
 }
 ```
 
-`GitHubRepos` must distinguish the relay's 404 from other failures — have it return a
-sentinel (`client.ErrNotFound`, or whichever the package already uses for 404) so the
-poll loop only retries on "not installed yet". The install URL is
-`https://github.com/apps/<slug>/installations/new`; have the enroll/login response
-carry the slug rather than hardcoding it, so a self-hosted relay's own App works.
+The install URL comes from the login-poll response's `install_url` (Task 12) — the
+poll response is the only relay reply the CLI has seen at that point (enroll happens
+later, on the box). Extend `relayclient.Account` with
+`InstallURL string \`json:"install_url"\``; in `relayLogin`
+(`cmd/piper/relayonboard.go:26`), after the credential is saved, call
+`waitForInstall(rc, acc.AccountCredential, acc.InstallURL)` when
+`acc.InstallURL != ""`. A relay without an App (or without a slug) sends no URL and
+login ends exactly as today.
 
-Test it in `cmd/piper/main_test.go` with a stub relay that answers 404 twice and then
-200, asserting `waitForInstall` returns nil and polled three times.
+Test it in `cmd/piper/relayonboard_test.go` with an `httptest` stub relay (crib
+`TestRelayLoginStoresCredential`, line 28) whose `/v1/github/repos` answers 404 twice
+and then 200 with two repos, asserting `waitForInstall` returns nil after three polls
+— the file's `pollSleep` seam (`relayonboard.go:21`) keeps the test from really
+sleeping.
 
 - [ ] **Step 6: Update the docs**
 
@@ -3477,7 +3687,8 @@ Test it in `cmd/piper/main_test.go` with a stub relay that answers 404 twice and
 
 - no `hooks.<base>` DNS record and no publicly trusted certificate are required;
 - no `piper github setup` step;
-- the relay must run with `PIPER_RELAY_GITHUB_APP_ID`, `_APP_KEY`, `_WEBHOOK_SECRET`, `_APP_SLUG`, `_CLIENT_ID`, `_CLIENT_SECRET` set.
+- the relay must run with `PIPER_RELAY_GITHUB_APP_ID`, `_APP_KEY`, `_WEBHOOK_SECRET`, `_APP_SLUG`, `_CLIENT_ID`, `_CLIENT_SECRET` set;
+- the App's webhook URL is the relay's account-API host: `https://api.<apex>/gh` (Task 6 mounts `/gh` there).
 
 Document the loopback variant using `NewAutoApproveVerifier` (`internal/relay/verifier.go:67`) exactly as the existing runbook does for login.
 
@@ -3497,8 +3708,8 @@ Expected: gofmt clean, vet clean, all tests pass, arm64 cross-compile succeeds.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/relay/api.go internal/relay/api_test.go internal/client/client.go \
-        cmd/piper/main.go docs/ PROGRESS.md
+git add internal/relay/api.go internal/relay/api_test.go internal/relayclient/relayclient.go \
+        cmd/piper/main.go cmd/piper/relayonboard.go cmd/piper/relayonboard_test.go docs/ PROGRESS.md
 git commit -m "$(cat <<'EOF'
 feat(cli): piper github repos, plus brokered-mode docs
 
@@ -3508,7 +3719,7 @@ brokered path from BYO, including the prerequisites brokered mode drops.
 
 Part of #289
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -3519,7 +3730,9 @@ EOF
 
 - [x] Tracking issue opened: **[#289](https://github.com/getpiper/piper/issues/289)** — every task's commit trail already references it.
 - [ ] `make verify` passes on the branch tip.
-- [ ] Register the GitHub App itself under the `getpiper` org — no task does this, and tasks 4, 6, 7 and 12 cannot be exercised against real GitHub without it. Permissions `contents:read`, `deployments:write`, `pull_requests:read`; events `push`, `pull_request`, `installation`; webhook URL `https://<relay>/gh`; **"Request user authorization (OAuth) during installation" ON**.
+- [ ] Register the GitHub App itself under the `getpiper` org — no task does this, and tasks 4, 6, 7 and 12 cannot be exercised against real GitHub without it. Permissions `contents:read`, `deployments:write`, `pull_requests:read`; events `push`, `pull_request`, `installation`; webhook URL `https://api.<relay-apex>/gh` (the account-API host — Task 6 mounts `/gh` there); **"Request user authorization (OAuth) during installation" ON**; **"Enable Device Flow" ON** — device flow is the CLI's only login path, and GitHub Apps reject it unless this box is checked.
+- [ ] Production rollout note: the `agents` schema changes in place, so deploying this relay to `public.getpiper.dev` means resetting `relay.db` (pre-1.x policy — no migrations). Every account re-runs `piper login`, every box re-runs `piper connect` (the pi4 included). The swap to the App's client id is otherwise invisible — accounts key on the stable `github_id`.
 - [x] Org-install follow-up opened: **[#290](https://github.com/getpiper/piper/issues/290)** — stays open after this plan lands.
+- [x] CLI one-trip browser-login follow-up opened: **[#291](https://github.com/getpiper/piper/issues/291)** — this plan ships device flow + install-page polling for `piper login`.
 - [ ] Tick this plan's task checkboxes on #289 as each task merges.
 - [ ] PR body carries `Closes #289` and links the spec.

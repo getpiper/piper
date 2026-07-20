@@ -28,10 +28,14 @@ Separately, the relay authenticates users against a *standalone* GitHub OAuth Ap
 (`internal/relay/verifier_github.go`). So the same human authorizes GitHub twice, for
 two different pieces of Piper.
 
-Goal: **one browser trip on desktop, one GitHub consent screen, no manual install step,
-no public DNS or certificate prerequisite** for users of a public relay. Headless boxes
-still need two trips — see "Onboarding — headless" — because device flow cannot install
-an App. Everything else in this document exists to serve that goal.
+Goal: **one GitHub consent screen, no App-creation dance, no manual install step, no
+public DNS or certificate prerequisite** for users of a public relay. The CLI's login is
+device flow, so `piper login` still makes two short browser stops — enter the device
+code, then the App install page — because device flow cannot install an App; a true
+one-browser-trip CLI login is follow-up
+[#291](https://github.com/getpiper/piper/issues/291). Web/dashboard onboarding gets the
+single install-and-authorize trip today. Everything else in this document exists to
+serve that goal.
 
 ## Non-goals
 
@@ -61,7 +65,11 @@ Mitigations narrow the blast radius but do not remove it:
   minimal permissions, and never persisted;
 - user access tokens are used once at login to read `GET /user` and then discarded, so
   no user credential is stored at all;
-- an agent can mint a token only for a repo bound to *that agent*.
+- an agent can mint a token only for a repository bound to *that agent* — which
+  contains accidents and confused-deputy bugs, not an attacker on the box: `bind-repo`
+  is itself an agent-issued op, so a compromised box can bind and then mint for any
+  repository its account's installation covers. The hard boundary is the account hop —
+  an agent can never reach another account's installation.
 
 **BYO stays first-class, permanently.** It is the answer for LAN-only boxes and for
 anyone who will not accept the above. It is already built, it sits behind the existing
@@ -233,11 +241,16 @@ PR-heavy repo cannot grow it without bound.
 
 ### Onboarding — desktop
 
-1. `piper login` → relay returns the App's install URL with `state`. GitHub shows one
-   screen: authorize + pick repositories.
-2. GitHub redirects to the relay callback with `code`, `installation_id`,
-   `setup_action`. The relay exchanges the code, reads `GET /user` for `github_id`,
-   upserts the account, discards the user token, and links the installation.
+1. `piper login` → GitHub device flow (enter the code, authorize), then the CLI prints
+   the App's install URL and polls until the installation appears. One consent screen
+   covers authorize + pick repositories; a redirect-based one-trip CLI login is
+   follow-up [#291](https://github.com/getpiper/piper/issues/291).
+2. The relay learns the installation from the `installation.created` webhook (sender →
+   account by `github_id`) and the CLI's poll sees it appear. Dashboard web logins get
+   the same linkage synchronously: their callback carries `code`, `installation_id`,
+   `setup_action`, and the relay exchanges the code, reads `GET /user` for `github_id`,
+   upserts the account, discards the user token, and links the installation. Both paths
+   are idempotent — the webhook and the redirect race in either order.
 3. `piper enroll` → base domain, relay token, per-agent `webhook_secret`.
 4. `piper create myapp --port 8080` and `piper app link myapp --repo owner/name --branch main`
    → binding registered relay-side.
@@ -304,10 +317,15 @@ is dropped with a 202 and a log line — never routed.
 
 ## Security and failure modes
 
-**Authorization on token brokering** is the load-bearing check: an agent may mint a
-token only for a repository present in *its own* `repo_bindings`. Agent token → agent →
-account → installation → repo bound to that agent. Without it, one compromised box could
-read every repository the account granted.
+**Authorization on token brokering:** an agent may mint a token only for a repository
+present in *its own* `repo_bindings`. Agent token → agent → account → installation →
+repo bound to that agent. Be precise about what this buys: `bind-repo` is itself an
+agent-issued op, so against a *compromised box* the binding check is self-serve and the
+effective blast radius is every repository that box's account granted the App. What it
+does contain is accidental cross-app minting and confused-deputy bugs. The load-bearing
+boundary is the account hop: the installation is always resolved through the asking
+agent's own account (a disabled account resolves to nothing), so no box can ever mint
+against another tenant's installation.
 
 **Signature handling:** the relay verifies GitHub's `X-Hub-Signature-256` with the App
 secret, then drops it and re-signs with the per-agent secret. The agent's verification
@@ -321,6 +339,7 @@ logged, never returned by any endpoint. Every relay query is scoped by `account_
 | Failure | Behavior |
 | --- | --- |
 | Box offline | Event parks in `pending_events`, coalesced by ref, drained on reconnect |
+| Box connected but delivery fails | Same parking path — GitHub already received its 202, so the relay never leans on GitHub redelivery; the event is re-driven from `pending_events` |
 | Relay unreachable at token-mint | Deploy fails fast, status `failed`, message names the relay rather than a generic auth error |
 | GitHub API error or rate limit | Relay returns 5xx so GitHub's own delivery retry does the work; no retry loop of our own |
 | Installation deleted | Token mint 404s → deploy fails with "GitHub App is no longer installed for this account" |
@@ -349,7 +368,7 @@ Test-first per `CLAUDE.md`. Layering holds: `relay` gains GitHub knowledge,
 
 | Today | Brokered |
 | --- | --- |
-| `piper login` — browser trip #1 | `piper login` — install + authorize, one trip |
+| `piper login` — browser trip #1 | `piper login` — authorize + install, one consent screen (one-trip login: [#291](https://github.com/getpiper/piper/issues/291)) |
 | `piper enroll` | `piper enroll` |
 | `piper create myapp --port 8080` | `piper create myapp --port 8080` |
 | `piper github setup` — browser trip #2 | — |
