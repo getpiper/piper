@@ -69,3 +69,14 @@ CREATE TABLE IF NOT EXISTS github_installations (
 
 CREATE INDEX IF NOT EXISTS github_installations_account
     ON github_installations(account_id);
+
+CREATE TABLE IF NOT EXISTS repo_bindings (
+    agent_name TEXT NOT NULL REFERENCES agents(name),
+    app        TEXT NOT NULL,
+    repo       TEXT NOT NULL,
+    branch     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (agent_name, app)
+);
+
+CREATE INDEX IF NOT EXISTS repo_bindings_repo ON repo_bindings(repo);
