@@ -189,7 +189,16 @@ func (h *Handler) processPush(ctx context.Context, ev source.Event) {
 		return
 	}
 
+	// Report the host the deploy actually routed, which the deployer recorded on
+	// the app row, rather than guessing "<app>.<baseDom>". On a relay-terminated
+	// box the routed host is a flattened single-label name the relay assigned;
+	// the guess sits two labels under the apex, outside the relay's wildcard
+	// certificate, so GitHub's Deployments tab would link somewhere unreachable.
+	// Re-read after the deploy: the row read above predates it.
 	url := "https://" + app.Name + "." + h.baseDom
+	if routed, err := h.store.GetApp(app.Name); err == nil && routed.Hostname != "" {
+		url = "https://" + routed.Hostname
+	}
 	_ = h.prov.Report(ctx, ev, source.StatusSuccess, url)
 
 	h.mu.Lock()
