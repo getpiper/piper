@@ -16,7 +16,7 @@ import (
 )
 
 func (p *Provider) Fetch(ctx context.Context, ev source.Event, destDir string) error {
-	token, err := p.installationToken(ctx, ev.InstallationID)
+	token, err := p.tokens.Token(ctx, ev)
 	if err != nil {
 		return err
 	}
