@@ -36,7 +36,7 @@ func httpGet80(t *testing.T, httpAddr, host string) string {
 // (TestAddDomainRoutesWhilePending). Subdomains route like the :443 path
 // (suffix match), and a Host carrying a port still matches.
 func TestCustomDomainHTTPPumpsDownTunnel(t *testing.T) {
-	sess, _, httpAddr, _, _ := startTestRelay(t, nil, nil)
+	sess, _, httpAddr, _, _, _ := startTestRelay(t, nil, nil)
 
 	// Fake box: answer every KindHTTP stream with a 200 echoing the Host it saw.
 	go func() {
@@ -81,7 +81,7 @@ func TestCustomDomainHTTPPumpsDownTunnel(t *testing.T) {
 // all keep the pre-#228 behavior: the connection is dropped without a byte in
 // reply and no tunnel stream is ever opened.
 func TestHTTPSharedAndUnknownHostsStayDead(t *testing.T) {
-	sess, _, httpAddr, base, _ := startTestRelay(t, nil, nil)
+	sess, _, httpAddr, base, _, _ := startTestRelay(t, nil, nil)
 
 	streams := make(chan byte, 8)
 	go func() {

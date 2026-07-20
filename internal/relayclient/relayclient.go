@@ -24,9 +24,13 @@ type DeviceAuth struct {
 }
 
 // Account is the completed-login result: a relay account credential + username.
+// InstallURL is the relay's GitHub App install-and-authorize page; empty when
+// the relay has no App configured (or the App has no slug), in which case
+// login ends without an install step.
 type Account struct {
 	AccountCredential string `json:"account_credential"`
 	Username          string `json:"username"`
+	InstallURL        string `json:"install_url"`
 }
 
 // Enrollment is the result of claiming a box: an enrollment token, the assigned
@@ -35,6 +39,8 @@ type Enrollment struct {
 	EnrollmentToken string `json:"enrollment_token"`
 	BaseDomain      string `json:"base_domain"`
 	TunnelEndpoint  string `json:"tunnel_endpoint"`
+	WebhookSecret   string `json:"webhook_secret"`
+	GitHubApp       bool   `json:"github_app"`
 }
 
 // ErrAuthPending means the user has not yet completed the device flow.
@@ -46,6 +52,10 @@ var ErrBadCredential = errors.New("relay rejected account credential")
 
 // ErrQuotaExceeded means the account is already at its agent cap.
 var ErrQuotaExceeded = errors.New("account agent quota exceeded")
+
+// ErrNoInstallation means the relay's GitHub App is not installed for this
+// account yet — the caller should keep polling, not fail.
+var ErrNoInstallation = errors.New("github app not installed for this account")
 
 // Client talks to a relay's control API rooted at base.
 type Client struct {
@@ -137,5 +147,35 @@ func (c *Client) Enroll(ctx context.Context, accountCredential string) (Enrollme
 		return Enrollment{}, ErrQuotaExceeded
 	default:
 		return Enrollment{}, fmt.Errorf("relay enroll: %s", resp.Status)
+	}
+}
+
+// GitHubRepos lists the repositories the account's GitHub App installation can
+// reach. A relay 404 (not installed yet) maps to ErrNoInstallation so a poll
+// loop can retry on that specific condition and fail fast on everything else.
+func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/github/repos", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accountCredential)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var body struct {
+			Repos []string `json:"repos"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		return body.Repos, nil
+	case http.StatusNotFound:
+		return nil, ErrNoInstallation
+	default:
+		return nil, fmt.Errorf("relay github repos: %s", resp.Status)
 	}
 }

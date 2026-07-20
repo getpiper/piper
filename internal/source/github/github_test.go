@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/getpiper/piper/internal/source"
 )
 
 // testKeyPEM returns a fresh PKCS#1 RSA private key in PEM form.
@@ -37,11 +39,12 @@ func TestInstallationToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(Config{AppID: 7, PrivateKeyPEM: testKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL})
+	key, err := parsePrivateKey(testKeyPEM(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, err := p.installationToken(context.Background(), 99)
+	a := &appTokenSource{appID: 7, key: key, apiBase: srv.URL, http: srv.Client()}
+	tok, err := a.Token(context.Background(), source.Event{InstallationID: 99})
 	if err != nil {
 		t.Fatalf("installationToken: %v", err)
 	}

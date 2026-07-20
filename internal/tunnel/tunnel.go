@@ -137,17 +137,21 @@ func (s *Session) AcceptKind() (byte, net.Conn, error) {
 
 // ControlRequest is an agent→relay control message on a KindControl stream.
 type ControlRequest struct {
-	Op       string `json:"op"` // "register" | "deregister" | "provision" | "add-domain" | "remove-domain" | "domain-active"
+	Op       string `json:"op"` // "register" | "deregister" | "provision" | "add-domain" | "remove-domain" | "domain-active" | "bind-repo" | "unbind-repo" | "gh-token"
 	App      string `json:"app,omitempty"`
 	Hostname string `json:"hostname,omitempty"`
 	Token    string `json:"token,omitempty"`  // "provision": the box's control-API bearer for the relay to inject
 	Domain   string `json:"domain,omitempty"` // custom domain for add/remove/active operations
+	Repo     string `json:"repo,omitempty"`   // "owner/name" for bind-repo and gh-token
+	Branch   string `json:"branch,omitempty"` // tracked branch for bind-repo
 }
 
 // ControlResponse is the relay's reply. Error is non-empty on failure.
 type ControlResponse struct {
 	Hostname string `json:"hostname,omitempty"`
 	Error    string `json:"error,omitempty"`
+	Token    string `json:"token,omitempty"`   // "gh-token": repo-scoped installation token
+	Expires  string `json:"expires,omitempty"` // "gh-token": RFC3339 expiry
 }
 
 // WriteMsg writes v as a single length-prefixed JSON frame.

@@ -287,6 +287,93 @@ func TestRelayFileTerminatedRoundTripAndLoad(t *testing.T) {
 	}
 }
 
+func TestLoadWebhookSecretPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{
+		RelayAddr: "relay:7000", RelayToken: "enr-1", WebhookSecret: "file-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_DATA_DIR", dir)
+	t.Setenv("PIPER_RELAY_ADDR", "")
+	t.Setenv("PIPER_RELAY_TOKEN", "")
+	t.Setenv("PIPER_BASE_DOMAIN", "")
+
+	t.Setenv("PIPER_WEBHOOK_SECRET", "env-secret")
+	if got := Load().WebhookSecret; got != "env-secret" {
+		t.Fatalf("env set, file set: WebhookSecret = %q, want env value", got)
+	}
+
+	t.Setenv("PIPER_WEBHOOK_SECRET", "")
+	if got := Load().WebhookSecret; got != "file-secret" {
+		t.Fatalf("env unset, file set: WebhookSecret = %q, want file value", got)
+	}
+
+	if err := SaveRelayFile(dir, RelayFile{RelayAddr: "relay:7000", RelayToken: "enr-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().WebhookSecret; got != "" {
+		t.Fatalf("env unset, file unset: WebhookSecret = %q, want zero value", got)
+	}
+
+	t.Setenv("PIPER_WEBHOOK_SECRET", "env-secret")
+	if got := Load().WebhookSecret; got != "env-secret" {
+		t.Fatalf("env set, file unset: WebhookSecret = %q, want env value", got)
+	}
+}
+
+func TestLoadGitHubBrokeredPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveRelayFile(dir, RelayFile{
+		RelayAddr: "relay:7000", RelayToken: "enr-1", GitHubBrokered: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_DATA_DIR", dir)
+	t.Setenv("PIPER_RELAY_ADDR", "")
+	t.Setenv("PIPER_RELAY_TOKEN", "")
+	t.Setenv("PIPER_BASE_DOMAIN", "")
+
+	// env unset, file true ⇒ true (the OR with the file value).
+	t.Setenv("PIPER_GITHUB_BROKERED", "")
+	if got := Load().GitHubBrokered; !got {
+		t.Fatal("env unset, file true: GitHubBrokered = false, want true")
+	}
+
+	// env "1", file false ⇒ true (env wins).
+	if err := SaveRelayFile(dir, RelayFile{RelayAddr: "relay:7000", RelayToken: "enr-1", GitHubBrokered: false}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIPER_GITHUB_BROKERED", "1")
+	if got := Load().GitHubBrokered; !got {
+		t.Fatal("env=1, file false: GitHubBrokered = false, want true")
+	}
+
+	// env unset, file false ⇒ false.
+	t.Setenv("PIPER_GITHUB_BROKERED", "")
+	if got := Load().GitHubBrokered; got {
+		t.Fatal("env unset, file false: GitHubBrokered = true, want false")
+	}
+
+	// Neither set ⇒ zero value (false).
+	if err := SaveRelayFile(dir, RelayFile{RelayAddr: "relay:7000", RelayToken: "enr-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().GitHubBrokered; got {
+		t.Fatal("env unset, file unset: GitHubBrokered = true, want false")
+	}
+
+	// Only "1" turns it on via env; other truthy-looking strings do not, and
+	// with the file also false the result stays false — pinning the actual
+	// (not merely expected) behaviour.
+	for _, v := range []string{"true", "0", "yes"} {
+		t.Setenv("PIPER_GITHUB_BROKERED", v)
+		if got := Load().GitHubBrokered; got {
+			t.Fatalf("env=%q, file false: GitHubBrokered = true, want false (only exact %q enables it)", v, "1")
+		}
+	}
+}
+
 // A config.json that isn't in the boxes shape (e.g. the pre-v2 flat form)
 // loads as empty, same as a missing file — there is no migration pre-1.0.
 func TestLoadClientFileIgnoresNonV2File(t *testing.T) {

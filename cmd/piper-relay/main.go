@@ -172,6 +172,37 @@ func main() {
 		log.Print("piper-relay: no PIPER_RELAY_GITHUB_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
+	appSlug := os.Getenv("PIPER_RELAY_GITHUB_APP_SLUG")
+	if gv, ok := v.(*relay.GitHubVerifier); ok {
+		gv.AppSlug = appSlug
+	}
+
+	var ghApp *relay.GitHubApp
+	appID := os.Getenv("PIPER_RELAY_GITHUB_APP_ID")
+	keyPath := os.Getenv("PIPER_RELAY_GITHUB_APP_KEY")
+	if appID != "" && keyPath != "" {
+		info, err := os.Stat(keyPath)
+		if err != nil {
+			log.Fatalf("github app key: %v", err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			log.Fatalf("github app key %s is group/world readable (mode %o); chmod 600 it", keyPath, info.Mode().Perm())
+		}
+		pemBytes, err := os.ReadFile(keyPath)
+		if err != nil {
+			log.Fatalf("github app key: %v", err)
+		}
+		ghApp, err = relay.NewGitHubApp(relay.GitHubAppConfig{
+			AppID:         appID,
+			PrivateKeyPEM: string(pemBytes),
+			WebhookSecret: os.Getenv("PIPER_RELAY_GITHUB_WEBHOOK_SECRET"),
+			Slug:          appSlug,
+		})
+		if err != nil {
+			log.Fatalf("github app: %v", err)
+		}
+		log.Printf("relay: GitHub App %s configured (brokered git deploys enabled)", appID)
+	}
 
 	if !apiAddrIsLoopback(apiAddr) {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
@@ -186,7 +217,17 @@ func main() {
 	}
 
 	router := relay.NewRouter()
-	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
+	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects, ghApp)
+
+	ctrl := apiHandler
+	var delivery *relay.TunnelDelivery
+	if ghApp != nil {
+		delivery = relay.NewTunnelDelivery(st, router)
+		outer := http.NewServeMux()
+		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
+		outer.Handle("/", apiHandler)
+		ctrl = outer
+	}
 
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)
@@ -204,5 +245,5 @@ func main() {
 	}
 
 	log.Printf("piper-relay: TLS %s, HTTP %s, tunnel %s", tlsAddr, httpAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, apiHandler))
+	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, ctrl, ghApp, delivery))
 }

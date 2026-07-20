@@ -17,8 +17,8 @@ import (
 // startTestRelay opens a store with one enrolled account-bound agent, starts
 // Serve on ephemeral ports with the given tlsCfg, and dials an agent tunnel back.
 // It returns the agent session, the relay's TLS address, its plain-HTTP (:80
-// stand-in) address, the agent base domain, and the store.
-func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunnel.Session, string, string, string, *Store) {
+// stand-in) address, the agent base domain, the store, and the router.
+func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunnel.Session, string, string, string, *Store, *Router) {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "relay.db"))
 	if err != nil {
@@ -64,7 +64,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 				continue
 			}
 			router.Register(sess)
-			go serveControl(sess, st, router)
+			go serveControl(sess, st, router, nil)
 		}
 	}()
 	go func() {
@@ -87,7 +87,18 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sess, tlsLn.Addr().String(), httpLn.Addr().String(), en.BaseDomain, st
+	// The relay's accept goroutine above registers the session into router only
+	// after tunnel.Serve completes its handshake read and auth (Serve then
+	// Register), which lags Dial's return. Callers that use the returned router
+	// immediately need that registration to have already landed.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := router.Lookup(en.BaseDomain); ok {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return sess, tlsLn.Addr().String(), httpLn.Addr().String(), en.BaseDomain, st, router
 }
 
 func TestControlRegisterThenTerminate(t *testing.T) {
@@ -96,7 +107,7 @@ func TestControlRegisterThenTerminate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess, tlsAddr, _, _, _ := startTestRelay(t, tlsCfg, nil)
+	sess, tlsAddr, _, _, _, _ := startTestRelay(t, tlsCfg, nil)
 
 	// Agent side: register a hostname over a control stream.
 	cs, err := sess.OpenKind(tunnel.KindControl)
@@ -171,7 +182,7 @@ func indexOf(s, sub string) int {
 }
 
 func TestControlProvisionStoresToken(t *testing.T) {
-	sess, _, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st, _ := startTestRelay(t, nil, nil)
 
 	cs, err := sess.OpenKind(tunnel.KindControl)
 	if err != nil {
@@ -194,7 +205,7 @@ func TestControlProvisionStoresToken(t *testing.T) {
 }
 
 func TestControlProvisionRejectsEmptyToken(t *testing.T) {
-	sess, _, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st, _ := startTestRelay(t, nil, nil)
 
 	// Seed a working token first, so we can confirm an empty provision
 	// doesn't clear it.
@@ -235,7 +246,7 @@ func TestControlProvisionRejectsEmptyToken(t *testing.T) {
 }
 
 func TestSetDomainControlOpRemoved(t *testing.T) {
-	sess, _, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st, _ := startTestRelay(t, nil, nil)
 
 	control := func(op, domain string) tunnel.ControlResponse {
 		t.Helper()
@@ -280,7 +291,7 @@ func TestControlPlaneSNIDispatch(t *testing.T) {
 	ctrl := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ctrl-ok "+r.URL.Path)
 	})
-	_, tlsAddr, _, _, _ := startTestRelay(t, tlsCfg, ctrl)
+	_, tlsAddr, _, _, _, _ := startTestRelay(t, tlsCfg, ctrl)
 
 	d := &tls.Dialer{Config: &tls.Config{ServerName: "api.public.getpiper.co", InsecureSkipVerify: true}}
 	c, err := d.Dial("tcp", tlsAddr)
@@ -323,7 +334,7 @@ func controlOp(t *testing.T, sess *tunnel.Session, req tunnel.ControlRequest, wa
 // A pending claim must route immediately: that is what lets the TLS-ALPN-01
 // challenge reach the box before any cert exists (#227).
 func TestAddDomainRoutesWhilePending(t *testing.T) {
-	sess, tlsAddr, _, _, st := startTestRelay(t, nil, nil)
+	sess, tlsAddr, _, _, st, _ := startTestRelay(t, nil, nil)
 
 	got := make(chan byte, 1)
 	go func() {
@@ -368,7 +379,7 @@ func TestAddDomainRoutesWhilePending(t *testing.T) {
 }
 
 func TestDomainLifecycleControlOps(t *testing.T) {
-	sess, _, _, base, st := startTestRelay(t, nil, nil)
+	sess, _, _, base, st, _ := startTestRelay(t, nil, nil)
 
 	controlOp(t, sess, tunnel.ControlRequest{Op: "add-domain", Domain: "shop.dev"}, false)
 	controlOp(t, sess, tunnel.ControlRequest{Op: "domain-active", Domain: "shop.dev"}, false)
@@ -431,7 +442,7 @@ func TestReconnectRederivesCustomDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tunLn.Close()
-	go acceptTunnels(tunLn, st, router)
+	go acceptTunnels(tunLn, st, router, nil, nil)
 
 	dial := func(tok, base string) *tunnel.Session {
 		t.Helper()
@@ -482,5 +493,66 @@ func TestReconnectRederivesCustomDomains(t *testing.T) {
 	waitRouted("squat.dev", sessB)
 	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 1 || got[0] != "squat.dev" {
 		t.Fatalf("bob's domains after alice's remove = %v, want [squat.dev]", got)
+	}
+}
+
+func TestBindRepoControlOp(t *testing.T) {
+	sess, _, _, base, st, _ := startTestRelay(t, nil, nil)
+
+	control := func(req tunnel.ControlRequest) tunnel.ControlResponse {
+		t.Helper()
+		cs, err := sess.OpenKind(tunnel.KindControl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cs.Close()
+		if err := tunnel.WriteMsg(cs, req); err != nil {
+			t.Fatal(err)
+		}
+		var resp tunnel.ControlResponse
+		if err := tunnel.ReadMsg(cs, &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	if resp := control(tunnel.ControlRequest{
+		Op: "bind-repo", App: "blog", Repo: "alice/blog", Branch: "main",
+	}); resp.Error != "" {
+		t.Fatalf("bind-repo error: %s", resp.Error)
+	}
+	ok, err := st.AgentBoundToRepo(base, "alice/blog")
+	if err != nil || !ok {
+		t.Fatalf("binding not stored: ok=%v err=%v", ok, err)
+	}
+
+	if resp := control(tunnel.ControlRequest{Op: "bind-repo", App: "blog"}); resp.Error == "" {
+		t.Fatal("bind-repo without repo/branch was accepted")
+	}
+
+	if resp := control(tunnel.ControlRequest{Op: "unbind-repo", App: "blog"}); resp.Error != "" {
+		t.Fatalf("unbind-repo error: %s", resp.Error)
+	}
+	if ok, _ := st.AgentBoundToRepo(base, "alice/blog"); ok {
+		t.Fatal("binding survived unbind-repo")
+	}
+}
+
+func TestGHTokenControlOpRejectsUnboundRepo(t *testing.T) {
+	sess, _, _, _, _, _ := startTestRelay(t, nil, nil)
+	cs, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "gh-token", Repo: "someone/else"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error == "" || resp.Token != "" {
+		t.Fatalf("unbound repo minted a token: %+v", resp)
 	}
 }

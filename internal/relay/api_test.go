@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -79,7 +80,7 @@ func TestLoginPollUnknownHandle(t *testing.T) {
 func TestEnrollWithAccountCredential(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
-	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil, nil)
 
 	acc, _ := st.UpsertAccount("sub-1", "judy")
 	cred, _ := st.MintAccountCredential(acc.ID)
@@ -110,10 +111,46 @@ func TestEnrollWithAccountCredential(t *testing.T) {
 	}
 }
 
+func TestEnrollReturnsWebhookSecretAndAppFlag(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay.getpiper.co:7000", nil, nil, app)
+
+	acc, _ := st.UpsertAccount("sub-1", "judy")
+	cred, _ := st.MintAccountCredential(acc.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
+	req.Header.Set("Authorization", "Bearer "+cred)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enroll status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		WebhookSecret string `json:"webhook_secret"`
+		GitHubApp     bool   `json:"github_app"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.WebhookSecret == "" {
+		t.Fatal("enroll returned no webhook_secret")
+	}
+	if !out.GitHubApp {
+		t.Fatal("github_app flag not advertised despite a configured App")
+	}
+}
+
 func TestEnrollRejectsBadCredential(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
-	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", nil)
 	req.Header.Set("Authorization", "Bearer nope")
@@ -127,7 +164,7 @@ func TestEnrollRejectsBadCredential(t *testing.T) {
 func TestEnrollOverCapReturns429(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 1, 10, 5)
-	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil)
+	api := NewAPIWithTunnel(st, NewFakeVerifier(), "relay:7000", nil, nil, nil)
 	acc, _ := st.UpsertAccount("sub-1", "ken")
 	cred, _ := st.MintAccountCredential(acc.ID)
 
@@ -184,8 +221,181 @@ func newWebTestAPI(t *testing.T) (http.Handler, *FakeVerifier) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
 	fv := NewFakeVerifier()
-	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"})
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, nil)
 	return api, fv
+}
+
+// installationAccountStub fakes the GitHub "get an installation" endpoint
+// used by InstallationAccountID, reporting the given account id for any
+// installation id it's asked about.
+func installationAccountStub(t *testing.T, accountID string) *GitHubApp {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"account":{"id":` + accountID + `,"login":"whoever","type":"User"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
+func TestLoginCallbackLinksInstallation(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	fv := NewFakeVerifier()
+	// The stub reports the installation's owning account as 583231, matching
+	// the identity the callback is about to authenticate as — the ownership
+	// check must pass and the link must go through.
+	app := installationAccountStub(t, "583231")
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-1", Identity{Subject: "583231", Login: "ivan"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-1&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	acc, err := st.UpsertAccount("583231", "ivan") // idempotent: fetches the row the callback created
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.InstallationForAccount(acc.ID)
+	if err != nil {
+		t.Fatalf("InstallationForAccount: %v", err)
+	}
+	if inst != "55" {
+		t.Fatalf("installation = %q, want 55", inst)
+	}
+}
+
+// TestLoginCallbackRefusesUnownedInstallation is the security regression test
+// for the hijack this fix closes: an attacker (identity "999999") replays
+// their own callback with someone else's installation_id ("55", owned by
+// account "583231" per the stub). The mismatch must not link the
+// installation to the attacker, and login must still succeed.
+func TestLoginCallbackRefusesUnownedInstallation(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	fv := NewFakeVerifier()
+	app := installationAccountStub(t, "583231") // installation belongs to the victim, not the caller
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-attacker", Identity{Subject: "999999", Login: "attacker"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-attacker&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	acc, err := st.UpsertAccount("999999", "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InstallationForAccount(acc.ID); !errors.Is(err, ErrNoInstallation) {
+		t.Fatalf("InstallationForAccount(attacker) err = %v, want ErrNoInstallation", err)
+	}
+}
+
+// TestLoginCallbackCannotHijackLinkedInstallation is the full attack chain:
+// the victim already legitimately linked installation "55". The attacker
+// then replays their own callback with that same installation_id. Afterward
+// the installation must still belong to the victim.
+func TestLoginCallbackCannotHijackLinkedInstallation(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	victim, err := st.UpsertAccount("583231", "victim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("55", "583231", "user", "victim"); err != nil {
+		t.Fatal(err)
+	}
+
+	fv := NewFakeVerifier()
+	app := installationAccountStub(t, "583231") // installation still belongs to the victim
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-attacker", Identity{Subject: "999999", Login: "attacker"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-attacker&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	inst, err := st.InstallationForAccount(victim.ID)
+	if err != nil {
+		t.Fatalf("InstallationForAccount(victim): %v", err)
+	}
+	if inst != "55" {
+		t.Fatalf("installation = %q, want 55 (still the victim's)", inst)
+	}
+	attacker, err := st.UpsertAccount("999999", "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InstallationForAccount(attacker.ID); !errors.Is(err, ErrNoInstallation) {
+		t.Fatalf("InstallationForAccount(attacker) err = %v, want ErrNoInstallation", err)
+	}
+}
+
+// TestLoginCallbackRejectsMalformedInstallationID is the regression test for
+// the panic the ownership check introduced: InstallationAccountID used to
+// discard NewRequestWithContext's error, so a non-numeric installation_id
+// (e.g. carrying a control character) made url.Parse fail, req come back
+// nil, and g.http.Do(nil) panic instead of the login just skipping the
+// link. It also covers a path-traversal attempt in the same id, which the
+// numeric check rejects for the same reason.
+func TestLoginCallbackRejectsMalformedInstallationID(t *testing.T) {
+	for _, instID := range []string{"55\n", "../installations/1"} {
+		t.Run(instID, func(t *testing.T) {
+			st := openTestStore(t)
+			st.Configure("public.getpiper.co", 3, 10, 5)
+			fv := NewFakeVerifier()
+			app := installationAccountStub(t, "583231")
+			api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+			state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+			fv.GrantCode("code-1", Identity{Subject: "583231", Login: "ivan"})
+			req := httptest.NewRequest(http.MethodGet,
+				"/v1/login/callback?code=code-1&state="+url.QueryEscape(state)+
+					"&installation_id="+url.QueryEscape(instID)+"&setup_action=install", nil)
+			req.AddCookie(cookie)
+			rr := httptest.NewRecorder()
+			api.ServeHTTP(rr, req) // must not panic
+			if rr.Code != http.StatusFound {
+				t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+
+			acc, err := st.UpsertAccount("583231", "ivan") // idempotent: fetches the row the callback created
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.InstallationForAccount(acc.ID); !errors.Is(err, ErrNoInstallation) {
+				t.Fatalf("InstallationForAccount err = %v, want ErrNoInstallation (nothing should have linked)", err)
+			}
+		})
+	}
 }
 
 func TestWebLoginCallbackHappyPath(t *testing.T) {
@@ -347,5 +557,104 @@ func TestWebLoginNotConfigured(t *testing.T) {
 	api.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/login/callback?code=x&state=y", nil))
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unconfigured callback = %d, want 503", rr.Code)
+	}
+}
+
+// ghAPIStub serves the two GitHub endpoints repo listing touches.
+func ghAPIStub(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/55/access_tokens":
+			_, _ = w.Write([]byte(`{"token":"t","expires_at":"2026-07-20T12:00:00Z"}`))
+		case "/installation/repositories":
+			_, _ = w.Write([]byte(`{"repositories":[{"full_name":"alice/blog"},{"full_name":"alice/api"}]}`))
+		default:
+			t.Errorf("unexpected GitHub path %q", r.URL.Path)
+		}
+	}))
+}
+
+// reposAPI builds the account API with a GitHub App pointed at gh.
+func reposAPI(t *testing.T, st *Store, gh *httptest.Server) http.Handler {
+	t.Helper()
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s", APIBase: gh.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewAPIWithTunnel(st, NewFakeVerifier(), "", nil, nil, app)
+}
+
+func getRepos(t *testing.T, h http.Handler, cred string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/github/repos", nil)
+	if cred != "" {
+		req.Header.Set("Authorization", "Bearer "+cred)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestGitHubReposListsInstallationRepos(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+
+	st := openTestStore(t)
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := st.MintAccountCredential(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getRepos(t, reposAPI(t, st, gh), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Repos []string `json:"repos"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Repos) != 2 || body.Repos[0] != "alice/blog" || body.Repos[1] != "alice/api" {
+		t.Fatalf("repos = %v", body.Repos)
+	}
+}
+
+func TestGitHubReposRequiresCredential(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestGitHubReposWithoutInstallation(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+
+	st := openTestStore(t)
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := st.MintAccountCredential(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getRepos(t, reposAPI(t, st, gh), cred)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }

@@ -158,6 +158,20 @@ func (s *Store) ControlToken(baseDomain string) (string, error) {
 	return tok.String, nil
 }
 
+// AgentWebhookSecret returns the secret the relay signs brokered webhook
+// deliveries to agentName with. Unknown agents are ErrBadToken.
+func (s *Store) AgentWebhookSecret(agentName string) (string, error) {
+	var sec sql.NullString
+	err := s.db.QueryRow(`SELECT webhook_secret FROM agents WHERE name=?`, agentName).Scan(&sec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrBadToken
+	}
+	if err != nil {
+		return "", err
+	}
+	return sec.String, nil
+}
+
 // ErrDomainTaken is returned when another agent already holds a custom domain.
 var ErrDomainTaken = errors.New("domain already in use")
 

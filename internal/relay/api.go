@@ -15,15 +15,17 @@ import (
 
 // NewAPI returns the account API without a tunnel endpoint, control proxy, or
 // web login (tests / LAN). Use NewAPIWithTunnel in production.
-func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "", nil, nil) }
+func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v, "", nil, nil, nil) }
 
 // NewAPIWithTunnel is the full account-facing API: device login, browser
 // (authorization-code) login, enroll, and — when router is non-nil — the
 // /agents/ control proxy (#73). webRedirects is the allowlist of redirect_uri
-// prefixes for the browser flow; empty disables web login (503).
-func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Router, webRedirects []string) http.Handler {
+// prefixes for the browser flow; empty disables web login (503). ghApp is nil
+// when the relay holds no GitHub App, in which case enroll advertises
+// "github_app": false and boxes stay on the BYO path.
+func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Router, webRedirects []string, ghApp *GitHubApp) http.Handler {
 	a := &api{st: st, v: v, tunnelEndpoint: tunnelEndpoint,
-		webRedirects: webRedirects, webStates: map[string]webState{}}
+		webRedirects: webRedirects, webStates: map[string]webState{}, ghApp: ghApp}
 	if wv, ok := v.(WebVerifier); ok {
 		a.webv = wv
 	}
@@ -33,6 +35,7 @@ func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Rout
 	mux.HandleFunc("GET /v1/login/web", a.loginWeb)
 	mux.HandleFunc("GET /v1/login/callback", a.loginCallback)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
+	mux.HandleFunc("GET /v1/github/repos", a.githubRepos)
 	a.registerOrgRoutes(mux)
 	if router != nil {
 		proxy := NewControlProxy(st, router)
@@ -50,7 +53,8 @@ type api struct {
 	v              Verifier
 	webv           WebVerifier // nil ⇒ web login disabled
 	tunnelEndpoint string
-	webRedirects   []string // allowed redirect_uri prefixes; empty ⇒ web login disabled
+	webRedirects   []string   // allowed redirect_uri prefixes; empty ⇒ web login disabled
+	ghApp          *GitHubApp // nil ⇒ relay serves BYO users only
 
 	mu        sync.Mutex
 	webStates map[string]webState // state → pending browser flow
@@ -156,6 +160,36 @@ func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "account error", http.StatusInternalServerError)
 		return
 	}
+	// GitHub's install-and-authorize redirect carries the installation id
+	// alongside the code, so one browser trip yields both identity and
+	// installation. The installation webhook may also arrive first or later;
+	// LinkInstallation is idempotent either way.
+	//
+	// The redirect itself is not signed: a user can re-open their own callback
+	// URL with any installation_id and, without this check, rebind someone
+	// else's installation to their account. So before linking, confirm with
+	// GitHub that the installation actually belongs to the identity we just
+	// authenticated. A verification failure or mismatch must not fail the
+	// login — it only skips the linking, same as before.
+	//
+	// An org-target installation's account is the org, which never matches
+	// id.Subject (the installing user) here — that's expected. It falls
+	// through to the HMAC-signed "installation" webhook, which already links
+	// it and which LinkInstallation is idempotent against (org routing itself
+	// is deferred follow-up #290).
+	if instID := r.URL.Query().Get("installation_id"); instID != "" && a.ghApp != nil {
+		owner, err := a.ghApp.InstallationAccountID(r.Context(), instID)
+		switch {
+		case err != nil:
+			log.Printf("relay: verify installation %s: %v", instID, err)
+		case owner != id.Subject:
+			log.Printf("relay: refusing to link installation %s to %s", instID, acc.Username)
+		default:
+			if err := a.st.LinkInstallation(instID, id.Subject, "user", id.Login); err != nil {
+				log.Printf("relay: link installation %s to %s: %v", instID, acc.Username, err)
+			}
+		}
+	}
 	cred, err := a.st.MintAccountCredential(acc.ID)
 	if err != nil {
 		http.Error(w, "credential error", http.StatusInternalServerError)
@@ -222,10 +256,14 @@ func (a *api) loginPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "credential error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	resp := map[string]string{
 		"account_credential": cred,
 		"username":           acc.Username,
-	})
+	}
+	if a.ghApp != nil {
+		resp["install_url"] = a.ghApp.InstallURL()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
@@ -265,11 +303,43 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "enroll error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"enrollment_token": en.Token,
 		"base_domain":      en.BaseDomain,
 		"tunnel_endpoint":  a.tunnelEndpoint,
+		"webhook_secret":   en.WebhookSecret,
+		"github_app":       a.ghApp != nil,
 	})
+}
+
+// githubRepos lists the repositories the caller's installation can reach. No
+// list is cached: it is read live through a fresh installation token, so a
+// repository revoked in GitHub disappears here immediately.
+func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	if a.ghApp == nil {
+		http.Error(w, "relay has no github app configured", http.StatusServiceUnavailable)
+		return
+	}
+	instID, err := a.st.InstallationForAccount(acc.ID)
+	if errors.Is(err, ErrNoInstallation) {
+		http.Error(w, "github app not installed for this account", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "lookup error", http.StatusInternalServerError)
+		return
+	}
+	repos, err := a.ghApp.Repos(r.Context(), instID)
+	if err != nil {
+		log.Printf("relay: list repos for %s: %v", acc.Username, err)
+		http.Error(w, "github unavailable", http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": repos})
 }
 
 // authAccount authenticates the request's bearer account credential, writing

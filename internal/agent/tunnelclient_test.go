@@ -363,3 +363,71 @@ func TestTunnelClientDomainOps(t *testing.T) {
 	}
 	<-got
 }
+
+func TestTunnelClientRepoOps(t *testing.T) {
+	addr, sessCh := fakeRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var c TunnelClient
+	go c.Run(ctx, addr, "tok", "base.example.com", func(byte, net.Conn) (net.Conn, error) {
+		return nil, errors.New("no local dials expected")
+	})
+	relaySess := <-sessCh
+
+	got := make(chan tunnel.ControlRequest, 3)
+	go func() {
+		for {
+			kind, stream, err := relaySess.AcceptKind()
+			if err != nil {
+				return
+			}
+			if kind != tunnel.KindControl {
+				stream.Close()
+				continue
+			}
+			var req tunnel.ControlRequest
+			_ = tunnel.ReadMsg(stream, &req)
+			got <- req
+			resp := tunnel.ControlResponse{}
+			if req.Op == "gh-token" {
+				resp.Token = "ghs_x"
+			}
+			_ = tunnel.WriteMsg(stream, resp)
+			stream.Close()
+		}
+	}()
+
+	// Retry until the session is up, exactly as TestTunnelClientDomainOps does.
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err = c.BindRepo("blog", "alice/blog", "main"); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("BindRepo: %v", err)
+	}
+	if req := <-got; req.Op != "bind-repo" || req.App != "blog" || req.Repo != "alice/blog" || req.Branch != "main" {
+		t.Fatalf("BindRepo sent %+v", req)
+	}
+
+	tok, err := c.GitHubToken("alice/blog")
+	if err != nil {
+		t.Fatalf("GitHubToken: %v", err)
+	}
+	if tok != "ghs_x" {
+		t.Fatalf("token = %q, want ghs_x", tok)
+	}
+	if req := <-got; req.Op != "gh-token" || req.Repo != "alice/blog" {
+		t.Fatalf("GitHubToken sent %+v", req)
+	}
+
+	if err := c.UnbindRepo("blog"); err != nil {
+		t.Fatalf("UnbindRepo: %v", err)
+	}
+	if req := <-got; req.Op != "unbind-repo" || req.App != "blog" {
+		t.Fatalf("UnbindRepo sent %+v", req)
+	}
+}

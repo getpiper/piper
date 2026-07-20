@@ -78,7 +78,7 @@ func proxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router, al
 	}
 	base = en.BaseDomain
 	router = NewRouter()
-	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router, nil)
+	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router, nil, nil)
 	return
 }
 
@@ -340,7 +340,7 @@ func orgProxyFixture(t *testing.T) (api http.Handler, st *Store, router *Router,
 	}
 	base = en.BaseDomain
 	router = NewRouter()
-	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router, nil)
+	api = NewAPIWithTunnel(st, NewFakeVerifier(), "", router, nil, nil)
 	return
 }
 

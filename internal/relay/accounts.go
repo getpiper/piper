@@ -178,11 +178,13 @@ func (s *Store) DisableAccount(username string) error {
 	return nil
 }
 
-// Enrollment is the result of a self-service claim: an enrollment token plus the
-// single-label base domain the relay assigned the agent under the apex.
+// Enrollment is the result of a self-service claim: an enrollment token, the
+// single-label base domain the relay assigned the agent under the apex, and the
+// secret the relay signs brokered webhook deliveries to this box with.
 type Enrollment struct {
-	Token      string
-	BaseDomain string
+	Token         string
+	BaseDomain    string
+	WebhookSecret string
 }
 
 // ErrQuotaExceeded is returned when an account is already at its agent cap.
@@ -229,14 +231,21 @@ func (s *Store) EnrollForAccount(accountID string) (Enrollment, error) {
 		}
 		tok := hex.EncodeToString(raw)
 
+		rawSecret := make([]byte, 32)
+		if _, err := rand.Read(rawSecret); err != nil {
+			return Enrollment{}, err
+		}
+		secret := hex.EncodeToString(rawSecret)
+
 		_, err := tx.Exec(
-			`INSERT INTO agents(name, token_hash, base_domain, account_id, created_at) VALUES(?,?,?,?,?)`,
-			base, hashToken(tok), base, accountID, now)
+			`INSERT INTO agents(name, token_hash, base_domain, account_id, webhook_secret, created_at)
+			 VALUES(?,?,?,?,?,?)`,
+			base, hashToken(tok), base, accountID, secret, now)
 		if err == nil {
 			if err := tx.Commit(); err != nil {
 				return Enrollment{}, err
 			}
-			return Enrollment{Token: tok, BaseDomain: base}, nil
+			return Enrollment{Token: tok, BaseDomain: base, WebhookSecret: secret}, nil
 		}
 		if isUniqueViolation(err) {
 			continue // hash collided with an existing base_domain; retry

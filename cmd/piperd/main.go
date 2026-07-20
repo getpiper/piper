@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ import (
 	"github.com/getpiper/piper/internal/deploy"
 	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/runtime"
+	"github.com/getpiper/piper/internal/source"
 	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
 	"github.com/getpiper/piper/internal/tunnel"
@@ -402,11 +404,24 @@ func main() {
 	if domMgr != nil {
 		dm = domMgr
 	}
+	// The tunnel client is created here, ahead of api.New, so the link handler
+	// can push repo bindings to the relay; Run and the rest of its wiring still
+	// start later, in the relay block below. binder is declared as the
+	// api.RepoBinder interface (not a *agent.TunnelClient) so that on a
+	// LAN-only box it stays genuinely nil — a nil *agent.TunnelClient boxed into
+	// the interface would be a non-nil interface value and would defeat the
+	// "binder != nil" guard in the link handler.
+	var binder api.RepoBinder
+	var tc *agent.TunnelClient
+	if cfg.RelayAddr != "" {
+		tc = &agent.TunnelClient{}
+		binder = tc
+	}
 	apiHandler := api.New(st, dep, cfg.BaseDomain, "", func() {
 		if wh != nil {
 			wh.start()
 		}
-	}, dm)
+	}, dm, binder)
 
 	// The authenticated entry point. Always on, so LAN-only and relay-connected
 	// boxes run the identical listener topology; the relay tunnel below is its
@@ -448,7 +463,6 @@ func main() {
 				}
 			}
 		}
-		tc := &agent.TunnelClient{}
 		// One mutex shared by every OnConnect callback, so overlapping
 		// (re)connects can't race the list-then-mint and double-provision.
 		var provisionMu sync.Mutex
@@ -456,6 +470,21 @@ func main() {
 			provisionRelayControl(&provisionMu, st, tc.Provision, cfg.BaseDomain)
 			if cfg.Terminated {
 				domMgr.OnRelayConnect() // gated like Resume: box-wide API configs exist only here
+			}
+			// The relay restores its routing table from its own store when a
+			// session registers, but repo bindings live only in the box's
+			// store — there is no agent-side hostname re-registration to hook
+			// instead, so every (re)connect re-pushes them here.
+			apps, err := st.ListApps()
+			if err == nil {
+				for _, a := range apps {
+					if a.Repo == "" {
+						continue
+					}
+					if err := tc.BindRepo(a.Name, a.Repo, a.Branch); err != nil {
+						log.Printf("relay: re-bind %s: %v", a.Name, err)
+					}
+				}
 			}
 		}
 		go tc.Run(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain, dialLocal)
@@ -469,11 +498,17 @@ func main() {
 		domMgr.ResumeAppDomains()
 		go domMgr.StartRenewals(ctx)
 
-		wh = newWebhookStarter(cfg, st, rt)
-		if _, err := st.GetGitHubApp(); err == nil {
+		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken)
+		_, err := st.GetGitHubApp()
+		switch decideWebhookProvider(err, cfg, wh.ghToken != nil) {
+		case webhookProviderNone:
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				log.Printf("github app lookup: %v; webhook listener not started", err)
+			} else {
+				log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
+			}
+		default:
 			wh.start()
-		} else {
-			log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
 		}
 	}
 
@@ -584,30 +619,79 @@ type webhookStarter struct {
 	cfg     config.Config
 	st      *store.Store
 	rt      *runtime.DockerRuntime
+	ghToken func(repo string) (string, error) // nil unless brokered
 	once    sync.Once
 	srv     *http.Server
 	handler *webhook.Handler
 }
 
-func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime) *webhookStarter {
-	return &webhookStarter{cfg: cfg, st: st, rt: rt}
+func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime, ghToken func(repo string) (string, error)) *webhookStarter {
+	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken}
+}
+
+// webhookProvider is the outcome of applying the BYO-over-brokered
+// precedence rule: which GitHub credential source, if any, the webhook
+// listener should use.
+type webhookProvider int
+
+const (
+	webhookProviderNone webhookProvider = iota
+	webhookProviderBYO
+	webhookProviderBrokered
+)
+
+// decideWebhookProvider is the one place the precedence rule lives, so the
+// boot gate and webhookStarter.run can't drift apart on it (they both call
+// this instead of each re-deriving their own guard). ghErr is the error from
+// st.GetGitHubApp(): a locally stored App is an explicit BYO override and
+// always wins over the relay's offer, so ghErr == nil (a row exists) wins
+// regardless of cfg. Only store.ErrNotFound means "no local row, brokered
+// may proceed" — any other error means we could not determine whether this
+// box has its own credentials, so we fail closed rather than silently
+// switching it to trusting the relay.
+func decideWebhookProvider(ghErr error, cfg config.Config, hasGHToken bool) webhookProvider {
+	switch {
+	case ghErr == nil:
+		return webhookProviderBYO
+	case errors.Is(ghErr, store.ErrNotFound) && cfg.GitHubBrokered && cfg.WebhookSecret != "" && hasGHToken:
+		return webhookProviderBrokered
+	default:
+		return webhookProviderNone
+	}
 }
 
 func (w *webhookStarter) start() { w.once.Do(w.run) }
 
 func (w *webhookStarter) run() {
+	var prov source.Provider
+
 	gh, err := w.st.GetGitHubApp()
-	if err != nil {
-		log.Printf("webhook: no GitHub App configured: %v", err)
+	switch decideWebhookProvider(err, w.cfg, w.ghToken != nil) {
+	case webhookProviderBYO:
+		p, err := github.New(github.Config{
+			AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+		})
+		if err != nil {
+			log.Printf("webhook: github provider: %v", err)
+			return
+		}
+		prov = p
+		log.Printf("webhook: using this box's own GitHub App %d", gh.AppID)
+	case webhookProviderBrokered:
+		prov = github.NewWithTokens(
+			github.Config{WebhookSecret: w.cfg.WebhookSecret},
+			github.RelayTokens{Ask: w.ghToken},
+		)
+		log.Printf("webhook: using the relay's GitHub App (brokered)")
+	default:
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("webhook: local GitHub App lookup: %v; not starting a listener", err)
+		} else {
+			log.Printf("webhook: no GitHub App configured")
+		}
 		return
 	}
-	prov, err := github.New(github.Config{
-		AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
-	})
-	if err != nil {
-		log.Printf("webhook: github provider: %v", err)
-		return
-	}
+
 	wdep := deploy.New(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain)
 	w.handler = webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
 	w.srv = &http.Server{Addr: w.cfg.WebhookAddr, Handler: w.handler}
@@ -621,7 +705,7 @@ func (w *webhookStarter) run() {
 	if err := caddy.NewClient(w.cfg.CaddyAdmin).UpsertRoute("hooks."+w.cfg.BaseDomain, port); err != nil {
 		log.Printf("webhook route: %v", err)
 	}
-	log.Printf("webhook listening on %s (GitHub App %d)", w.cfg.WebhookAddr, gh.AppID)
+	log.Printf("webhook listening on %s", w.cfg.WebhookAddr)
 }
 
 func (w *webhookStarter) stop(ctx context.Context) {
