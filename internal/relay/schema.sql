@@ -58,3 +58,14 @@ CREATE TABLE IF NOT EXISTS custom_domains (
 );
 
 CREATE INDEX IF NOT EXISTS custom_domains_agent_base ON custom_domains(agent_base);
+
+CREATE TABLE IF NOT EXISTS github_installations (
+    installation_id TEXT PRIMARY KEY,
+    account_id      TEXT NOT NULL REFERENCES accounts(id),
+    target_type     TEXT NOT NULL,
+    target_login    TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS github_installations_account
+    ON github_installations(account_id);
