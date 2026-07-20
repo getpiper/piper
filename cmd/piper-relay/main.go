@@ -30,6 +30,23 @@ func env(key, def string) string {
 	return def
 }
 
+// readAppKey loads the GitHub App private key, refusing one any other user on
+// the box could read. Only the world bits disqualify it: systemd stages
+// LoadCredential= files at 0440 inside a per-unit tmpfs it grants nobody else
+// access to, and that is how a DynamicUser= relay is meant to receive a key —
+// the same path its TLS cert already takes. A world-readable key is still
+// fatal, which catches the realistic mistake of scp'ing one in at 0644.
+func readAppKey(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if perm := info.Mode().Perm(); perm&0o007 != 0 {
+		return nil, fmt.Errorf("%s is world readable (mode %o); chmod 600 it", path, perm)
+	}
+	return os.ReadFile(path)
+}
+
 func atoiOr(s string, def int) int {
 	if n, err := strconv.Atoi(s); err == nil {
 		return n
@@ -181,14 +198,7 @@ func main() {
 	appID := os.Getenv("PIPER_RELAY_GITHUB_APP_ID")
 	keyPath := os.Getenv("PIPER_RELAY_GITHUB_APP_KEY")
 	if appID != "" && keyPath != "" {
-		info, err := os.Stat(keyPath)
-		if err != nil {
-			log.Fatalf("github app key: %v", err)
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			log.Fatalf("github app key %s is group/world readable (mode %o); chmod 600 it", keyPath, info.Mode().Perm())
-		}
-		pemBytes, err := os.ReadFile(keyPath)
+		pemBytes, err := readAppKey(keyPath)
 		if err != nil {
 			log.Fatalf("github app key: %v", err)
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -101,5 +102,51 @@ func TestVersionRequested(t *testing.T) {
 	}
 	if version.String() == "" {
 		t.Error("version.String() is empty")
+	}
+}
+
+// TestReadAppKeyMode pins which file modes the GitHub App key may carry.
+// systemd stages LoadCredential= files at 0440 inside a per-unit 0700 tmpfs —
+// the documented way to hand a key to a DynamicUser= service, and the way the
+// relay's own TLS cert already arrives — so group-readable must be accepted.
+// World-readable must not be: `scp` defaults to 0644, which is the realistic
+// way a key gets exposed on a shared box.
+func TestReadAppKeyMode(t *testing.T) {
+	for _, tc := range []struct {
+		mode    os.FileMode
+		wantErr bool
+	}{
+		{0o600, false},
+		{0o400, false},
+		{0o440, false}, // systemd credential
+		{0o644, true},  // scp default
+		{0o604, true},
+		{0o666, true},
+	} {
+		path := filepath.Join(t.TempDir(), "github-app.pem")
+		if err := os.WriteFile(path, []byte("-----BEGIN RSA PRIVATE KEY-----"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, tc.mode); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readAppKey(path)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("mode %o: accepted a world-readable key", tc.mode)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("mode %o: %v", tc.mode, err)
+		} else if len(got) == 0 {
+			t.Errorf("mode %o: read no bytes", tc.mode)
+		}
+	}
+}
+
+func TestReadAppKeyMissing(t *testing.T) {
+	if _, err := readAppKey(filepath.Join(t.TempDir(), "nope.pem")); err == nil {
+		t.Fatal("missing key file accepted")
 	}
 }

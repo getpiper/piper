@@ -396,17 +396,40 @@ Before `sudo systemctl enable --now piper-relay`, drop the App's credentials int
 
 ```bash
 PIPER_RELAY_GITHUB_APP_ID=123456
-PIPER_RELAY_GITHUB_APP_KEY=/etc/piper-relay/github-app.pem   # mode 0600
+PIPER_RELAY_GITHUB_APP_KEY=/run/credentials/piper-relay.service/github-app.pem
 PIPER_RELAY_GITHUB_WEBHOOK_SECRET=<whsec>
 PIPER_RELAY_GITHUB_APP_SLUG=piper-bot                        # → InstallURL
 PIPER_RELAY_GITHUB_CLIENT_ID=<the App's Iv23li... client id>
 PIPER_RELAY_GITHUB_CLIENT_SECRET=<the App's client secret>
 ```
 
-The relay refuses to start if the key file is group- or world-readable, or if
-App credentials are set without `PIPER_RELAY_GITHUB_WEBHOOK_SECRET` — an empty
-secret would leave `/gh` verifying against a forgeable empty HMAC key, so a
-half-configured App is a startup failure rather than a silently open ingress.
+**The key reaches the relay as a systemd credential, not as a path in `/etc`.**
+`piper-relay.service` runs `DynamicUser=yes`, so the service user cannot read a
+root-owned `0600` file — and making it world-readable is a startup failure, not
+a workaround. Hand it over the same way the TLS cert already arrives:
+
+```bash
+sudo install -d -m 0700 /etc/piper-relay
+sudo install -m 0600 -o root -g root github-app.pem /etc/piper-relay/github-app.pem
+
+sudo tee /etc/systemd/system/piper-relay.service.d/github-app.conf >/dev/null <<'EOF'
+[Service]
+LoadCredential=github-app.pem:/etc/piper-relay/github-app.pem
+EOF
+sudo systemctl daemon-reload
+```
+
+systemd stages that at `/run/credentials/piper-relay.service/github-app.pem`,
+mode `0440` inside a per-unit tmpfs no other user can traverse — which is why
+the relay rejects only *world*-readable keys rather than any group-readable one.
+Placing the key in the `StateDirectory` instead does not work: systemd only
+re-chowns that directory when it has to fix the directory's own ownership, so a
+root-created file inside it stays unreadable to the service.
+
+The relay also refuses to start if App credentials are set without
+`PIPER_RELAY_GITHUB_WEBHOOK_SECRET` — an empty secret would leave `/gh`
+verifying against a forgeable empty HMAC key, so a half-configured App is a
+startup failure rather than a silently open ingress.
 
 `sudo systemctl restart piper-relay` and confirm the log line
 `relay: GitHub App <id> configured (brokered git deploys enabled)`.
