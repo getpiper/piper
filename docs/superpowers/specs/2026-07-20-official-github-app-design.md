@@ -40,6 +40,11 @@ an App. Everything else in this document exists to serve that goal.
   design once a repo picker exists.
 - GitHub Actions provider, raw-webhook provider, cross-fork PRs, relay-side build
   caching, delivery-ID dedupe.
+- **Org-owned installations.** An install whose target is a GitHub organization links to
+  the account of the user who installed it; `target_type` and `target_login` are recorded
+  as display metadata. Resolving org-target installations to *org-owned* agents through
+  `org_members` — described under "Ownership check" as the eventual shape — is a
+  follow-up, not part of the first implementation.
 - Backwards compatibility. Per the pre-1.x policy in `CLAUDE.md`, formats and schemas
   change in place.
 
