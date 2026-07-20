@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -86,10 +87,15 @@ func NewGitHubIngress(st *Store, app *GitHubApp, d Deliverer) http.Handler {
 
 		accountID, err := st.AccountForInstallation(installationID)
 		if err != nil {
-			// Unlinked installation: acknowledge so GitHub stops retrying, but
-			// never route. This is the tenancy boundary.
-			log.Printf("relay: %s event for unlinked installation %s", event, installationID)
-			w.WriteHeader(http.StatusAccepted)
+			if errors.Is(err, ErrNoInstallation) {
+				// Unlinked installation: acknowledge so GitHub stops retrying, but
+				// never route. This is the tenancy boundary.
+				log.Printf("relay: %s event for unlinked installation %s", event, installationID)
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+			log.Printf("relay: resolve account for installation %s: %v", installationID, err)
+			http.Error(w, "routing error", http.StatusInternalServerError)
 			return
 		}
 		bindings, err := st.BindingsForRepo(accountID, env.Repository.FullName)

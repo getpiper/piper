@@ -124,6 +124,36 @@ func TestIngressDropsUnlinkedInstallation(t *testing.T) {
 	}
 }
 
+func TestIngressStoreErrorOnLinkedInstallationReturns500(t *testing.T) {
+	st := openTestStore(t)
+	if _, err := st.UpsertAccount("1001", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &capturingDeliverer{done: make(chan struct{}, 8)}
+	h := newTestIngress(t, st, d)
+
+	// Force a transient store error (distinct from ErrNoInstallation) on an
+	// otherwise-linked installation by closing the store's DB out from under
+	// the handler.
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"ref":"refs/heads/main","after":"abc",` +
+		`"repository":{"full_name":"alice/blog"},"installation":{"id":55}}`
+	rec := postEvent(t, h, "push", signed("s3cret", []byte(body)), body)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if len(d.seen()) != 0 {
+		t.Fatal("delivered despite store error")
+	}
+}
+
 func TestIngressLinksAndUnlinksInstallation(t *testing.T) {
 	st := openTestStore(t)
 	if _, err := st.UpsertAccount("1001", "alice"); err != nil {
