@@ -28,8 +28,8 @@
 This plan links an installation to **the account of the GitHub user who installed it**
 (the webhook's `sender`), regardless of whether the target is a user or an organization.
 `target_type` and `target_login` are recorded as display metadata only. Routing an
-org-target installation to *org-owned* agents through `org_members` is a follow-up, not
-part of this plan. Every task below assumes user-account linkage.
+org-target installation to *org-owned* agents through `org_members` is a follow-up
+(#290), not part of this plan. Every task below assumes user-account linkage.
 
 ## File Structure
 
@@ -3520,6 +3520,6 @@ EOF
 - [x] Tracking issue opened: **[#289](https://github.com/getpiper/piper/issues/289)** — every task's commit trail already references it.
 - [ ] `make verify` passes on the branch tip.
 - [ ] Register the GitHub App itself under the `getpiper` org — no task does this, and tasks 4, 6, 7 and 12 cannot be exercised against real GitHub without it. Permissions `contents:read`, `deployments:write`, `pull_requests:read`; events `push`, `pull_request`, `installation`; webhook URL `https://<relay>/gh`; **"Request user authorization (OAuth) during installation" ON**.
-- [ ] Open the follow-up issue: `[relay] route org-target GitHub App installations to org-owned agents` — labelled `enhancement`, `P3`, `size/M`, `relay`.
+- [x] Org-install follow-up opened: **[#290](https://github.com/getpiper/piper/issues/290)** — stays open after this plan lands.
 - [ ] Tick this plan's task checkboxes on #289 as each task merges.
 - [ ] PR body carries `Closes #289` and links the spec.
