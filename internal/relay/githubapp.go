@@ -137,6 +137,39 @@ func (g *GitHubApp) RepoToken(ctx context.Context, installationID, repo string) 
 	})
 }
 
+// InstallationAccountID resolves an installation to the GitHub account id
+// (user or org) that owns it, authenticated as the App itself rather than
+// through the installation (which would beg the question). Callers use this
+// to confirm an installation id actually belongs to the identity presenting
+// it before trusting any binding built on that id.
+func (g *GitHubApp) InstallationAccountID(ctx context.Context, installationID string) (string, error) {
+	jwt, err := ghjwt.Sign(g.appID, g.key, time.Now())
+	if err != nil {
+		return "", err
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, g.apiBase+"/app/installations/"+installationID, nil)
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("get installation: %s: %s", resp.Status, b)
+	}
+	var out struct {
+		Account struct {
+			ID int64 `json:"id"`
+		} `json:"account"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d", out.Account.ID), nil
+}
+
 // Repos lists the repositories an installation can reach, as "owner/name".
 // This is what a dashboard's repo picker renders; no list is ever cached.
 func (g *GitHubApp) Repos(ctx context.Context, installationID string) ([]string, error) {

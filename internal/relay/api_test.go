@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -224,11 +225,34 @@ func newWebTestAPI(t *testing.T) (http.Handler, *FakeVerifier) {
 	return api, fv
 }
 
+// installationAccountStub fakes the GitHub "get an installation" endpoint
+// used by InstallationAccountID, reporting the given account id for any
+// installation id it's asked about.
+func installationAccountStub(t *testing.T, accountID string) *GitHubApp {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"account":{"id":` + accountID + `,"login":"whoever","type":"User"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s", APIBase: srv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
 func TestLoginCallbackLinksInstallation(t *testing.T) {
 	st := openTestStore(t)
 	st.Configure("public.getpiper.co", 3, 10, 5)
 	fv := NewFakeVerifier()
-	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, nil)
+	// The stub reports the installation's owning account as 583231, matching
+	// the identity the callback is about to authenticate as — the ownership
+	// check must pass and the link must go through.
+	app := installationAccountStub(t, "583231")
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
 
 	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
 	fv.GrantCode("code-1", Identity{Subject: "583231", Login: "ivan"})
@@ -252,6 +276,86 @@ func TestLoginCallbackLinksInstallation(t *testing.T) {
 	}
 	if inst != "55" {
 		t.Fatalf("installation = %q, want 55", inst)
+	}
+}
+
+// TestLoginCallbackRefusesUnownedInstallation is the security regression test
+// for the hijack this fix closes: an attacker (identity "999999") replays
+// their own callback with someone else's installation_id ("55", owned by
+// account "583231" per the stub). The mismatch must not link the
+// installation to the attacker, and login must still succeed.
+func TestLoginCallbackRefusesUnownedInstallation(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	fv := NewFakeVerifier()
+	app := installationAccountStub(t, "583231") // installation belongs to the victim, not the caller
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-attacker", Identity{Subject: "999999", Login: "attacker"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-attacker&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	acc, err := st.UpsertAccount("999999", "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InstallationForAccount(acc.ID); !errors.Is(err, ErrNoInstallation) {
+		t.Fatalf("InstallationForAccount(attacker) err = %v, want ErrNoInstallation", err)
+	}
+}
+
+// TestLoginCallbackCannotHijackLinkedInstallation is the full attack chain:
+// the victim already legitimately linked installation "55". The attacker
+// then replays their own callback with that same installation_id. Afterward
+// the installation must still belong to the victim.
+func TestLoginCallbackCannotHijackLinkedInstallation(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	victim, err := st.UpsertAccount("583231", "victim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("55", "583231", "user", "victim"); err != nil {
+		t.Fatal(err)
+	}
+
+	fv := NewFakeVerifier()
+	app := installationAccountStub(t, "583231") // installation still belongs to the victim
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-attacker", Identity{Subject: "999999", Login: "attacker"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-attacker&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	inst, err := st.InstallationForAccount(victim.ID)
+	if err != nil {
+		t.Fatalf("InstallationForAccount(victim): %v", err)
+	}
+	if inst != "55" {
+		t.Fatalf("installation = %q, want 55 (still the victim's)", inst)
+	}
+	attacker, err := st.UpsertAccount("999999", "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InstallationForAccount(attacker.ID); !errors.Is(err, ErrNoInstallation) {
+		t.Fatalf("InstallationForAccount(attacker) err = %v, want ErrNoInstallation", err)
 	}
 }
 
