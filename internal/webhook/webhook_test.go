@@ -20,6 +20,7 @@ type fakeProvider struct {
 	parseErr error
 	ev       source.Event
 	reports  []source.Status
+	urls     []string
 	fetchErr error
 }
 
@@ -27,11 +28,23 @@ func (f *fakeProvider) Parse(http.Header, []byte) (source.Event, error) {
 	return f.ev, f.parseErr
 }
 func (f *fakeProvider) Fetch(context.Context, source.Event, string) error { return f.fetchErr }
-func (f *fakeProvider) Report(_ context.Context, _ source.Event, s source.Status, _ string) error {
+func (f *fakeProvider) Report(_ context.Context, _ source.Event, s source.Status, url string) error {
 	f.mu.Lock()
 	f.reports = append(f.reports, s)
+	f.urls = append(f.urls, url)
 	f.mu.Unlock()
 	return nil
+}
+
+func (f *fakeProvider) successURL() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, st := range f.reports {
+		if st == source.StatusSuccess {
+			return f.urls[i]
+		}
+	}
+	return ""
 }
 func (f *fakeProvider) statuses() []source.Status {
 	f.mu.Lock()
@@ -316,5 +329,33 @@ func TestPRClosedWithoutPreviewReportsNothing(t *testing.T) {
 	// no wasted deployments lookup, no swallowed "no deployment" error.
 	if got := p.statuses(); len(got) != 0 {
 		t.Fatalf("statuses = %v, want none", got)
+	}
+}
+
+// The URL reported to GitHub must be the host the deploy actually routed, not
+// "<app>.<baseDom>". On a relay-terminated box the routed host is a flattened
+// single-label name the relay assigned; the guessed one sits two labels under
+// the apex, outside the relay's wildcard certificate, so GitHub's Deployments
+// tab would link somewhere that cannot serve — while the CLI and TUI, which
+// read the recorded hostname, showed the working URL.
+func TestReportsTheRoutedHostname(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	if err := s.SetAppHostname("blog", "abc123-alice.public.getpiper.dev"); err != nil {
+		t.Fatal(err)
+	}
+	p := &fakeProvider{ev: source.Event{
+		Kind: source.KindPush, Repo: "alice/blog", Ref: "refs/heads/main", SHA: "s1",
+	}}
+	h := webhook.New(p, s, &fakeDeployer{}, "85b90055-ozykhan.public.getpiper.dev")
+
+	if rec := post(h); rec.Code != http.StatusAccepted {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	h.Wait()
+
+	if got, want := p.successURL(), "https://abc123-alice.public.getpiper.dev"; got != want {
+		t.Fatalf("reported %q, want %q", got, want)
 	}
 }
