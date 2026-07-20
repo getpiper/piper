@@ -490,6 +490,24 @@ func TestManifestAndExchange(t *testing.T) {
 	}
 }
 
+func TestResetGitHubReportsNextProvider(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/github/app" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		io.WriteString(w, `{"provider":"brokered"}`)
+	}))
+	defer srv.Close()
+
+	got, err := New(srv.URL, "").ResetGitHub()
+	if err != nil {
+		t.Fatalf("ResetGitHub: %v", err)
+	}
+	if got != "brokered" {
+		t.Fatalf("provider = %q, want brokered", got)
+	}
+}
+
 func TestSetsAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -369,6 +369,26 @@ func (c *Client) ExchangeGitHub(code string) error {
 	return nil
 }
 
+// ResetGitHub drops the box's own GitHub App and returns the webhook credential
+// source it will use once piperd restarts ("brokered", "none", or "unknown").
+func (c *Client) ResetGitHub() (string, error) {
+	resp, err := c.do(http.MethodDelete, "/v1/github/app", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", responseError("reset github", resp)
+	}
+	var out struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Provider, nil
+}
+
 // StatusError is the error for a request that reached the server but got a
 // non-2xx response; Code lets callers tell auth failures (401) from other
 // HTTP errors and from transport errors (which are never a StatusError).
