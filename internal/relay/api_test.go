@@ -359,6 +359,45 @@ func TestLoginCallbackCannotHijackLinkedInstallation(t *testing.T) {
 	}
 }
 
+// TestLoginCallbackRejectsMalformedInstallationID is the regression test for
+// the panic the ownership check introduced: InstallationAccountID used to
+// discard NewRequestWithContext's error, so a non-numeric installation_id
+// (e.g. carrying a control character) made url.Parse fail, req come back
+// nil, and g.http.Do(nil) panic instead of the login just skipping the
+// link. It also covers a path-traversal attempt in the same id, which the
+// numeric check rejects for the same reason.
+func TestLoginCallbackRejectsMalformedInstallationID(t *testing.T) {
+	for _, instID := range []string{"55\n", "../installations/1"} {
+		t.Run(instID, func(t *testing.T) {
+			st := openTestStore(t)
+			st.Configure("public.getpiper.co", 3, 10, 5)
+			fv := NewFakeVerifier()
+			app := installationAccountStub(t, "583231")
+			api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, app)
+
+			state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+			fv.GrantCode("code-1", Identity{Subject: "583231", Login: "ivan"})
+			req := httptest.NewRequest(http.MethodGet,
+				"/v1/login/callback?code=code-1&state="+url.QueryEscape(state)+
+					"&installation_id="+url.QueryEscape(instID)+"&setup_action=install", nil)
+			req.AddCookie(cookie)
+			rr := httptest.NewRecorder()
+			api.ServeHTTP(rr, req) // must not panic
+			if rr.Code != http.StatusFound {
+				t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+
+			acc, err := st.UpsertAccount("583231", "ivan") // idempotent: fetches the row the callback created
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.InstallationForAccount(acc.ID); !errors.Is(err, ErrNoInstallation) {
+				t.Fatalf("InstallationForAccount err = %v, want ErrNoInstallation (nothing should have linked)", err)
+			}
+		})
+	}
+}
+
 func TestWebLoginCallbackHappyPath(t *testing.T) {
 	api, fv := newWebTestAPI(t)
 	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")

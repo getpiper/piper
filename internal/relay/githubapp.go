@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,11 +144,20 @@ func (g *GitHubApp) RepoToken(ctx context.Context, installationID, repo string) 
 // to confirm an installation id actually belongs to the identity presenting
 // it before trusting any binding built on that id.
 func (g *GitHubApp) InstallationAccountID(ctx context.Context, installationID string) (string, error) {
+	// installationID comes from an unauthenticated callback query parameter,
+	// not from us — GitHub installation ids are always integers, so reject
+	// anything else before it reaches a URL rather than merely escaping it.
+	if _, err := strconv.ParseInt(installationID, 10, 64); err != nil {
+		return "", fmt.Errorf("installation id %q is not numeric", installationID)
+	}
 	jwt, err := ghjwt.Sign(g.appID, g.key, time.Now())
 	if err != nil {
 		return "", err
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, g.apiBase+"/app/installations/"+installationID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.apiBase+"/app/installations/"+installationID, nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := g.http.Do(req)

@@ -184,7 +184,9 @@ func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
 		case owner != id.Subject:
 			log.Printf("relay: refusing to link installation %s to %s", instID, acc.Username)
 		default:
-			_ = a.st.LinkInstallation(instID, id.Subject, "user", id.Login)
+			if err := a.st.LinkInstallation(instID, id.Subject, "user", id.Login); err != nil {
+				log.Printf("relay: link installation %s to %s: %v", instID, acc.Username, err)
+			}
 		}
 	}
 	cred, err := a.st.MintAccountCredential(acc.ID)
