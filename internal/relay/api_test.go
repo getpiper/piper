@@ -224,6 +224,37 @@ func newWebTestAPI(t *testing.T) (http.Handler, *FakeVerifier) {
 	return api, fv
 }
 
+func TestLoginCallbackLinksInstallation(t *testing.T) {
+	st := openTestStore(t)
+	st.Configure("public.getpiper.co", 3, 10, 5)
+	fv := NewFakeVerifier()
+	api := NewAPIWithTunnel(st, fv, "", nil, []string{"https://dash.getpiper.co/"}, nil)
+
+	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")
+	fv.GrantCode("code-1", Identity{Subject: "583231", Login: "ivan"})
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/login/callback?code=code-1&state="+url.QueryEscape(state)+
+			"&installation_id=55&setup_action=install", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	api.ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	acc, err := st.UpsertAccount("583231", "ivan") // idempotent: fetches the row the callback created
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := st.InstallationForAccount(acc.ID)
+	if err != nil {
+		t.Fatalf("InstallationForAccount: %v", err)
+	}
+	if inst != "55" {
+		t.Fatalf("installation = %q, want 55", inst)
+	}
+}
+
 func TestWebLoginCallbackHappyPath(t *testing.T) {
 	api, fv := newWebTestAPI(t)
 	state, cookie := startWebLogin(t, api, "https://dash.getpiper.co/auth")

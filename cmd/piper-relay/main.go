@@ -172,6 +172,10 @@ func main() {
 		log.Print("piper-relay: no PIPER_RELAY_GITHUB_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
+	appSlug := os.Getenv("PIPER_RELAY_GITHUB_APP_SLUG")
+	if gv, ok := v.(*relay.GitHubVerifier); ok {
+		gv.AppSlug = appSlug
+	}
 
 	var ghApp *relay.GitHubApp
 	appID := os.Getenv("PIPER_RELAY_GITHUB_APP_ID")
@@ -192,6 +196,7 @@ func main() {
 			AppID:         appID,
 			PrivateKeyPEM: string(pemBytes),
 			WebhookSecret: os.Getenv("PIPER_RELAY_GITHUB_WEBHOOK_SECRET"),
+			Slug:          appSlug,
 		})
 		if err != nil {
 			log.Fatalf("github app: %v", err)

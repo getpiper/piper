@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ type GitHubAppConfig struct {
 	PrivateKeyPEM string
 	WebhookSecret string
 	APIBase       string // defaults to https://api.github.com
+	Slug          string // the App's URL slug; empty disables InstallURL
 }
 
 // GitHubApp is the relay's view of one GitHub App: webhook signature
@@ -36,6 +38,7 @@ type GitHubApp struct {
 	key     *rsa.PrivateKey
 	secret  string
 	apiBase string
+	slug    string
 	http    *http.Client
 }
 
@@ -53,8 +56,18 @@ func NewGitHubApp(cfg GitHubAppConfig) (*GitHubApp, error) {
 		key:     key,
 		secret:  cfg.WebhookSecret,
 		apiBase: strings.TrimRight(base, "/"),
+		slug:    cfg.Slug,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}, nil
+}
+
+// InstallURL is the App's install-and-authorize page. Empty when the operator
+// configured no slug; the CLI then prints no install link.
+func (g *GitHubApp) InstallURL() string {
+	if g.slug == "" {
+		return ""
+	}
+	return "https://github.com/apps/" + url.PathEscape(g.slug) + "/installations/new"
 }
 
 // VerifySignature checks GitHub's X-Hub-Signature-256 header against the App

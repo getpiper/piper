@@ -159,6 +159,15 @@ func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "account error", http.StatusInternalServerError)
 		return
 	}
+	// GitHub's install-and-authorize redirect carries the installation id
+	// alongside the code, so one browser trip yields both identity and
+	// installation. The installation webhook may also arrive first or later;
+	// LinkInstallation is idempotent either way.
+	if instID := r.URL.Query().Get("installation_id"); instID != "" {
+		if err := a.st.LinkInstallation(instID, id.Subject, "user", id.Login); err != nil {
+			log.Printf("relay: link installation %s for %s: %v", instID, acc.Username, err)
+		}
+	}
 	cred, err := a.st.MintAccountCredential(acc.ID)
 	if err != nil {
 		http.Error(w, "credential error", http.StatusInternalServerError)
@@ -225,10 +234,14 @@ func (a *api) loginPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "credential error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	resp := map[string]string{
 		"account_credential": cred,
 		"username":           acc.Username,
-	})
+	}
+	if a.ghApp != nil {
+		resp["install_url"] = a.ghApp.InstallURL()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
