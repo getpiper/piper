@@ -2,13 +2,16 @@ package relay
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -151,5 +154,71 @@ func TestDrainForReplaysOnlyTheNewestPerRef(t *testing.T) {
 	}
 	if len(left) != 0 {
 		t.Fatalf("%d events still parked after drain", len(left))
+	}
+}
+
+// TestDrainForBailsWhileOffline pins the bail at the top of DrainFor: it must
+// never reach the store while the agent has no live session. We close the
+// store out from under it and capture relay's log output — if the bail is
+// skipped, DrainFor calls DrainEvents on a closed DB, which logs an error;
+// the bail's whole job is to never let that call happen.
+func TestDrainForBailsWhileOffline(t *testing.T) {
+	st := openTestStore(t)
+	_, base := enrolledAgent(t, st, "1001", "alice")
+	router := NewRouter() // no session registered: base is offline
+
+	if err := st.ParkEvent(base, "blog", "main", "push", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+
+	NewTunnelDelivery(st, router).DrainFor(context.Background(), base)
+
+	if logs.Len() != 0 {
+		t.Fatalf("DrainFor touched the store while offline: %s", logs.String())
+	}
+}
+
+// TestDrainForReparksFailedReplay proves a replay that fails is re-parked,
+// not dropped: GitHub already got its 202 for the original delivery, so a
+// silently lost event here would never be retried by anyone.
+func TestDrainForReparksFailedReplay(t *testing.T) {
+	sess, _, _, base, st, router := startTestRelay(t, nil, nil)
+
+	if err := st.ParkEvent(base, "blog", "main", "push", []byte(`{"after":"x"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		kind, conn, err := sess.AcceptKind()
+		if err != nil || kind != tunnel.KindHTTP {
+			return
+		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, req.Body)
+		_, _ = io.WriteString(conn, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
+	}()
+
+	NewTunnelDelivery(st, router).DrainFor(context.Background(), base)
+
+	got, err := st.DrainEvents(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events after failed replay, want 1 (re-parked, not dropped)", len(got))
+	}
+	if string(got[0].Payload) != `{"after":"x"}` {
+		t.Fatalf("payload = %s, want the original", got[0].Payload)
 	}
 }

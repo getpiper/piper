@@ -103,6 +103,7 @@ type PendingEvent struct {
 	Ref       string
 	Event     string
 	Payload   []byte
+	CreatedAt string
 }
 
 // ParkEvent stores an undelivered event, coalescing by (agent, app, ref): a
@@ -135,6 +136,26 @@ func (s *Store) ParkEvent(agentName, app, ref, event string, payload []byte) err
 	return err
 }
 
+// ReparkEvent restores a replay that failed delivery, using the event's
+// ORIGINAL created_at rather than now: a re-park is not a new arrival, and
+// must not win the coalescing slot by park recency when a genuinely newer
+// event took the slot while the replay was in flight (DrainFor drains,
+// delivers, and re-parks in three separate steps, so that window is real).
+// The WHERE clause makes the overwrite conditional on the re-park still
+// being the newest thing for this ref; if it lost the race, the INSERT is
+// silently dropped, which is correct by design — the newer event already
+// in the slot supersedes it under last-write-wins.
+func (s *Store) ReparkEvent(agentName, app, ref, event string, payload []byte, createdAt string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO pending_events(agent_name, app, ref, event, payload, created_at)
+		 VALUES(?,?,?,?,?,?)
+		 ON CONFLICT(agent_name, app, ref) DO UPDATE SET
+		     event = excluded.event, payload = excluded.payload, created_at = excluded.created_at
+		 WHERE excluded.created_at > pending_events.created_at`,
+		agentName, app, ref, event, payload, createdAt)
+	return err
+}
+
 // DrainEvents returns and removes every parked event for agentName. Read and
 // delete share one immediate transaction (see Open's _txlock): a concurrent
 // ParkEvent either commits before it and is returned, or blocks until after
@@ -147,7 +168,7 @@ func (s *Store) DrainEvents(agentName string) ([]PendingEvent, error) {
 	}
 	defer tx.Rollback()
 	rows, err := tx.Query(
-		`SELECT app, ref, event, payload FROM pending_events
+		`SELECT app, ref, event, payload, created_at FROM pending_events
 		  WHERE agent_name=? ORDER BY created_at`, agentName)
 	if err != nil {
 		return nil, err
@@ -155,7 +176,7 @@ func (s *Store) DrainEvents(agentName string) ([]PendingEvent, error) {
 	var out []PendingEvent
 	for rows.Next() {
 		ev := PendingEvent{AgentName: agentName}
-		if err := rows.Scan(&ev.App, &ev.Ref, &ev.Event, &ev.Payload); err != nil {
+		if err := rows.Scan(&ev.App, &ev.Ref, &ev.Event, &ev.Payload, &ev.CreatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -190,7 +211,7 @@ func (t *TunnelDelivery) DrainFor(ctx context.Context, agentName string) {
 		b := Binding{AgentName: ev.AgentName, App: ev.App}
 		if err := t.Deliver(ctx, b, ev.Event, ev.Payload); err != nil {
 			log.Printf("relay: replay %s to %s/%s: %v (re-parking)", ev.Event, ev.AgentName, ev.App, err)
-			if perr := t.st.ParkEvent(ev.AgentName, ev.App, ev.Ref, ev.Event, ev.Payload); perr != nil {
+			if perr := t.st.ReparkEvent(ev.AgentName, ev.App, ev.Ref, ev.Event, ev.Payload, ev.CreatedAt); perr != nil {
 				log.Printf("relay: re-park %s for %s/%s: %v", ev.Event, ev.AgentName, ev.App, perr)
 			}
 		}

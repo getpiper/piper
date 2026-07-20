@@ -1,6 +1,9 @@
 package relay
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParkEventCoalescesByRef(t *testing.T) {
 	st := openTestStore(t)
@@ -79,8 +82,43 @@ func TestParkEventCapsPerAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) > maxPendingPerAgent {
-		t.Fatalf("parked %d events, cap is %d", len(got), maxPendingPerAgent)
+	if len(got) != maxPendingPerAgent {
+		t.Fatalf("parked %d events, want exactly %d", len(got), maxPendingPerAgent)
+	}
+	// Eviction must drop the OLDEST rows: survivors are pr-10..pr-59, in
+	// ascending created_at order (DrainEvents orders by created_at).
+	for i, ev := range got {
+		want := "pr-" + itoa(i+10)
+		if ev.Ref != want {
+			t.Fatalf("survivor %d: ref = %s, want %s", i, ev.Ref, want)
+		}
+	}
+}
+
+// TestReparkEventDoesNotClobberNewerEvent pins the coalescing invariant a
+// re-park must not break: a replay carrying a stale original created_at must
+// lose the slot to a genuinely newer event already parked there.
+func TestReparkEventDoesNotClobberNewerEvent(t *testing.T) {
+	st := openTestStore(t)
+	_, agent := enrolledAgent(t, st, "1001", "alice")
+
+	if err := st.ParkEvent(agent, "blog", "main", "push", []byte(`{"after":"new"}`)); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().UTC().Add(-time.Hour).Format(pendingTimeLayout)
+	if err := st.ReparkEvent(agent, "blog", "main", "push", []byte(`{"after":"old"}`), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.DrainEvents(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1", len(got))
+	}
+	if string(got[0].Payload) != `{"after":"new"}` {
+		t.Fatalf("payload = %s, want the newer event to survive the stale re-park", got[0].Payload)
 	}
 }
 
