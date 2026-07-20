@@ -27,8 +27,8 @@ import (
 
 var openBrowserFn = openBrowser
 
-// stdinReader feeds the delete confirmation prompt; a var so tests can
-// substitute input.
+// stdinReader feeds the destructive-command confirmation prompts; a var so
+// tests can substitute input.
 var stdinReader io.Reader = os.Stdin
 
 // dialClient returns a client for piperd's control API: loopback by default,
@@ -397,7 +397,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper delete <name> [--yes]")
 			return 2
 		}
-		if !*yes && !confirmDelete(stdout, name) {
+		if !*yes && !confirmPrompt(stdout, fmt.Sprintf("delete app %q and all its history?", name)) {
 			fmt.Fprintln(stdout, "aborted")
 			return 0
 		}
@@ -457,7 +457,7 @@ func cmdApp(remote string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-const githubUsage = "usage: piper github setup [--org <name>] | piper github repos"
+const githubUsage = "usage: piper github setup [--org <name>] | piper github repos | piper github reset [--yes]"
 
 func cmdGithub(remote string, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
@@ -483,6 +483,18 @@ func cmdGithub(remote string, args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return githubRepos(stdout, stderr)
+	case "reset":
+		fs := flag.NewFlagSet("reset", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		yes := fs.Bool("yes", false, "skip the confirmation prompt")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "usage: piper github reset [--yes]")
+			return 2
+		}
+		return githubReset(remote, *yes, stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, githubUsage)
 		return 2
@@ -559,6 +571,38 @@ func githubSetup(remote, org string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// githubReset drops the box's own GitHub App. A stored App is treated as a
+// deliberate operator override and outranks any App a relay brokers, so a box
+// that ever ran `piper github setup` keeps failing brokered deliveries until
+// the row goes (#299). The provider only takes effect at start, hence the
+// restart line.
+func githubReset(remote string, yes bool, stdout, stderr io.Writer) int {
+	c, ok := dialClient(remote, stderr)
+	if !ok {
+		return 1
+	}
+	if !yes && !confirmPrompt(stdout, "remove this box's own GitHub App? its private key is not recoverable") {
+		fmt.Fprintln(stdout, "aborted")
+		return 0
+	}
+	provider, err := c.ResetGitHub()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "removed this box's own GitHub App.")
+	switch provider {
+	case "brokered":
+		fmt.Fprintln(stdout, "webhooks will use the relay's brokered GitHub App after a restart of piperd.")
+	case "none":
+		fmt.Fprintln(stdout, "no GitHub App is configured now; git deploys stay off until you run `piper github setup`")
+		fmt.Fprintln(stdout, "or connect to a relay that brokers one. Restart piperd to apply.")
+	default:
+		fmt.Fprintf(stdout, "next webhook provider: %s. Restart piperd to apply.\n", provider)
+	}
+	return 0
+}
+
 // manifestFormHandler serves the auto-submitting manifest form. The Content-Type
 // is set explicitly: the page starts with <form>, which Go's content sniffer does
 // not recognize as HTML, so it would otherwise be served as text/plain and the
@@ -583,9 +627,9 @@ func openBrowser(url string) error {
 	}
 }
 
-// confirmDelete guards the destructive delete; only "y"/"yes" proceeds.
-func confirmDelete(stdout io.Writer, name string) bool {
-	fmt.Fprintf(stdout, "delete app %q and all its history? [y/N] ", name)
+// confirmPrompt guards a destructive command; only "y"/"yes" proceeds.
+func confirmPrompt(stdout io.Writer, question string) bool {
+	fmt.Fprintf(stdout, "%s [y/N] ", question)
 	sc := bufio.NewScanner(stdinReader)
 	if !sc.Scan() {
 		return false

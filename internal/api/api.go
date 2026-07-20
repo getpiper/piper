@@ -67,7 +67,10 @@ type RepoBinder interface {
 
 // onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
 // exchange endpoint, so the daemon can start serving webhooks without a restart.
-func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager, binder RepoBinder) http.Handler {
+// nextGitHubProvider, if non-nil, names the webhook credential source the box
+// would pick with no App stored locally; the reset endpoint reports it so the
+// operator learns whether anything takes over. Nil answers "unknown".
+func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager, binder RepoBinder, nextGitHubProvider func() string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -315,6 +318,23 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			onGitHubApp()
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// Dropping the stored App is the only way off BYO: while the row exists it
+	// is treated as a deliberate operator override and shadows any App a relay
+	// brokers, so brokered deliveries fail their signature check (#299). The
+	// running listener keeps the old credentials until piperd restarts — the
+	// provider is chosen once, at start — which is why the reply names the
+	// provider that restart will pick rather than one now in effect.
+	mux.HandleFunc("DELETE /v1/github/app", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.DeleteGitHubApp(); err != nil {
+			serverError(w, r, err)
+			return
+		}
+		provider := "unknown"
+		if nextGitHubProvider != nil {
+			provider = nextGitHubProvider()
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"provider": provider})
 	})
 
 	noRelay := func(w http.ResponseWriter) bool {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/getpiper/piper/internal/config"
@@ -73,5 +74,38 @@ func TestDecideWebhookProvider(t *testing.T) {
 				t.Fatalf("decideWebhookProvider(%v, %+v, %v) = %v, want %v", tt.ghErr, tt.cfg, tt.hasGHToken, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWebhookProviderName pins the strings `piper github reset` reports back to
+// the operator, so the CLI can phrase its follow-up per provider.
+func TestWebhookProviderName(t *testing.T) {
+	for prov, want := range map[webhookProvider]string{
+		webhookProviderBYO:      "byo",
+		webhookProviderBrokered: "brokered",
+		webhookProviderNone:     "none",
+	} {
+		if got := prov.name(); got != want {
+			t.Errorf("%v.name() = %q, want %q", prov, got, want)
+		}
+	}
+}
+
+// TestShadowWarning covers the line whose absence cost an hour of diagnosis
+// (#299): when a stored App wins on a relay that brokers one, nothing else in
+// the log says the brokered App was passed over.
+func TestShadowWarning(t *testing.T) {
+	brokeredCfg := config.Config{GitHubBrokered: true, WebhookSecret: "shh"}
+
+	if got := shadowWarning(webhookProviderBYO, brokeredCfg); got == "" {
+		t.Error("BYO on a brokering relay warned nothing; want the shadowing warning")
+	} else if !strings.Contains(got, "piper github reset") {
+		t.Errorf("warning = %q, want the reset command", got)
+	}
+	if got := shadowWarning(webhookProviderBYO, config.Config{}); got != "" {
+		t.Errorf("BYO with no brokered offer warned %q, want silence", got)
+	}
+	if got := shadowWarning(webhookProviderBrokered, brokeredCfg); got != "" {
+		t.Errorf("brokered shadows nothing, warned %q", got)
 	}
 }

@@ -421,7 +421,11 @@ func main() {
 		if wh != nil {
 			wh.start()
 		}
-	}, dm, binder)
+	}, dm, binder, func() string {
+		// What `piper github reset` leaves behind: the same decision, re-run as
+		// if the row it just deleted had never been there.
+		return decideWebhookProvider(store.ErrNotFound, cfg, wh != nil && wh.ghToken != nil).name()
+	})
 
 	// The authenticated entry point. Always on, so LAN-only and relay-connected
 	// boxes run the identical listener topology; the relay tunnel below is its
@@ -688,6 +692,31 @@ func decideWebhookProvider(ghErr error, cfg config.Config, hasGHToken bool) webh
 	}
 }
 
+// name is the wire spelling the control API reports to `piper github reset`.
+func (p webhookProvider) name() string {
+	switch p {
+	case webhookProviderBYO:
+		return "byo"
+	case webhookProviderBrokered:
+		return "brokered"
+	default:
+		return "none"
+	}
+}
+
+// shadowWarning is the line that makes a passed-over brokered App visible.
+// The precedence rule is right — a locally stored App is a deliberate trust
+// boundary and must win — but a box that once ran `piper github setup` then
+// enrolled on a brokering relay silently verifies deliveries against the wrong
+// secret, and the only signal is the absence of the brokered log line (#299).
+func shadowWarning(prov webhookProvider, cfg config.Config) string {
+	if prov != webhookProviderBYO || !cfg.GitHubBrokered {
+		return ""
+	}
+	return "webhook: the relay offers a brokered GitHub App, shadowed by this box's own; " +
+		"run `piper github reset` to use the relay's"
+}
+
 func (w *webhookStarter) start() { w.once.Do(w.run) }
 
 func (w *webhookStarter) run() {
@@ -705,6 +734,9 @@ func (w *webhookStarter) run() {
 		}
 		prov = p
 		log.Printf("webhook: using this box's own GitHub App %d", gh.AppID)
+		if warn := shadowWarning(webhookProviderBYO, w.cfg); warn != "" {
+			log.Print(warn)
+		}
 	case webhookProviderBrokered:
 		prov = github.NewWithTokens(
 			github.Config{WebhookSecret: w.cfg.WebhookSecret},

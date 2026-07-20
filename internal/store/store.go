@@ -247,6 +247,13 @@ func (s *Store) GetGitHubApp() (GitHubApp, error) {
 	return a, err
 }
 
+// DeleteGitHubApp drops this box's own GitHub App, so a stored row stops
+// shadowing a relay's brokered App (#299). Deleting nothing is not an error.
+func (s *Store) DeleteGitHubApp() error {
+	_, err := s.db.Exec(`DELETE FROM github_app WHERE id=1`)
+	return err
+}
+
 // Ordered deployment queries key on rowid (monotonic insertion order), not the
 // created_at text: RFC3339Nano drops trailing zeros, so its lexical order is
 // not chronological and equal timestamps have no tiebreaker (#109).
