@@ -371,10 +371,12 @@ themselves when wrong:
 - **Enable Device Flow — ON.** Device flow is the CLI's only login path, and
   GitHub rejects it outright unless this is checked. Without it `piper login`
   cannot work at any point.
-- **Request user authorization (OAuth) during installation — ON.** This is what
-  makes one browser screen cover both identity and repository selection, and
-  what puts `installation_id` on the callback. With it off, login still works
-  but the installation is only linked later, when the webhook arrives.
+- **Request user authorization (OAuth) during installation — OFF.** Login
+  never rides an install: the CLI uses the device flow and the browser flow
+  uses GitHub's OAuth authorize endpoint (#305), and installations are linked
+  by the `installation` webhook in both cases. Leaving it ON only makes GitHub
+  bounce the browser to the OAuth callback after each install with a `code`
+  but no `state`, which the relay rejects as a stray login ("bad state").
 - **Expire user authorization tokens — ON.** Safe here because the relay uses
   the user token once, for a single `GET /user` inside `fetchUser`, and never
   stores it: `Identity` carries only the subject and login, and the extra
