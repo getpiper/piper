@@ -105,15 +105,37 @@ single screen that authorizes *and* selects repositories.
 2. **Webhook ingress** — GitHub delivers to `POST /gh` on the relay. The relay verifies
    the App HMAC, resolves installation → account → bindings → agent, and delivers over
    the existing tunnel.
-3. **Token brokering** — the agent calls `POST /v1/github/token {repo}` with its
-   existing agent token; the relay returns a repo-scoped installation token and expiry.
+3. **Token brokering** — the agent asks the relay for a repo-scoped installation
+   token over the existing `KindControl` op protocol.
+
+### Agent→relay calls ride the existing control ops
+
+The box already has an authenticated agent→relay channel: `KindControl` streams
+carrying `tunnel.ControlRequest{Op: …}`, sent from `internal/agent/tunnelclient.go` and
+dispatched in `internal/relay/server.go:225`. The tunnel handshake authenticates the
+agent by token, so ops need no second credential and the box needs no relay HTTP base
+URL.
+
+Both new agent→relay calls are therefore ops, not HTTP endpoints:
+
+| Op | Request fields | Response |
+| --- | --- | --- |
+| `bind-repo` | `App`, `Repo`, `Branch` | empty, or `Error` |
+| `unbind-repo` | `App` | empty, or `Error` |
+| `gh-token` | `Repo` | `Token`, `Expires` |
+
+`ControlRequest` gains `Repo` and `Branch`; `ControlResponse` gains `Token` and
+`Expires`. Relay→box HTTP (webhook delivery) still uses the `KindHTTP` stream that
+already pipes to the box's Caddy on `:80`.
 
 ### Delivery is deliberately boring
 
 The tunnel already carries public HTTP to the box's Caddy, and `webhookStarter` already
-installs a `hooks.<base>` Caddy route (`cmd/piperd/main.go:621`). Delivery is therefore:
-open a yamux stream, speak HTTP with `Host: hooks.<base>`. Caddy routes it to `:8089`
-exactly as a public request would.
+installs a `hooks.<base>` Caddy route on Caddy's `:80` server (`cmd/piperd/main.go:621`,
+`internal/caddy/client.go:25`). Delivery is therefore: open a `tunnel.KindHTTP` stream —
+which the agent already pipes to `:80` in every mode (`cmd/piperd/main.go:191`) — and
+speak plain HTTP with `Host: hooks.<base>`. Caddy routes it to `:8089` exactly as a
+public request would.
 
 **No new wire protocol and no agent-side receive code.** The only change from today is
 that the request arrives through the tunnel rather than from the internet — which is
@@ -124,30 +146,38 @@ public `piperd` surface off the internet.
 
 New relay state (`internal/relay/schema.sql`, edited in place — no migration):
 
+Note the existing key types: `accounts.id` and `accounts.github_id` are `TEXT`
+(UUID and decimal-string GitHub id respectively), and `agents` is keyed by
+`name TEXT PRIMARY KEY`, which equals the agent's base domain. New tables follow
+those types and the file's `IF NOT EXISTS` idiom.
+
 ```sql
-CREATE TABLE github_installations (
-  installation_id INTEGER PRIMARY KEY,
-  account_id      INTEGER NOT NULL REFERENCES accounts(id),
-  target_type     TEXT    NOT NULL,   -- 'user' | 'org'
-  target_login    TEXT    NOT NULL
+CREATE TABLE IF NOT EXISTS github_installations (
+    installation_id TEXT PRIMARY KEY,
+    account_id      TEXT NOT NULL REFERENCES accounts(id),
+    target_type     TEXT NOT NULL,   -- 'user' | 'org'
+    target_login    TEXT NOT NULL,
+    created_at      TEXT NOT NULL
 );
 
-CREATE TABLE repo_bindings (
-  agent_id INTEGER NOT NULL REFERENCES agents(id),
-  app      TEXT    NOT NULL,
-  repo     TEXT    NOT NULL,          -- 'owner/name', lowercased
-  branch   TEXT    NOT NULL,
-  PRIMARY KEY (agent_id, app)
+CREATE TABLE IF NOT EXISTS repo_bindings (
+    agent_name TEXT NOT NULL REFERENCES agents(name),
+    app        TEXT NOT NULL,
+    repo       TEXT NOT NULL,        -- 'owner/name', lowercased
+    branch     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (agent_name, app)
 );
-CREATE INDEX repo_bindings_repo ON repo_bindings(repo);
+CREATE INDEX IF NOT EXISTS repo_bindings_repo ON repo_bindings(repo);
 
-CREATE TABLE pending_events (
-  agent_id INTEGER NOT NULL REFERENCES agents(id),
-  app      TEXT    NOT NULL,
-  ref      TEXT    NOT NULL,          -- branch name, or 'pr-<N>'
-  payload  BLOB    NOT NULL,
-  event    TEXT    NOT NULL,
-  PRIMARY KEY (agent_id, app, ref)
+CREATE TABLE IF NOT EXISTS pending_events (
+    agent_name TEXT NOT NULL REFERENCES agents(name),
+    app        TEXT NOT NULL,
+    ref        TEXT NOT NULL,        -- branch name, or 'pr-<N>'
+    payload    BLOB NOT NULL,
+    event      TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (agent_name, app, ref)
 );
 ```
 
@@ -166,9 +196,10 @@ PR-heavy repo cannot grow it without bound.
 | --- | --- |
 | `internal/relay/githubapp.go` | App JWT (RS256), repo-scoped installation tokens, `GET /installation/repositories` |
 | `internal/relay/ingress.go` | `POST /gh` — verify App HMAC, resolve installation → account → bindings |
-| `internal/relay/bindings.go` | `POST /v1/agent/bindings` (agent-token auth), full replace of that agent's set |
-| `internal/relay/delivery.go` | Deliver over tunnel; park in `pending_events` on failure; drain on reconnect |
-| `internal/relay/api.go` | `POST /v1/github/token`, `GET /v1/github/repos`, install-redirect handler |
+| `internal/relay/bindings.go` | Store methods behind the `bind-repo` / `unbind-repo` / `gh-token` control ops |
+| `internal/relay/delivery.go` | Deliver over a `KindHTTP` stream; park in `pending_events` on failure; drain on reconnect |
+| `internal/relay/server.go` | Existing control-op switch; dispatch the three new ops |
+| `internal/relay/api.go` | `GET /v1/github/repos` and the install-redirect handler (account-credential auth) |
 | `internal/relay/verifier_github.go` | Existing file; swap the OAuth client to the App's credentials |
 
 ### Agent
@@ -225,10 +256,10 @@ GitHub → POST /gh (relay)
   repo_bindings WHERE repo = ? AND agent.account_id = account
   for each agent:
     re-sign payload with agent.webhook_secret
-    yamux stream → HTTP POST, Host: hooks.<base>
+    KindHTTP stream → HTTP POST, Host: hooks.<base>  (box Caddy :80 → :8089)
     on failure → upsert pending_events (coalesce by ref)
 → agent: existing internal/webhook path, unchanged
-→ agent: POST /v1/github/token {repo} → repo-scoped installation token
+→ agent: control op gh-token {Repo} → repo-scoped installation token
 → tarball fetch → build → deploy → deployment status
 ```
 
