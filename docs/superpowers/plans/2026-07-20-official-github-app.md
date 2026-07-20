@@ -304,7 +304,7 @@ refactor(source): put installation tokens behind a TokenSource seam
 Brokered boxes hold no GitHub App key, so token acquisition moves behind an
 interface that Fetch and Report call. BYO behavior is unchanged.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -541,7 +541,7 @@ feat(relay): persist GitHub App installations per account
 Links an installation to the account of the user who installed it, idempotently
 so the OAuth redirect and the installation webhook may arrive in either order.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -805,7 +805,7 @@ Lets the relay route a push to the right box and answer the token-brokering
 authz question: an agent may mint a token only for a repo it deploys. Lookups
 are account-scoped so a repo name can never cross tenants.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -1310,7 +1310,7 @@ deployments:write, and installation repo listing. JWT signing moves to
 internal/ghjwt now that agent and relay both need it; the relay never imports
 the agent's provider package.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -1593,7 +1593,7 @@ Agent->relay calls ride the existing authenticated KindControl channel, so the
 box needs no second credential. gh-token mints only for a repo the asking agent
 actually deploys, and only through its own account's installation.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -1978,7 +1978,7 @@ Verifies the App signature, keeps installation<->account linkage current, and
 routes by repository to the bound agents of that installation's account only.
 An event whose installation is not linked is acknowledged and dropped.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -2311,7 +2311,7 @@ existing webhook listener serves it unchanged. GitHub's signature is dropped and
 replaced with an HMAC over a per-agent secret minted at enroll: the tunnel is
 not treated as authenticating on its own.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -2684,7 +2684,7 @@ One coalescing slot per (agent, app, ref) rather than a queue: a box that was
 off overnight deploys the tip commit once instead of replaying every push it
 missed. Capped per agent so a PR-heavy repo cannot grow the table unbounded.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -2808,7 +2808,7 @@ A box learns at enroll whether its relay brokers GitHub, and gets the secret
 brokered deliveries are signed with. Relays without an App configured advertise
 false and their boxes stay on the BYO path.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -2983,7 +2983,7 @@ A brokered box starts its webhook listener with no local credentials: the
 webhook secret comes from enroll and every installation token from the relay's
 gh-token op. A locally stored App remains an explicit override and wins.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -3107,7 +3107,7 @@ The relay routes brokered webhooks by binding, so linking an app now tells it
 which repo that app deploys. A briefly unreachable relay does not fail the
 link: the local row is authoritative and bindings are re-pushed on reconnect.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -3240,7 +3240,7 @@ One browser trip now covers identity and repository selection: the callback
 carries installation_id next to the code, so the installation is linked without
 waiting for the webhook. Relays without an App slug keep the plain OAuth flow.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -3486,7 +3486,7 @@ Document the loopback variant using `NewAutoApproveVerifier` (`internal/relay/ve
 `PROGRESS.md` — add one line under the git-deploy entries:
 
 ```markdown
-- Relay-held GitHub App: one-trip login + install, brokered webhooks and tokens, BYO unchanged [#TBD]
+- Relay-held GitHub App: one-trip login + install, brokered webhooks and tokens, BYO unchanged [#289]
 ```
 
 - [ ] **Step 7: Run the full suite**
@@ -3506,7 +3506,7 @@ Lists the repositories the account's installation can reach, read live through
 a fresh installation token. Runbook and getting-started now separate the
 brokered path from BYO, including the prerequisites brokered mode drops.
 
-Part of #TBD
+Part of #289
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 EOF
@@ -3517,8 +3517,9 @@ EOF
 
 ## Before opening the PR
 
+- [x] Tracking issue opened: **[#289](https://github.com/getpiper/piper/issues/289)** — every task's commit trail already references it.
 - [ ] `make verify` passes on the branch tip.
-- [ ] Replace every `#TBD` in the commit trail with the real issue number (see below).
-- [ ] Open the tracking issue first, titled `[relay] relay-held official GitHub App`, labelled `enhancement`, `P1`, `size/XL`, `relay`, `agent`, `cli`, `epic`, linking this plan and the spec.
+- [ ] Register the GitHub App itself under the `getpiper` org — no task does this, and tasks 4, 6, 7 and 12 cannot be exercised against real GitHub without it. Permissions `contents:read`, `deployments:write`, `pull_requests:read`; events `push`, `pull_request`, `installation`; webhook URL `https://<relay>/gh`; **"Request user authorization (OAuth) during installation" ON**.
 - [ ] Open the follow-up issue: `[relay] route org-target GitHub App installations to org-owned agents` — labelled `enhancement`, `P3`, `size/M`, `relay`.
-- [ ] PR body carries `Closes #<tracking issue>` and links the spec.
+- [ ] Tick this plan's task checkboxes on #289 as each task merges.
+- [ ] PR body carries `Closes #289` and links the spec.
