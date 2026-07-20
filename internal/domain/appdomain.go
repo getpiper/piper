@@ -54,17 +54,19 @@ func (m *Manager) AddAppDomain(app, domainName string) (store.AppDomain, error) 
 	if err := m.st.UpdateAppDomainStatus(d, StatusPending, "", time.Time{}); err != nil {
 		return store.AppDomain{}, err
 	}
-	go m.appLoop(d, m.nextGenFor(d))
+	gen := m.nextGenFor(d)
+	m.spawn(func() { m.appLoop(d, gen) })
 	return m.st.GetAppDomain(d)
 }
 
 // appLoop drives one per-app domain to activation. It exits when the row is
-// gone (removed), activation succeeds, or a newer loop for the same domain
-// supersedes this generation. A DNS wait polls flat at dnsWait and keeps the
-// row pending; real failures mark it failed and back off.
+// gone (removed), activation succeeds, Close stops the manager, or a newer
+// loop for the same domain supersedes this generation. A DNS wait polls flat
+// at dnsWait and keeps the row pending; real failures mark it failed and back
+// off.
 func (m *Manager) appLoop(domain string, gen int) {
 	for attempt := 0; ; {
-		if m.currentGenFor(domain) != gen {
+		if m.stopped() || m.currentGenFor(domain) != gen {
 			return
 		}
 		row, err := m.st.GetAppDomain(domain)
@@ -79,10 +81,14 @@ func (m *Manager) appLoop(domain string, gen int) {
 			return // removed or re-owned; the successor owns the state now
 		case errors.Is(err, errWaitDNS):
 			_ = m.st.UpdateAppDomainStatus(domain, StatusPending, err.Error(), time.Time{})
-			time.Sleep(m.dnsWait)
+			if !m.sleepOrStopped(m.dnsWait) {
+				return
+			}
 		default:
 			_ = m.st.UpdateAppDomainStatus(domain, StatusFailed, err.Error(), time.Time{})
-			time.Sleep(m.retryDelay(attempt))
+			if !m.sleepOrStopped(m.retryDelay(attempt)) {
+				return
+			}
 			attempt++
 		}
 	}
@@ -216,14 +222,16 @@ func (m *Manager) ResumeAppDomains() {
 			certPEM, keyPEM, err := m.readAppCert(row.Domain)
 			if err == nil && certValidFor(certPEM, row.Domain, time.Now()) {
 				if err := m.armApp(row, certPEM, keyPEM); err == nil {
-					go m.reassertLoop(row.Domain, m.nextGenFor(row.Domain))
+					gen := m.nextGenFor(row.Domain)
+					m.spawn(func() { m.reassertLoop(row.Domain, gen) })
 					continue
 				}
 			}
 			// Damaged or missing disk cert: degrade to re-issuance.
 			_ = m.st.UpdateAppDomainStatus(row.Domain, StatusIssuing, "", time.Time{})
 		}
-		go m.appLoop(row.Domain, m.nextGenFor(row.Domain))
+		gen := m.nextGenFor(row.Domain)
+		m.spawn(func() { m.appLoop(row.Domain, gen) })
 	}
 }
 
@@ -233,10 +241,12 @@ func (m *Manager) ResumeAppDomains() {
 // tunnel not being connected yet at resume. Failures never touch the row.
 func (m *Manager) reassertLoop(domain string, gen int) {
 	for attempt := 0; ; attempt++ {
-		if m.reassertOnce(domain, gen) {
+		if m.stopped() || m.reassertOnce(domain, gen) {
 			return
 		}
-		time.Sleep(m.retryDelay(attempt))
+		if !m.sleepOrStopped(m.retryDelay(attempt)) {
+			return
+		}
 	}
 }
 

@@ -49,6 +49,10 @@ func newAppManagerOn(t *testing.T, st *store.Store, dataDir string, iss Issuer) 
 		Proxy:     proxy, Router: router, DataDir: dataDir,
 		RelayHost: "relay.example.net", HTTPSListen: ":8443",
 	})
+	// Join the lifecycle goroutines before the temp dir's RemoveAll: cleanups
+	// run LIFO and t.TempDir registered its own cleanup before this helper was
+	// called, so this Close runs first (#279).
+	t.Cleanup(m.Close)
 	m.SetRelay(relay)
 	m.retryDelay = func(int) time.Duration { return time.Millisecond }
 	m.dnsWait = time.Millisecond

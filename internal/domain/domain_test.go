@@ -219,6 +219,10 @@ func newTestManagerWith(t *testing.T, iss Issuer) (*Manager, *store.Store, *fake
 		Proxy:  proxy, DataDir: dataDir,
 		RelayHost: "relay.example.net", HTTPSListen: ":8443",
 	})
+	// Join the lifecycle goroutines before the temp dir's RemoveAll: cleanups
+	// run LIFO and t.TempDir registered its own cleanup above, so this Close
+	// runs first (#279).
+	t.Cleanup(m.Close)
 	m.SetRelay(relay)
 	m.retryDelay = func(int) time.Duration { return time.Millisecond }
 	return m, st, proxy, relay, dataDir
