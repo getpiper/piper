@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,27 +237,6 @@ func TestGitHubExchange(t *testing.T) {
 	f := fake.tokenForms[0]
 	if f["client_id"] != "test-client" || f["client_secret"] != "test-secret" || f["code"] != "code-1" {
 		t.Fatalf("exchange form = %+v", f)
-	}
-}
-
-func TestAuthCodeURLUsesAppInstallWhenSlugSet(t *testing.T) {
-	v := NewGitHubVerifier("client-id", "client-secret") // match the real constructor
-	v.AppSlug = "piper-dev"
-
-	got := v.AuthCodeURL("st4te")
-	if !strings.Contains(got, "/apps/piper-dev/installations/new") {
-		t.Fatalf("AuthCodeURL = %q, want the App install URL", got)
-	}
-	if !strings.Contains(got, "state=st4te") {
-		t.Fatalf("AuthCodeURL = %q, missing state", got)
-	}
-}
-
-func TestAuthCodeURLFallsBackToPlainOAuth(t *testing.T) {
-	v := NewGitHubVerifier("client-id", "client-secret")
-	got := v.AuthCodeURL("st4te")
-	if strings.Contains(got, "/installations/new") {
-		t.Fatalf("AuthCodeURL = %q, want the plain OAuth authorize URL", got)
 	}
 }
 

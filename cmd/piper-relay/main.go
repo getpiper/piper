@@ -190,9 +190,6 @@ func main() {
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
 	appSlug := os.Getenv("PIPER_RELAY_GITHUB_APP_SLUG")
-	if gv, ok := v.(*relay.GitHubVerifier); ok {
-		gv.AppSlug = appSlug
-	}
 
 	var ghApp *relay.GitHubApp
 	appID := os.Getenv("PIPER_RELAY_GITHUB_APP_ID")
