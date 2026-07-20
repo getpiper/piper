@@ -366,11 +366,14 @@ type fakeRegistrar struct {
 	failing bool
 }
 
-func (f *fakeRegistrar) Register(app string) (string, error) {
+func (f *fakeRegistrar) Register(app string, pr int) (string, error) {
 	if f.failing {
 		return "", errors.New("quota")
 	}
 	f.host = "hash-" + app + "-alice.public.getpiper.co"
+	if pr > 0 {
+		f.host = fmt.Sprintf("pr%d-%s", pr, f.host)
+	}
 	return f.host, nil
 }
 func (f *fakeRegistrar) Deregister(hostname string) error {
@@ -1516,5 +1519,101 @@ func TestDeletePrunesAllImages(t *testing.T) {
 	}
 	if len(rt.Pruned) != 1 || rt.Pruned[0] != (runtime.PruneCall{App: "blog", Keep: 0}) {
 		t.Fatalf("pruned = %+v, want one keep=0 prune of blog", rt.Pruned)
+	}
+}
+
+// TestDeployPreviewTerminatedRoutesAssignedHostname covers previews on a
+// relay-terminated box (#302). There baseDom is itself a label under the apex,
+// so the constructed "pr-<N>-<app>.<baseDom>" sits two labels deep — outside
+// the relay's single-label wildcard cert and unknown to its router — and the
+// preview is unreachable however healthy the container is. Like production, the
+// host must come from the registrar.
+func TestDeployPreviewTerminatedRoutesAssignedHostname(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "preview-c", HostPort: 40002},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "85b90055-alice.public.getpiper.co")
+	reg := &fakeRegistrar{}
+	d.SetHostnameRegistrar(reg)
+
+	if _, err := d.DeployPreview(context.Background(), "blog", 7, t.TempDir()); err != nil {
+		t.Fatalf("DeployPreview: %v", err)
+	}
+	want := "pr7-hash-blog-alice.public.getpiper.co"
+	if routes.upserts[want] != 40002 {
+		t.Fatalf("routes = %+v, want %s -> 40002", routes.upserts, want)
+	}
+	if _, ok := routes.upserts["pr-7-blog.85b90055-alice.public.getpiper.co"]; ok {
+		t.Error("routed the constructed two-label host; the relay cannot serve it")
+	}
+	if host, ok := d.PreviewHost("blog", 7); !ok || host != want {
+		t.Fatalf("PreviewHost = %q,%v want %q (what gets reported to GitHub)", host, ok, want)
+	}
+
+	// Teardown releases the relay-side hostname; otherwise every closed PR
+	// leaks a hostnames row.
+	if _, err := d.TeardownPreview(context.Background(), "blog", 7); err != nil {
+		t.Fatalf("TeardownPreview: %v", err)
+	}
+	if len(routes.removed()) != 1 || routes.removed()[0] != want {
+		t.Errorf("removed routes = %v, want [%s]", routes.removed(), want)
+	}
+	if len(reg.deregs) != 1 || reg.deregs[0] != want {
+		t.Errorf("deregistered = %v, want [%s]", reg.deregs, want)
+	}
+}
+
+// TestPreviewHostWithoutRegistrar keeps LAN and BYO boxes on today's
+// construction: there baseDom is the apex, so "pr-<N>-<app>.<apex>" is a single
+// label and is exactly right.
+func TestPreviewHostWithoutRegistrar(t *testing.T) {
+	s, _ := newStore(t)
+	d := New(s, &runtime.FakeRuntime{}, newFakeCaddy(), "alice.dev")
+	if host, ok := d.PreviewHost("blog", 5); !ok || host != "pr-5-blog.alice.dev" {
+		t.Fatalf("PreviewHost = %q,%v want pr-5-blog.alice.dev", host, ok)
+	}
+}
+
+// Deleting an app must release its previews' relay hostnames too, or every
+// deleted app leaks one hostnames row (and one router entry) per open PR.
+func TestDeleteTerminatedReleasesPreviewHostnames(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "main-c", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "85b90055-alice.public.getpiper.co")
+	reg := &fakeRegistrar{}
+	d.SetHostnameRegistrar(reg)
+
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	rt.RunResultVal = runtime.RunResult{ContainerID: "preview-c", HostPort: 40002}
+	if _, err := d.DeployPreview(context.Background(), "blog", 7, t.TempDir()); err != nil {
+		t.Fatalf("DeployPreview: %v", err)
+	}
+	if err := d.Delete(context.Background(), "blog"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	const previewHost = "pr7-hash-blog-alice.public.getpiper.co"
+	removed := map[string]bool{}
+	for _, h := range routes.removed() {
+		removed[h] = true
+	}
+	if !removed[previewHost] || !removed["hash-blog-alice.public.getpiper.co"] {
+		t.Errorf("removed routes = %v, want both the preview and production hosts", routes.removed())
+	}
+	dereg := map[string]bool{}
+	for _, h := range reg.deregs {
+		dereg[h] = true
+	}
+	if !dereg[previewHost] || !dereg["hash-blog-alice.public.getpiper.co"] {
+		t.Errorf("deregistered = %v, want both the preview and production hosts", reg.deregs)
 	}
 }

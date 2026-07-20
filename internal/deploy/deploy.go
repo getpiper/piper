@@ -60,7 +60,7 @@ type RouteSetter interface {
 // instead of "<app>.<baseDom>". Implemented by *agent.TunnelClient; injected by
 // piperd. Nil in LAN / BYO-domain mode.
 type HostnameRegistrar interface {
-	Register(app string) (string, error)
+	Register(app string, pr int) (string, error)
 	Deregister(hostname string) error
 }
 
@@ -108,6 +108,25 @@ func (d *Deployer) hostFor(app string) string {
 
 func (d *Deployer) hostForPreview(app string, pr int) string {
 	return fmt.Sprintf("pr-%d-%s.%s", pr, app, d.baseDom)
+}
+
+// PreviewHost resolves the routed host for app's PR-pr preview, the mirror of
+// primaryHost: the relay-assigned name in registrar mode (recovered via the
+// idempotent Register), else "pr-<N>-<app>.<baseDom>". ok is false when the
+// relay is unreachable and the hostname can't be recovered.
+//
+// A relay-terminated box must go through the registrar here. Its baseDom is
+// already a label under the apex, so the constructed host sits two labels deep:
+// outside the relay's single-label wildcard cert and absent from its router, so
+// the preview is unreachable however healthy the container is (#302). LAN and
+// BYO boxes have no registrar and keep the construction, which is correct there
+// — their base domain is the apex.
+func (d *Deployer) PreviewHost(appName string, pr int) (string, bool) {
+	if d.registrar == nil {
+		return d.hostForPreview(appName, pr), true
+	}
+	host, err := d.registrar.Register(appName, pr)
+	return host, err == nil
 }
 
 func (d *Deployer) stopPartial(ctx context.Context, containerID string) {
@@ -238,7 +257,7 @@ func (d *Deployer) finish(ctx context.Context, dep store.Deployment, srcDir stri
 	// success the CLI/dashboard would trust.
 	host := d.hostFor(dep.App)
 	if d.registrar != nil {
-		host, err = d.registrar.Register(dep.App)
+		host, err = d.registrar.Register(dep.App, 0)
 		if err != nil {
 			return d.failFinish(ctx, dep.ID, build.ImageID, run.ContainerID, run.HostPort, logs, fmt.Errorf("register hostname: %w", err))
 		}
@@ -340,7 +359,13 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 	if err != nil {
 		return store.Deployment{}, err
 	}
-	if err := d.routes.UpsertRoute(d.hostForPreview(appName, pr), run.HostPort); err != nil {
+	host, ok := d.PreviewHost(appName, pr)
+	if !ok {
+		d.stopPartial(ctx, run.ContainerID)
+		_ = d.store.UpdateDeploymentStatus(dep.ID, "failed")
+		return store.Deployment{}, fmt.Errorf("register preview hostname for %s PR %d", appName, pr)
+	}
+	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
 		// The container is running and the row is "running", but with no route
 		// it's unreachable. Unwind rather than leak both: best-effort stop the
 		// container and mark the row "failed" (mirrors failFinish on the Deploy
@@ -366,23 +391,43 @@ func (d *Deployer) DeployPreview(ctx context.Context, appName string, pr int, sr
 func (d *Deployer) TeardownPreview(ctx context.Context, appName string, pr int) (retired bool, err error) {
 	defer d.lockApp(appName)()
 	dep, err := d.store.PreviewRunning(appName, pr)
+	host, hostOK := d.PreviewHost(appName, pr)
 	if errors.Is(err, store.ErrNotFound) {
-		if rerr := d.routes.RemoveRoute(d.hostForPreview(appName, pr)); rerr != nil {
-			log.Printf("teardown %s PR %d: remove orphan route: %v", appName, pr, rerr)
+		if hostOK {
+			if rerr := d.routes.RemoveRoute(host); rerr != nil {
+				log.Printf("teardown %s PR %d: remove orphan route: %v", appName, pr, rerr)
+			}
+			d.deregisterPreview(host)
 		}
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
+	if !hostOK {
+		return false, fmt.Errorf("resolve preview hostname for %s PR %d", appName, pr)
+	}
 	_ = d.runtime.Stop(ctx, dep.ContainerID)
-	if err := d.routes.RemoveRoute(d.hostForPreview(appName, pr)); err != nil {
+	if err := d.routes.RemoveRoute(host); err != nil {
 		return false, fmt.Errorf("unroute: %w", err)
 	}
 	if err := d.store.UpdateDeploymentStatus(dep.ID, "stopped"); err != nil {
 		return false, err
 	}
+	d.deregisterPreview(host)
 	return true, nil
+}
+
+// deregisterPreview releases a closed PR's relay-side hostname. Best-effort:
+// the preview is already stopped and unrouted, so a relay blip must not fail
+// the teardown — the row is re-derived deterministically if the PR reopens.
+func (d *Deployer) deregisterPreview(host string) {
+	if d.registrar == nil {
+		return
+	}
+	if err := d.registrar.Deregister(host); err != nil {
+		log.Printf("teardown: deregister %s: %v", host, err)
+	}
 }
 
 // primaryHost resolves the app's routed production host: the relay-assigned
@@ -393,7 +438,7 @@ func (d *Deployer) primaryHost(appName string) (string, bool) {
 	if d.registrar == nil {
 		return d.hostFor(appName), true
 	}
-	host, err := d.registrar.Register(appName)
+	host, err := d.registrar.Register(appName, 0)
 	return host, err == nil
 }
 
@@ -485,9 +530,14 @@ func (d *Deployer) Delete(ctx context.Context, appName string) error {
 		}
 		_ = d.runtime.Stop(ctx, dep.ContainerID)
 		if dep.PR > 0 {
-			if err := d.routes.RemoveRoute(d.hostForPreview(appName, dep.PR)); err != nil {
+			host, ok := d.PreviewHost(appName, dep.PR)
+			if !ok {
+				return fmt.Errorf("resolve preview hostname for %s PR %d", appName, dep.PR)
+			}
+			if err := d.routes.RemoveRoute(host); err != nil {
 				return fmt.Errorf("unroute: %w", err)
 			}
+			d.deregisterPreview(host)
 		}
 	}
 	if host, ok := d.primaryHost(appName); ok {

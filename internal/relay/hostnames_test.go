@@ -28,7 +28,7 @@ func newAccountAgent(t *testing.T) (*Store, string) {
 
 func TestRegisterHostnameIdempotentAndDerived(t *testing.T) {
 	st, base := newAccountAgent(t)
-	h1, err := st.RegisterHostname(base, "blog")
+	h1, err := st.RegisterHostname(base, "blog", 0)
 	if err != nil {
 		t.Fatalf("RegisterHostname: %v", err)
 	}
@@ -38,30 +38,85 @@ func TestRegisterHostnameIdempotentAndDerived(t *testing.T) {
 	if strings.Count(strings.TrimSuffix(h1, ".public.getpiper.co"), ".") != 0 {
 		t.Fatalf("hostname %q is not a single label under the apex", h1)
 	}
-	h2, err := st.RegisterHostname(base, "blog")
+	h2, err := st.RegisterHostname(base, "blog", 0)
 	if err != nil || h2 != h1 {
 		t.Fatalf("re-register = %q,%v want %q (idempotent)", h2, err, h1)
 	}
-	h3, err := st.RegisterHostname(base, "api")
+	h3, err := st.RegisterHostname(base, "api", 0)
 	if err != nil || h3 == h1 {
 		t.Fatalf("distinct app got %q,%v (want a different hostname)", h3, err)
+	}
+}
+
+// TestRegisterPreviewHostname covers PR previews on a relay-terminated box
+// (#302): a preview needs its own hostname per (account, app, pr), and it has
+// to stay a single label under the apex — the relay's wildcard matches exactly
+// one label, so the agent's old "pr-<N>-<app>.<base-domain>" construction was
+// both untrusted by TLS and unknown to the router.
+func TestRegisterPreviewHostname(t *testing.T) {
+	st, base := newAccountAgent(t)
+	prod, err := st.RegisterHostname(base, "blog", 0)
+	if err != nil {
+		t.Fatalf("RegisterHostname: %v", err)
+	}
+	prev, err := st.RegisterHostname(base, "blog", 7)
+	if err != nil {
+		t.Fatalf("RegisterHostname preview: %v", err)
+	}
+	if prev == prod {
+		t.Fatalf("preview reused the production hostname %q", prev)
+	}
+	if strings.Count(strings.TrimSuffix(prev, ".public.getpiper.co"), ".") != 0 {
+		t.Fatalf("preview hostname %q is not a single label under the apex", prev)
+	}
+	if again, err := st.RegisterHostname(base, "blog", 7); err != nil || again != prev {
+		t.Fatalf("re-register = %q,%v want %q (idempotent)", again, err, prev)
+	}
+	other, err := st.RegisterHostname(base, "blog", 8)
+	if err != nil || other == prev {
+		t.Fatalf("PR 8 got %q,%v want a hostname of its own", other, err)
+	}
+	// Production must survive a preview's deregistration, and vice versa.
+	if err := st.DeregisterHostname(base, prev); err != nil {
+		t.Fatalf("DeregisterHostname: %v", err)
+	}
+	if got, err := st.RegisterHostname(base, "blog", 0); err != nil || got != prod {
+		t.Fatalf("production hostname after preview teardown = %q,%v want %q", got, err, prod)
+	}
+}
+
+// TestPreviewHostnamesDoNotConsumeAppCap keeps open PRs from locking an account
+// out of creating apps: the cap counts apps, and a preview is not one.
+func TestPreviewHostnamesDoNotConsumeAppCap(t *testing.T) {
+	st, base := newAccountAgent(t)
+	st.Configure("public.getpiper.co", 3, 2, 5) // cap 2 apps
+	if _, err := st.RegisterHostname(base, "a", 0); err != nil {
+		t.Fatal(err)
+	}
+	for pr := 1; pr <= 4; pr++ {
+		if _, err := st.RegisterHostname(base, "a", pr); err != nil {
+			t.Fatalf("preview PR %d: %v", pr, err)
+		}
+	}
+	if _, err := st.RegisterHostname(base, "b", 0); err != nil {
+		t.Fatalf("second app after four previews: %v, want it to fit under the cap", err)
 	}
 }
 
 func TestRegisterHostnameAppCap(t *testing.T) {
 	st, base := newAccountAgent(t)
 	st.Configure("public.getpiper.co", 3, 2, 5) // cap 2 apps
-	if _, err := st.RegisterHostname(base, "a"); err != nil {
+	if _, err := st.RegisterHostname(base, "a", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.RegisterHostname(base, "b"); err != nil {
+	if _, err := st.RegisterHostname(base, "b", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.RegisterHostname(base, "c"); err != ErrQuotaExceeded {
+	if _, err := st.RegisterHostname(base, "c", 0); err != ErrQuotaExceeded {
 		t.Fatalf("third app err = %v, want ErrQuotaExceeded", err)
 	}
 	// A re-register of an existing app must not be blocked by the cap.
-	if _, err := st.RegisterHostname(base, "a"); err != nil {
+	if _, err := st.RegisterHostname(base, "a", 0); err != nil {
 		t.Fatalf("re-register under cap: %v", err)
 	}
 }
@@ -71,7 +126,7 @@ func TestRegisterHostnameDisabledAccount(t *testing.T) {
 	if err := st.DisableAccount("alice"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.RegisterHostname(base, "blog"); err != ErrBadCredential {
+	if _, err := st.RegisterHostname(base, "blog", 0); err != ErrBadCredential {
 		t.Fatalf("disabled-account register err = %v, want ErrBadCredential", err)
 	}
 }
@@ -115,7 +170,7 @@ func TestAgentDisabledOutcomes(t *testing.T) {
 
 func TestDeregisterHostname(t *testing.T) {
 	st, base := newAccountAgent(t)
-	h, err := st.RegisterHostname(base, "blog")
+	h, err := st.RegisterHostname(base, "blog", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

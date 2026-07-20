@@ -40,7 +40,7 @@ type recordingRegistrar struct {
 	registered []string
 }
 
-func (r *recordingRegistrar) Register(app string) (string, error) {
+func (r *recordingRegistrar) Register(app string, pr int) (string, error) {
 	r.registered = append(r.registered, app)
 	return r.host, nil
 }
