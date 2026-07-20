@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -217,13 +216,8 @@ func main() {
 
 	ctrl := apiHandler
 	if ghApp != nil {
-		// Replaced by the tunnel deliverer in Task 7.
-		delivery := relay.DeliverFunc(func(ctx context.Context, b relay.Binding, event string, payload []byte) error {
-			log.Printf("relay: would deliver %s to %s/%s", event, b.AgentName, b.App)
-			return nil
-		})
 		outer := http.NewServeMux()
-		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
+		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, relay.NewTunnelDelivery(st, router)))
 		outer.Handle("/", apiHandler)
 		ctrl = outer
 	}
