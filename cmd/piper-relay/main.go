@@ -173,6 +173,33 @@ func main() {
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
 
+	var ghApp *relay.GitHubApp
+	appID := os.Getenv("PIPER_RELAY_GITHUB_APP_ID")
+	keyPath := os.Getenv("PIPER_RELAY_GITHUB_APP_KEY")
+	if appID != "" && keyPath != "" {
+		info, err := os.Stat(keyPath)
+		if err != nil {
+			log.Fatalf("github app key: %v", err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			log.Fatalf("github app key %s is group/world readable (mode %o); chmod 600 it", keyPath, info.Mode().Perm())
+		}
+		pemBytes, err := os.ReadFile(keyPath)
+		if err != nil {
+			log.Fatalf("github app key: %v", err)
+		}
+		ghApp, err = relay.NewGitHubApp(relay.GitHubAppConfig{
+			AppID:         appID,
+			PrivateKeyPEM: string(pemBytes),
+			WebhookSecret: os.Getenv("PIPER_RELAY_GITHUB_WEBHOOK_SECRET"),
+		})
+		if err != nil {
+			log.Fatalf("github app: %v", err)
+		}
+		log.Printf("relay: GitHub App %s configured (brokered git deploys enabled)", appID)
+	}
+	_ = ghApp // wired in Task 6
+
 	if !apiAddrIsLoopback(apiAddr) {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
 	}

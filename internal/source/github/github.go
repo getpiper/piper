@@ -4,14 +4,12 @@ package github
 
 import (
 	"crypto/rsa"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/getpiper/piper/internal/ghjwt"
 )
 
 const defaultAPIBase = "https://api.github.com"
@@ -64,22 +62,5 @@ func apiBaseOrDefault(base string) string {
 }
 
 func parsePrivateKey(pemStr string) (*rsa.PrivateKey, error) {
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		return nil, errors.New("no PEM block")
-	}
-	if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return k, nil
-	}
-	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	rk, ok := k.(*rsa.PrivateKey)
-	if !ok {
-		return nil, errors.New("not an RSA key")
-	}
-	return rk, nil
+	return ghjwt.ParseKey(pemStr)
 }
-
-func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
