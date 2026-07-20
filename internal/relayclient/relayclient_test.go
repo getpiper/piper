@@ -105,6 +105,47 @@ func TestEnrollErrorMapping(t *testing.T) {
 	}
 }
 
+func TestGitHubRepos(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer cred-xyz" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []string{"alice/one", "alice/two"}})
+	}))
+	defer srv.Close()
+
+	repos, err := New(srv.URL).GitHubRepos(context.Background(), "cred-xyz")
+	if err != nil {
+		t.Fatalf("GitHubRepos: %v", err)
+	}
+	if len(repos) != 2 || repos[0] != "alice/one" || repos[1] != "alice/two" {
+		t.Fatalf("repos = %+v", repos)
+	}
+}
+
+func TestGitHubReposErrorMapping(t *testing.T) {
+	for _, tc := range []struct {
+		code int
+		want error
+	}{{http.StatusNotFound, ErrNoInstallation}, {http.StatusInternalServerError, nil}, {http.StatusBadGateway, nil}} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(tc.code)
+		}))
+		_, err := New(srv.URL).GitHubRepos(context.Background(), "whatever")
+		srv.Close()
+		if tc.want != nil {
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("code %d err = %v, want %v", tc.code, err, tc.want)
+			}
+			continue
+		}
+		if err == nil || errors.Is(err, ErrNoInstallation) {
+			t.Fatalf("code %d err = %v, want a non-nil, non-ErrNoInstallation error", tc.code, err)
+		}
+	}
+}
+
 // A cancelled context aborts an in-flight request promptly instead of waiting
 // out the 30s client timeout — the cancellation seam #85/#95 asked for.
 func TestRequestRespectsContextCancellation(t *testing.T) {

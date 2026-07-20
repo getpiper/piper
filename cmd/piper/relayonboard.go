@@ -72,8 +72,65 @@ func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "logged in to relay as %s\n", acc.Username)
+		if acc.InstallURL != "" {
+			if err := waitForInstall(rc, acc.AccountCredential, acc.InstallURL); err != nil {
+				fmt.Fprintln(stderr, "error:", err)
+				return 1
+			}
+		}
 		return 0
 	}
+}
+
+// waitForInstall polls the relay until the account's GitHub App installation is
+// on record. Device flow cannot install, so this is how `piper login` learns
+// the user finished the install page — in another tab, or on another device
+// for a headless box. A one-trip browser login for the CLI is follow-up #291.
+func waitForInstall(rc *relayclient.Client, cred, installURL string) error {
+	fmt.Printf("Install the Piper GitHub App on the repos you want to deploy:\n  %s\n\nWaiting…", installURL)
+	deadline := time.Now().Add(10 * time.Minute)
+	for time.Now().Before(deadline) {
+		repos, err := rc.GitHubRepos(context.Background(), cred)
+		if err == nil {
+			fmt.Printf("\rInstalled — %d repo(s) available.\n", len(repos))
+			return nil
+		}
+		if !errors.Is(err, relayclient.ErrNoInstallation) {
+			return err
+		}
+		fmt.Print(".")
+		pollSleep(3 * time.Second)
+	}
+	return errors.New("timed out waiting for the GitHub App install")
+}
+
+// githubRepos lists the repositories the logged-in account's GitHub App
+// installation can reach, read live from the relay.
+func githubRepos(stdout, stderr io.Writer) int {
+	cc, err := config.LoadClient()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	if cc.RelayAPI == "" || cc.AccountCredential == "" {
+		fmt.Fprintln(stderr, "error: not logged in to a relay; run `piper login` first")
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	repos, err := relayclient.New(cc.RelayAPI).GitHubRepos(ctx, cc.AccountCredential)
+	if errors.Is(err, relayclient.ErrNoInstallation) {
+		fmt.Fprintln(stdout, "No repositories yet — run `piper login` to install the Piper GitHub App on the repos you want to deploy.")
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	for _, r := range repos {
+		fmt.Fprintln(stdout, r)
+	}
+	return 0
 }
 
 // connectOpts are the inputs to `piper connect`. dataDir is where relay.json is
@@ -136,19 +193,25 @@ func connect(o connectOpts, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "box claimed: %s\n", en.BaseDomain)
 		fmt.Fprintln(stdout, "\npiperd runs as a systemd DynamicUser; store the enrollment in its EnvironmentFile.")
 		fmt.Fprintln(stdout, "\nNext step:")
+		githubBrokered := 0
+		if en.GitHubApp {
+			githubBrokered = 1
+		}
 		fmt.Fprintf(stdout, "\n    sudo sh -c 'f=%s; \\\n"+
-			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN|PIPER_RELAY_TERMINATED)=/d\" \"$f\"; \\\n"+
-			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; } >> \"$f\"'\n",
-			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain)
+			"      sed -i -E \"/^#?(PIPER_RELAY_ADDR|PIPER_RELAY_TOKEN|PIPER_BASE_DOMAIN|PIPER_RELAY_TERMINATED|PIPER_WEBHOOK_SECRET|PIPER_GITHUB_BROKERED)=/d\" \"$f\"; \\\n"+
+			"      { echo PIPER_RELAY_ADDR=%s; echo PIPER_RELAY_TOKEN=%s; echo PIPER_BASE_DOMAIN=%s; echo PIPER_RELAY_TERMINATED=1; echo PIPER_WEBHOOK_SECRET=%s; echo PIPER_GITHUB_BROKERED=%d; } >> \"$f\"'\n",
+			config.SystemEnvFile(), en.TunnelEndpoint, en.EnrollmentToken, en.BaseDomain, en.WebhookSecret, githubBrokered)
 		fmt.Fprintln(stdout, "\nthen: sudo systemctl restart piperd")
 		return 0
 	}
 
 	if err := config.SaveRelayFile(o.dataDir, config.RelayFile{
-		RelayAddr:  en.TunnelEndpoint,
-		RelayToken: en.EnrollmentToken,
-		BaseDomain: en.BaseDomain,
-		Terminated: true,
+		RelayAddr:      en.TunnelEndpoint,
+		RelayToken:     en.EnrollmentToken,
+		BaseDomain:     en.BaseDomain,
+		Terminated:     true,
+		WebhookSecret:  en.WebhookSecret,
+		GitHubBrokered: en.GitHubApp,
 	}); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1

@@ -30,6 +30,23 @@ func env(key, def string) string {
 	return def
 }
 
+// readAppKey loads the GitHub App private key, refusing one any other user on
+// the box could read. Only the world bits disqualify it: systemd stages
+// LoadCredential= files at 0440 inside a per-unit tmpfs it grants nobody else
+// access to, and that is how a DynamicUser= relay is meant to receive a key —
+// the same path its TLS cert already takes. A world-readable key is still
+// fatal, which catches the realistic mistake of scp'ing one in at 0644.
+func readAppKey(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if perm := info.Mode().Perm(); perm&0o007 != 0 {
+		return nil, fmt.Errorf("%s is world readable (mode %o); chmod 600 it", path, perm)
+	}
+	return os.ReadFile(path)
+}
+
 func atoiOr(s string, def int) int {
 	if n, err := strconv.Atoi(s); err == nil {
 		return n
@@ -172,6 +189,30 @@ func main() {
 		log.Print("piper-relay: no PIPER_RELAY_GITHUB_CLIENT_ID; self-service login disabled")
 		v = relay.NewFakeVerifier() // login routes exist but complete only via test approval
 	}
+	appSlug := os.Getenv("PIPER_RELAY_GITHUB_APP_SLUG")
+	if gv, ok := v.(*relay.GitHubVerifier); ok {
+		gv.AppSlug = appSlug
+	}
+
+	var ghApp *relay.GitHubApp
+	appID := os.Getenv("PIPER_RELAY_GITHUB_APP_ID")
+	keyPath := os.Getenv("PIPER_RELAY_GITHUB_APP_KEY")
+	if appID != "" && keyPath != "" {
+		pemBytes, err := readAppKey(keyPath)
+		if err != nil {
+			log.Fatalf("github app key: %v", err)
+		}
+		ghApp, err = relay.NewGitHubApp(relay.GitHubAppConfig{
+			AppID:         appID,
+			PrivateKeyPEM: string(pemBytes),
+			WebhookSecret: os.Getenv("PIPER_RELAY_GITHUB_WEBHOOK_SECRET"),
+			Slug:          appSlug,
+		})
+		if err != nil {
+			log.Fatalf("github app: %v", err)
+		}
+		log.Printf("relay: GitHub App %s configured (brokered git deploys enabled)", appID)
+	}
 
 	if !apiAddrIsLoopback(apiAddr) {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
@@ -186,7 +227,17 @@ func main() {
 	}
 
 	router := relay.NewRouter()
-	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
+	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects, ghApp)
+
+	ctrl := apiHandler
+	var delivery *relay.TunnelDelivery
+	if ghApp != nil {
+		delivery = relay.NewTunnelDelivery(st, router)
+		outer := http.NewServeMux()
+		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
+		outer.Handle("/", apiHandler)
+		ctrl = outer
+	}
 
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)
@@ -204,5 +255,5 @@ func main() {
 	}
 
 	log.Printf("piper-relay: TLS %s, HTTP %s, tunnel %s", tlsAddr, httpAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, apiHandler))
+	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, ctrl, ghApp, delivery))
 }

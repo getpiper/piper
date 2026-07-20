@@ -12,7 +12,7 @@ import (
 )
 
 func (p *Provider) Report(ctx context.Context, ev source.Event, status source.Status, url string) error {
-	token, err := p.installationToken(ctx, ev.InstallationID)
+	token, err := p.tokens.Token(ctx, ev)
 	if err != nil {
 		return err
 	}

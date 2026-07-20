@@ -316,6 +316,170 @@ should appear.
 
 ---
 
+## Part G — Brokered mode: the relay holds the GitHub App
+
+Everything above (Parts A–F) is **bring-your-own (BYO)**: each box creates and holds
+its own GitHub App. **Brokered mode** is the alternative — the relay operator
+registers *one* App under the `getpiper` org and holds its key; every account's
+`piper login` installs that shared App and the relay re-signs and forwards webhooks
+to the right box over the tunnel. This is what the public hosted relay runs, and
+it's the default flow in [`getting-started.md`](../getting-started.md).
+
+**Prerequisites differ from BYO in exactly these ways:**
+
+- **No `hooks.<base>` DNS record and no publicly trusted certificate are
+  required.** GitHub delivers webhooks to the relay's account-API host, not your
+  box, so the "cert must be publicly trusted" constraint from Part C/E above
+  doesn't apply to you at all. Join with `piper connect` (terminated mode) and
+  skip Parts A and C entirely — no domain, no DNS, no cert of your own.
+- **No `piper github setup` step.** The App already exists on the relay; there's
+  nothing to create or store on the box.
+- **The relay must run with the App's credentials set:**
+  `PIPER_RELAY_GITHUB_APP_ID`, `PIPER_RELAY_GITHUB_APP_KEY`,
+  `PIPER_RELAY_GITHUB_WEBHOOK_SECRET`, `PIPER_RELAY_GITHUB_APP_SLUG`,
+  `PIPER_RELAY_GITHUB_CLIENT_ID`, `PIPER_RELAY_GITHUB_CLIENT_SECRET` (extending
+  Part B below). The App's webhook URL is the relay's account-API host,
+  **`https://api.<apex>/gh`** — `cmd/piper-relay/main.go` mounts `/gh` there
+  alongside the control API.
+
+### Registering the App (once per relay)
+
+**Settings → Developer settings → GitHub Apps → New GitHub App.** Two ordering
+rules first: deploy a relay that actually serves `/gh` *before* anyone installs
+the App (an install landing on an older relay 404s, GitHub retries a few times
+and gives up, and that installation stays unlinked); and set permissions before
+events, because GitHub only offers the event checkboxes your permissions justify.
+
+Generate the webhook secret up front with `openssl rand -hex 32`.
+
+| Field | Value |
+| --- | --- |
+| GitHub App name | must be globally unique across GitHub; the slug derives from it |
+| Callback URL | `https://api.<apex>/v1/login/callback` |
+| Webhook → Active | checked |
+| Webhook URL | `https://api.<apex>/gh` |
+| Webhook secret | the `openssl` value |
+
+**Repository permissions:** Contents *Read-only*, Deployments *Read and write*,
+Pull requests *Read-only*. **Events:** `Push` and `Pull request` — there is
+normally no *Installation* checkbox, because GitHub delivers installation
+lifecycle events to Apps automatically.
+
+Three toggles decide whether this works at all, and none of them announce
+themselves when wrong:
+
+- **Enable Device Flow — ON.** Device flow is the CLI's only login path, and
+  GitHub rejects it outright unless this is checked. Without it `piper login`
+  cannot work at any point.
+- **Request user authorization (OAuth) during installation — ON.** This is what
+  makes one browser screen cover both identity and repository selection, and
+  what puts `installation_id` on the callback. With it off, login still works
+  but the installation is only linked later, when the webhook arrives.
+- **Expire user authorization tokens — ON.** Safe here because the relay uses
+  the user token once, for a single `GET /user` inside `fetchUser`, and never
+  stores it: `Identity` carries only the subject and login, and the extra
+  `refresh_token`/`expires_in` fields are ignored by the decoder. Everything
+  after login runs on *installation* tokens minted from the App key, so nothing
+  ever needs refreshing. Leaving it off just means a leaked user token lives
+  until manually revoked.
+
+After creating it, collect what the form doesn't give you: **Generate a private
+key** (downloads a PKCS#1 `.pem`) and **Generate a client secret** (shown once).
+Read the slug off the App's own URL (`github.com/apps/<slug>`) rather than
+assuming it. Note the App's client ID starts `Iv23li…` — a standalone OAuth
+app's `Ov23li…` id is a different credential and will not work.
+
+### Relay: add the App credentials to Part B
+
+Before `sudo systemctl enable --now piper-relay`, drop the App's credentials into
+`/etc/piper-relay.env` alongside any TLS/listener overrides:
+
+```bash
+PIPER_RELAY_GITHUB_APP_ID=123456
+PIPER_RELAY_GITHUB_APP_KEY=/run/credentials/piper-relay.service/github-app.pem
+PIPER_RELAY_GITHUB_WEBHOOK_SECRET=<whsec>
+PIPER_RELAY_GITHUB_APP_SLUG=piper-bot                        # → InstallURL
+PIPER_RELAY_GITHUB_CLIENT_ID=<the App's Iv23li... client id>
+PIPER_RELAY_GITHUB_CLIENT_SECRET=<the App's client secret>
+```
+
+**The key reaches the relay as a systemd credential, not as a path in `/etc`.**
+`piper-relay.service` runs `DynamicUser=yes`, so the service user cannot read a
+root-owned `0600` file — and making it world-readable is a startup failure, not
+a workaround. Hand it over the same way the TLS cert already arrives:
+
+```bash
+sudo install -d -m 0700 /etc/piper-relay
+sudo install -m 0600 -o root -g root github-app.pem /etc/piper-relay/github-app.pem
+
+sudo tee /etc/systemd/system/piper-relay.service.d/github-app.conf >/dev/null <<'EOF'
+[Service]
+LoadCredential=github-app.pem:/etc/piper-relay/github-app.pem
+EOF
+sudo systemctl daemon-reload
+```
+
+systemd stages that at `/run/credentials/piper-relay.service/github-app.pem`,
+mode `0440` inside a per-unit tmpfs no other user can traverse — which is why
+the relay rejects only *world*-readable keys rather than any group-readable one.
+Placing the key in the `StateDirectory` instead does not work: systemd only
+re-chowns that directory when it has to fix the directory's own ownership, so a
+root-created file inside it stays unreadable to the service.
+
+The relay also refuses to start if App credentials are set without
+`PIPER_RELAY_GITHUB_WEBHOOK_SECRET` — an empty secret would leave `/gh`
+verifying against a forgeable empty HMAC key, so a half-configured App is a
+startup failure rather than a silently open ingress.
+
+`sudo systemctl restart piper-relay` and confirm the log line
+`relay: GitHub App <id> configured (brokered git deploys enabled)`.
+
+### Box: join with `piper login` + `piper connect`
+
+No Part C TLS setup — the relay terminates HTTPS for you:
+
+```bash
+./bin/piper login
+#   To log in, open: https://github.com/login/device ... enter the code: XXXX-XXXX
+#   logged in to relay as alice
+#   Install the Piper GitHub App on the repos you want to deploy:
+#     https://github.com/apps/piper-bot/installations/new
+#   Waiting…...Installed — 2 repo(s) available.
+
+./bin/piper connect
+#   box claimed: ab12-alice.public.getpiper.dev
+sudo systemctl restart piperd   # or the relay.json restart hint connect prints
+```
+
+`piper login` prints the install URL from the login-poll response and blocks
+until the App shows up installed — open the link (another tab, or another
+device for a headless box) and it resolves on its own. `piper github repos`
+lists what the installation can reach at any point afterward.
+
+### Push (same as Part F, on the relay-assigned hostname)
+
+```bash
+./bin/piper create myapp --port 8080
+./bin/piper app link myapp --repo owner/name --branch main
+# in a clone of owner/name, on main:
+git commit --allow-empty -m "trigger piper deploy"
+git push origin main
+curl -sS https://ab12-alice.public.getpiper.dev/     # or myapp's own routed host
+```
+
+### Loopback variant
+
+Mirroring [Appendix A](#appendix-a--local-loopback-smoke-test), start `piper-relay`
+with `PIPER_RELAY_FAKE_APPROVE=1` (`NewAutoApproveVerifier`,
+`internal/relay/verifier.go:67`) so `piper login` completes without a real GitHub
+OAuth round trip — proves the login → connect → deploy plumbing on one machine.
+It still can't exercise real webhook delivery (no public host for GitHub to
+reach, same limitation as Appendix A), so configure `ghApp` too only if you want
+to confirm `piper github repos`/token brokering against a stubbed or real GitHub
+API — not for a genuine end-to-end push.
+
+---
+
 ## Teardown
 
 ```bash
