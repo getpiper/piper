@@ -31,6 +31,7 @@ import (
 	"github.com/getpiper/piper/internal/deploy"
 	"github.com/getpiper/piper/internal/domain"
 	"github.com/getpiper/piper/internal/runtime"
+	"github.com/getpiper/piper/internal/source"
 	"github.com/getpiper/piper/internal/source/github"
 	"github.com/getpiper/piper/internal/store"
 	"github.com/getpiper/piper/internal/tunnel"
@@ -469,8 +470,10 @@ func main() {
 		domMgr.ResumeAppDomains()
 		go domMgr.StartRenewals(ctx)
 
-		wh = newWebhookStarter(cfg, st, rt)
+		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken)
 		if _, err := st.GetGitHubApp(); err == nil {
+			wh.start()
+		} else if cfg.GitHubBrokered {
 			wh.start()
 		} else {
 			log.Printf("no GitHub App configured; run `piper github setup` to enable git deploys")
@@ -584,30 +587,45 @@ type webhookStarter struct {
 	cfg     config.Config
 	st      *store.Store
 	rt      *runtime.DockerRuntime
+	ghToken func(repo string) (string, error) // nil unless brokered
 	once    sync.Once
 	srv     *http.Server
 	handler *webhook.Handler
 }
 
-func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime) *webhookStarter {
-	return &webhookStarter{cfg: cfg, st: st, rt: rt}
+func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime, ghToken func(repo string) (string, error)) *webhookStarter {
+	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken}
 }
 
 func (w *webhookStarter) start() { w.once.Do(w.run) }
 
 func (w *webhookStarter) run() {
-	gh, err := w.st.GetGitHubApp()
-	if err != nil {
-		log.Printf("webhook: no GitHub App configured: %v", err)
+	var prov source.Provider
+
+	// A locally stored App is an explicit BYO override and wins over the
+	// relay's offer, so a box that ran `piper github setup` keeps its own
+	// credentials and its own trust boundary.
+	if gh, err := w.st.GetGitHubApp(); err == nil {
+		p, err := github.New(github.Config{
+			AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+		})
+		if err != nil {
+			log.Printf("webhook: github provider: %v", err)
+			return
+		}
+		prov = p
+		log.Printf("webhook: using this box's own GitHub App %d", gh.AppID)
+	} else if w.cfg.GitHubBrokered && w.cfg.WebhookSecret != "" && w.ghToken != nil {
+		prov = github.NewWithTokens(
+			github.Config{WebhookSecret: w.cfg.WebhookSecret},
+			github.RelayTokens{Ask: w.ghToken},
+		)
+		log.Printf("webhook: using the relay's GitHub App (brokered)")
+	} else {
+		log.Printf("webhook: no GitHub App configured")
 		return
 	}
-	prov, err := github.New(github.Config{
-		AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
-	})
-	if err != nil {
-		log.Printf("webhook: github provider: %v", err)
-		return
-	}
+
 	wdep := deploy.New(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain)
 	w.handler = webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
 	w.srv = &http.Server{Addr: w.cfg.WebhookAddr, Handler: w.handler}
@@ -621,7 +639,7 @@ func (w *webhookStarter) run() {
 	if err := caddy.NewClient(w.cfg.CaddyAdmin).UpsertRoute("hooks."+w.cfg.BaseDomain, port); err != nil {
 		log.Printf("webhook route: %v", err)
 	}
-	log.Printf("webhook listening on %s (GitHub App %d)", w.cfg.WebhookAddr, gh.AppID)
+	log.Printf("webhook listening on %s", w.cfg.WebhookAddr)
 }
 
 func (w *webhookStarter) stop(ctx context.Context) {
