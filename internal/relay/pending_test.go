@@ -122,6 +122,51 @@ func TestReparkEventDoesNotClobberNewerEvent(t *testing.T) {
 	}
 }
 
+// TestReparkEventEnforcesTheCap pins the concurrent-refill window ReparkEvent
+// must not leave open: fill the table to the cap, "drain" it (simulating
+// DrainFor), let fresh ParkEvent calls refill it to the cap under distinct
+// refs while the drained batch is still in flight, then re-park the drained
+// batch under yet more distinct refs. Without eviction on the re-park path,
+// the table would end up far over the cap.
+func TestReparkEventEnforcesTheCap(t *testing.T) {
+	st := openTestStore(t)
+	_, agent := enrolledAgent(t, st, "1001", "alice")
+
+	drained := make([]PendingEvent, 0, maxPendingPerAgent)
+	for i := 0; i < maxPendingPerAgent; i++ {
+		ref := "drained-" + itoa(i)
+		createdAt := time.Now().UTC().Format(pendingTimeLayout)
+		if err := st.ParkEvent(agent, "blog", ref, "pull_request", []byte(`{}`)); err != nil {
+			t.Fatalf("ParkEvent %d: %v", i, err)
+		}
+		drained = append(drained, PendingEvent{App: "blog", Ref: ref, Event: "pull_request", Payload: []byte(`{}`), CreatedAt: createdAt})
+	}
+	if _, err := st.DrainEvents(agent); err != nil { // empties the table, as DrainFor would before replaying
+		t.Fatal(err)
+	}
+
+	for i := 0; i < maxPendingPerAgent; i++ {
+		ref := "fresh-" + itoa(i)
+		if err := st.ParkEvent(agent, "blog", ref, "push", []byte(`{}`)); err != nil {
+			t.Fatalf("ParkEvent fresh %d: %v", i, err)
+		}
+	}
+
+	for i, ev := range drained {
+		if err := st.ReparkEvent(agent, ev.App, ev.Ref, ev.Event, ev.Payload, ev.CreatedAt); err != nil {
+			t.Fatalf("ReparkEvent %d: %v", i, err)
+		}
+	}
+
+	got, err := st.DrainEvents(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != maxPendingPerAgent {
+		t.Fatalf("parked %d events after re-park, want exactly %d (cap enforced)", len(got), maxPendingPerAgent)
+	}
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

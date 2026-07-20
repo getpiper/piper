@@ -126,6 +126,16 @@ func (s *Store) ParkEvent(agentName, app, ref, event string, payload []byte) err
 		agentName, app, ref, event, payload, now); err != nil {
 		return err
 	}
+	return s.evictOldestPending(agentName)
+}
+
+// evictOldestPending trims agentName's parked events down to the newest
+// maxPendingPerAgent. Both ParkEvent and ReparkEvent can grow the table (a
+// re-park is itself an insert), so both must run this or the cap can be
+// exceeded by the concurrent window where DrainFor empties the table for a
+// replay batch while fresh ParkEvent calls refill it before the replay
+// re-parks — see ReparkEvent's doc comment.
+func (s *Store) evictOldestPending(agentName string) error {
 	_, err := s.db.Exec(
 		`DELETE FROM pending_events
 		  WHERE agent_name = ?
@@ -146,14 +156,21 @@ func (s *Store) ParkEvent(agentName, app, ref, event string, payload []byte) err
 // silently dropped, which is correct by design — the newer event already
 // in the slot supersedes it under last-write-wins.
 func (s *Store) ReparkEvent(agentName, app, ref, event string, payload []byte, createdAt string) error {
-	_, err := s.db.Exec(
+	if _, err := s.db.Exec(
 		`INSERT INTO pending_events(agent_name, app, ref, event, payload, created_at)
 		 VALUES(?,?,?,?,?,?)
 		 ON CONFLICT(agent_name, app, ref) DO UPDATE SET
 		     event = excluded.event, payload = excluded.payload, created_at = excluded.created_at
 		 WHERE excluded.created_at > pending_events.created_at`,
-		agentName, app, ref, event, payload, createdAt)
-	return err
+		agentName, app, ref, event, payload, createdAt); err != nil {
+		return err
+	}
+	// A re-park is itself an insert (it can land under a ref that fresh
+	// ParkEvent calls never touched), so it must enforce the same cap: a
+	// batch of replays failing while fresh events refill the table would
+	// otherwise leave the agent over maxPendingPerAgent until the next
+	// arrival happened to trim it back down.
+	return s.evictOldestPending(agentName)
 }
 
 // DrainEvents returns and removes every parked event for agentName. Read and
