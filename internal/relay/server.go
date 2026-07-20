@@ -60,8 +60,10 @@ func (q *connQueue) push(c net.Conn) {
 // ctrl, when non-nil and a wildcard cert is armed, is the relay's own HTTP API,
 // served TLS-terminated at SNI "api.<apex>" (#73). ghApp, when non-nil, lets the
 // relay broker GitHub tokens over the control channel (#289); nil means BYO-only.
-// Blocks until a listener fails.
-func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler, ghApp *GitHubApp) error {
+// delivery, when non-nil, drains any webhooks parked for a box while it was
+// disconnected as soon as its tunnel reconnects; nil (no App configured) skips
+// the drain. Blocks until a listener fails.
+func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler, ghApp *GitHubApp, delivery *TunnelDelivery) error {
 	var ctrlQ *connQueue
 	if ctrl != nil && tlsCfg != nil {
 		ctrlQ = newConnQueue()
@@ -80,7 +82,7 @@ func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, 
 	if err != nil {
 		return err
 	}
-	go acceptTunnels(tunLn, st, router, ghApp)
+	go acceptTunnels(tunLn, st, router, ghApp, delivery)
 
 	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
@@ -125,13 +127,13 @@ func tunnelAuth(st *Store) tunnel.Auth {
 	}
 }
 
-func acceptTunnels(ln net.Listener, st *Store, router *Router, ghApp *GitHubApp) {
+func acceptTunnels(ln net.Listener, st *Store, router *Router, ghApp *GitHubApp, delivery *TunnelDelivery) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go serveTunnel(conn, st, router, st.AgentDisabled, ghApp)
+		go serveTunnel(conn, st, router, st.AgentDisabled, ghApp, delivery)
 	}
 }
 
@@ -139,14 +141,18 @@ func acceptTunnels(ln net.Listener, st *Store, router *Router, ghApp *GitHubApp)
 // per-session kill-switch watchdog until the session ends. disabled reports
 // whether the session's account has been disabled; it is a parameter (defaulting
 // to st.AgentDisabled) so tests can inject store-read failures. ghApp is
-// threaded through to serveControl for token-brokering control ops.
-func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string) (bool, error), ghApp *GitHubApp) {
+// threaded through to serveControl for token-brokering control ops. delivery,
+// when non-nil, drains any webhooks parked while this box was disconnected.
+func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string) (bool, error), ghApp *GitHubApp, delivery *TunnelDelivery) {
 	sess, err := tunnel.Serve(conn, tunnelAuth(st))
 	if err != nil {
 		conn.Close()
 		return
 	}
 	router.Register(sess)
+	if delivery != nil {
+		go delivery.DrainFor(context.Background(), sess.BaseDomain)
+	}
 	// Re-derive every live custom domain (active + unexpired pending);
 	// expired pending squats are filtered by the store, so they also die
 	// here even if never contested by a rival claim (#227).

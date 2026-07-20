@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -88,4 +89,110 @@ func signPayload(secret string, payload []byte) string {
 	m := hmac.New(sha256.New, []byte(secret))
 	m.Write(payload)
 	return "sha256=" + hex.EncodeToString(m.Sum(nil))
+}
+
+// maxPendingPerAgent bounds the parked-event table for one box. A PR-heavy repo
+// creates one slot per open PR, so the cap is what stops an offline box from
+// growing the table without limit. Oldest slots are evicted first.
+const maxPendingPerAgent = 50
+
+// PendingEvent is a webhook parked for a box that was offline when it arrived.
+type PendingEvent struct {
+	AgentName string
+	App       string
+	Ref       string
+	Event     string
+	Payload   []byte
+}
+
+// ParkEvent stores an undelivered event, coalescing by (agent, app, ref): a
+// newer event for the same ref replaces the older one. Deploys are
+// last-write-wins, so replaying intermediate commits on reconnect would be
+// actively wrong — a box that was off overnight should deploy the tip, once.
+// pendingTimeLayout is fixed-width, unlike RFC3339Nano (which trims trailing
+// fractional zeros, so "…:05Z" sorts lexicographically *after* "…:05.4Z").
+// The eviction and drain ordering below compare created_at as strings and
+// depend on lexicographic == chronological.
+const pendingTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+func (s *Store) ParkEvent(agentName, app, ref, event string, payload []byte) error {
+	now := time.Now().UTC().Format(pendingTimeLayout)
+	if _, err := s.db.Exec(
+		`INSERT INTO pending_events(agent_name, app, ref, event, payload, created_at)
+		 VALUES(?,?,?,?,?,?)
+		 ON CONFLICT(agent_name, app, ref) DO UPDATE SET
+		     event = excluded.event, payload = excluded.payload, created_at = excluded.created_at`,
+		agentName, app, ref, event, payload, now); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(
+		`DELETE FROM pending_events
+		  WHERE agent_name = ?
+		    AND rowid NOT IN (
+		        SELECT rowid FROM pending_events WHERE agent_name = ?
+		         ORDER BY created_at DESC LIMIT ?)`,
+		agentName, agentName, maxPendingPerAgent)
+	return err
+}
+
+// DrainEvents returns and removes every parked event for agentName. Read and
+// delete share one immediate transaction (see Open's _txlock): a concurrent
+// ParkEvent either commits before it and is returned, or blocks until after
+// the delete and survives for the next drain — the blanket DELETE can never
+// destroy a row this call did not return.
+func (s *Store) DrainEvents(agentName string) ([]PendingEvent, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(
+		`SELECT app, ref, event, payload FROM pending_events
+		  WHERE agent_name=? ORDER BY created_at`, agentName)
+	if err != nil {
+		return nil, err
+	}
+	var out []PendingEvent
+	for rows.Next() {
+		ev := PendingEvent{AgentName: agentName}
+		if err := rows.Scan(&ev.App, &ev.Ref, &ev.Event, &ev.Payload); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM pending_events WHERE agent_name=?`, agentName); err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
+}
+
+// DrainFor replays every parked event for agentName. Called on reconnect, and
+// after a park to close the race where the box came back between a delivery
+// failing and the park landing. It bails while the agent is offline — the
+// destructive drain must not run when nothing can be delivered — and a replay
+// that fails is re-parked, never dropped: GitHub already got its 202, so a
+// lost event here would never be retried by anyone.
+func (t *TunnelDelivery) DrainFor(ctx context.Context, agentName string) {
+	if _, ok := t.router.Lookup(agentName); !ok {
+		return // events stay parked for the reconnect drain
+	}
+	events, err := t.st.DrainEvents(agentName)
+	if err != nil {
+		log.Printf("relay: drain pending for %s: %v", agentName, err)
+		return
+	}
+	for _, ev := range events {
+		b := Binding{AgentName: ev.AgentName, App: ev.App}
+		if err := t.Deliver(ctx, b, ev.Event, ev.Payload); err != nil {
+			log.Printf("relay: replay %s to %s/%s: %v (re-parking)", ev.Event, ev.AgentName, ev.App, err)
+			if perr := t.st.ParkEvent(ev.AgentName, ev.App, ev.Ref, ev.Event, ev.Payload); perr != nil {
+				log.Printf("relay: re-park %s for %s/%s: %v", ev.Event, ev.AgentName, ev.App, perr)
+			}
+		}
+	}
 }

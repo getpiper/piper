@@ -95,3 +95,61 @@ func TestDeliveryOfflineAgent(t *testing.T) {
 		t.Fatalf("err = %v, want ErrAgentOffline", err)
 	}
 }
+
+func TestDrainForReplaysOnlyTheNewestPerRef(t *testing.T) {
+	sess, _, _, base, st, router := startTestRelay(t, nil, nil)
+
+	if err := st.ParkEvent(base, "blog", "main", "push", []byte(`{"after":"old"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ParkEvent(base, "blog", "main", "push", []byte(`{"after":"new"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	bodies := make(chan string, 4)
+	go func() {
+		for {
+			kind, conn, err := sess.AcceptKind()
+			if err != nil {
+				return
+			}
+			if kind != tunnel.KindHTTP {
+				conn.Close()
+				continue
+			}
+			req, err := http.ReadRequest(bufio.NewReader(conn))
+			if err != nil {
+				conn.Close()
+				return
+			}
+			body, _ := io.ReadAll(req.Body)
+			bodies <- string(body)
+			_, _ = io.WriteString(conn, "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+			conn.Close()
+		}
+	}()
+
+	NewTunnelDelivery(st, router).DrainFor(context.Background(), base)
+
+	select {
+	case got := <-bodies:
+		if got != `{"after":"new"}` {
+			t.Fatalf("replayed %s, want the newer commit", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no replay arrived")
+	}
+	select {
+	case extra := <-bodies:
+		t.Fatalf("a second replay arrived: %s", extra)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	left, err := st.DrainEvents(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("%d events still parked after drain", len(left))
+	}
+}

@@ -81,3 +81,13 @@ CREATE TABLE IF NOT EXISTS repo_bindings (
 );
 
 CREATE INDEX IF NOT EXISTS repo_bindings_repo ON repo_bindings(repo);
+
+CREATE TABLE IF NOT EXISTS pending_events (
+    agent_name TEXT NOT NULL REFERENCES agents(name),
+    app        TEXT NOT NULL,
+    ref        TEXT NOT NULL,
+    event      TEXT NOT NULL,
+    payload    BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (agent_name, app, ref)
+);

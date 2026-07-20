@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // maxWebhookBody mirrors the agent-side cap in internal/webhook.
@@ -16,19 +17,15 @@ const maxWebhookBody = 5 << 20
 // Deliverer hands a verified, routed webhook to one bound agent.
 type Deliverer interface {
 	Deliver(ctx context.Context, b Binding, eventType string, payload []byte) error
-}
-
-// DeliverFunc adapts a function to Deliverer.
-type DeliverFunc func(ctx context.Context, b Binding, eventType string, payload []byte) error
-
-func (f DeliverFunc) Deliver(ctx context.Context, b Binding, eventType string, payload []byte) error {
-	return f(ctx, b, eventType, payload)
+	DrainFor(ctx context.Context, agentName string)
 }
 
 // ghEnvelope is the slice of a GitHub webhook the relay needs to route. Payload
 // interpretation stays on the box: the relay reads only the routing keys.
 type ghEnvelope struct {
 	Action     string `json:"action"`
+	Ref        string `json:"ref"`
+	Number     int    `json:"number"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
@@ -110,9 +107,30 @@ func NewGitHubIngress(st *Store, app *GitHubApp, d Deliverer) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		for _, b := range bindings {
 			go func(b Binding) {
-				if err := d.Deliver(context.Background(), b, event, body); err != nil {
-					log.Printf("relay: deliver %s to %s/%s: %v", event, b.AgentName, b.App, err)
+				err := d.Deliver(context.Background(), b, event, body)
+				if err == nil {
+					return
 				}
+				// Park on ANY failure, not just offline: GitHub already got its
+				// 202, so an event dropped here would never be retried by
+				// anyone. Parking is coalescing and idempotent, so this is
+				// safe for transient box-side errors too.
+				if !errors.Is(err, ErrAgentOffline) {
+					log.Printf("relay: deliver %s to %s/%s: %v (parking)", event, b.AgentName, b.App, err)
+				}
+				ref := strings.TrimPrefix(env.Ref, "refs/heads/")
+				if env.Number > 0 {
+					ref = "pr-" + strconv.Itoa(env.Number)
+				}
+				if err := st.ParkEvent(b.AgentName, b.App, ref, event, body); err != nil {
+					log.Printf("relay: park %s for %s/%s: %v", event, b.AgentName, b.App, err)
+					return
+				}
+				// Close the park/drain race: the box may have reconnected while
+				// the delivery was failing, in which case its reconnect drain
+				// already ran and missed this event. DrainFor no-ops while the
+				// agent is still offline.
+				d.DrainFor(context.Background(), b.AgentName)
 			}(b)
 		}
 	})

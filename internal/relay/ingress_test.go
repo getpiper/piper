@@ -31,6 +31,8 @@ func (c *capturingDeliverer) Deliver(_ context.Context, b Binding, _ string, _ [
 	return nil
 }
 
+func (c *capturingDeliverer) DrainFor(_ context.Context, _ string) {}
+
 func (c *capturingDeliverer) seen() []Binding {
 	c.mu.Lock()
 	defer c.mu.Unlock()

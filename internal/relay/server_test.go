@@ -442,7 +442,7 @@ func TestReconnectRederivesCustomDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tunLn.Close()
-	go acceptTunnels(tunLn, st, router, nil)
+	go acceptTunnels(tunLn, st, router, nil, nil)
 
 	dial := func(tok, base string) *tunnel.Session {
 		t.Helper()

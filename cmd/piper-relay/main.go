@@ -215,9 +215,11 @@ func main() {
 	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
 
 	ctrl := apiHandler
+	var delivery *relay.TunnelDelivery
 	if ghApp != nil {
+		delivery = relay.NewTunnelDelivery(st, router)
 		outer := http.NewServeMux()
-		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, relay.NewTunnelDelivery(st, router)))
+		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
 		outer.Handle("/", apiHandler)
 		ctrl = outer
 	}
@@ -238,5 +240,5 @@ func main() {
 	}
 
 	log.Printf("piper-relay: TLS %s, HTTP %s, tunnel %s", tlsAddr, httpAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, ctrl, ghApp))
+	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, ctrl, ghApp, delivery))
 }
