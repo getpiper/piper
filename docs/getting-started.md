@@ -226,9 +226,28 @@ shape: [`custom-domains.md`](custom-domains.md).
 
 ## Git deploys
 
-Once your box runs in relay mode, a `git push` can build and publish an app.
-Piper uses a **per-user GitHub App** you create yourself — the private key and
-webhook secret never leave your box.
+Once you've joined the relay (above), a `git push` can build and publish an app.
+The **public hosted relay holds one shared GitHub App** on everyone's behalf, so
+there's nothing to create yourself — `piper login` walks you through installing
+it on the repos you want:
+
+```bash
+piper login                                          # ... then: install the App (link printed); login waits for it
+piper create myapp --port 8080                       # register the app (needed before it can be linked)
+piper app link myapp --repo owner/name --branch main # bind the repo to an app
+git push origin main                                 # → live at the app's routed URL
+```
+
+Every push to the tracked branch builds the Dockerfile at the repo root,
+health-checks the container, and serves it. The live URL shows up on GitHub as
+a Deployment status. `piper github repos` lists what the installation can reach
+at any point; re-run `piper login` to install the App on more repos later.
+
+### Self-hosted relay / bring-your-own GitHub App
+
+Running your own `piper-relay` without a configured App, or serving on your own
+domain outside the public relay? Each box then creates and holds its **own**
+GitHub App instead — the private key and webhook secret never leave it:
 
 ```bash
 piper create myapp --port 8080                       # register the app (needed before it can be linked)
@@ -243,5 +262,6 @@ The live URL shows up on GitHub as a Deployment status. Webhooks ride the same
 tunnel as your traffic (delivered to `hooks.<your-domain>`); nothing else on the
 box is exposed.
 
-Standing this up against a real relay, domain, and GitHub App end-to-end:
-[`runbooks/git-deploy-e2e.md`](runbooks/git-deploy-e2e.md).
+Standing either path up against a real relay, domain, and GitHub App end-to-end:
+[`runbooks/git-deploy-e2e.md`](runbooks/git-deploy-e2e.md) (BYO in Parts A–F,
+brokered mode in Part G).

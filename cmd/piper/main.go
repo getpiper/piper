@@ -457,22 +457,36 @@ func cmdApp(remote string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+const githubUsage = "usage: piper github setup [--org <name>] | piper github repos"
+
 func cmdGithub(remote string, args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 || args[0] != "setup" {
-		fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, githubUsage)
 		return 2
 	}
-	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	org := fs.String("org", "", "GitHub organization name")
-	if err := fs.Parse(args[1:]); err != nil {
+	switch args[0] {
+	case "setup":
+		fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		org := fs.String("org", "", "GitHub organization name")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
+			return 2
+		}
+		return githubSetup(remote, *org, stdout, stderr)
+	case "repos":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: piper github repos")
+			return 2
+		}
+		return githubRepos(stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, githubUsage)
 		return 2
 	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: piper github setup [--org <name>]")
-		return 2
-	}
-	return githubSetup(remote, *org, stdout, stderr)
 }
 
 // githubSetup drives the GitHub App manifest flow: it asks piperd for a manifest,

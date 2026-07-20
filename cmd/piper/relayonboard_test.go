@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/relayclient"
 )
 
 // The shipped default must point at the live hosted relay: a stale default
@@ -70,6 +71,103 @@ func TestRelayLoginStoresCredential(t *testing.T) {
 	}
 	if cc.RelayAPI != srv.URL || cc.AccountCredential != "cred-xyz" {
 		t.Fatalf("cc = %+v", cc)
+	}
+}
+
+// TestWaitForInstallPollsUntilInstalled cribs TestRelayLoginStoresCredential's
+// httptest-stub-relay shape. The stub's /v1/github/repos answers 404 ("not
+// installed yet") twice, then 200 with two repos, pinning that waitForInstall
+// keeps retrying on ErrNoInstallation and returns nil once the install lands.
+func TestWaitForInstallPollsUntilInstalled(t *testing.T) {
+	pollSleep = func(time.Duration) {}
+	defer func() { pollSleep = time.Sleep }()
+
+	var polls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/github/repos" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		polls++
+		if polls < 3 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []string{"alice/blog", "alice/api"}})
+	}))
+	defer srv.Close()
+
+	rc := relayclient.New(srv.URL)
+	if err := waitForInstall(rc, "cred-xyz", "https://github.com/apps/piper/installations/new"); err != nil {
+		t.Fatalf("waitForInstall: %v", err)
+	}
+	if polls != 3 {
+		t.Fatalf("polls = %d, want 3", polls)
+	}
+}
+
+func TestGitHubReposCommandListsRepos(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/github/repos" || r.Header.Get("Authorization") != "Bearer cred-xyz" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []string{"alice/blog", "alice/api"}})
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{
+		Addr: "http://127.0.0.1:8088", RelayAPI: srv.URL, AccountCredential: "cred-xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"github", "repos"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, err = %s", code, errb.String())
+	}
+	if got := out.String(); got != "alice/blog\nalice/api\n" {
+		t.Fatalf("stdout = %q", got)
+	}
+}
+
+func TestGitHubReposCommandNotInstalledYet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	if err := config.SaveClient(config.ClientConfig{
+		Addr: "http://127.0.0.1:8088", RelayAPI: srv.URL, AccountCredential: "cred-xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"github", "repos"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, err = %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "run `piper login`") {
+		t.Fatalf("stdout = %q, want the install hint", out.String())
+	}
+}
+
+func TestGitHubReposCommandRequiresLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"github", "repos"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "piper login") {
+		t.Fatalf("stderr = %q, want a `piper login` hint", errb.String())
 	}
 }
 

@@ -559,3 +559,102 @@ func TestWebLoginNotConfigured(t *testing.T) {
 		t.Fatalf("unconfigured callback = %d, want 503", rr.Code)
 	}
 }
+
+// ghAPIStub serves the two GitHub endpoints repo listing touches.
+func ghAPIStub(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations/55/access_tokens":
+			_, _ = w.Write([]byte(`{"token":"t","expires_at":"2026-07-20T12:00:00Z"}`))
+		case "/installation/repositories":
+			_, _ = w.Write([]byte(`{"repositories":[{"full_name":"alice/blog"},{"full_name":"alice/api"}]}`))
+		default:
+			t.Errorf("unexpected GitHub path %q", r.URL.Path)
+		}
+	}))
+}
+
+// reposAPI builds the account API with a GitHub App pointed at gh.
+func reposAPI(t *testing.T, st *Store, gh *httptest.Server) http.Handler {
+	t.Helper()
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s", APIBase: gh.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewAPIWithTunnel(st, NewFakeVerifier(), "", nil, nil, app)
+}
+
+func getRepos(t *testing.T, h http.Handler, cred string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/github/repos", nil)
+	if cred != "" {
+		req.Header.Set("Authorization", "Bearer "+cred)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestGitHubReposListsInstallationRepos(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+
+	st := openTestStore(t)
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := st.MintAccountCredential(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getRepos(t, reposAPI(t, st, gh), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Repos []string `json:"repos"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Repos) != 2 || body.Repos[0] != "alice/blog" || body.Repos[1] != "alice/api" {
+		t.Fatalf("repos = %v", body.Repos)
+	}
+}
+
+func TestGitHubReposRequiresCredential(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestGitHubReposWithoutInstallation(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+
+	st := openTestStore(t)
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := st.MintAccountCredential(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getRepos(t, reposAPI(t, st, gh), cred)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}

@@ -35,6 +35,7 @@ func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Rout
 	mux.HandleFunc("GET /v1/login/web", a.loginWeb)
 	mux.HandleFunc("GET /v1/login/callback", a.loginCallback)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
+	mux.HandleFunc("GET /v1/github/repos", a.githubRepos)
 	a.registerOrgRoutes(mux)
 	if router != nil {
 		proxy := NewControlProxy(st, router)
@@ -309,6 +310,36 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 		"webhook_secret":   en.WebhookSecret,
 		"github_app":       a.ghApp != nil,
 	})
+}
+
+// githubRepos lists the repositories the caller's installation can reach. No
+// list is cached: it is read live through a fresh installation token, so a
+// repository revoked in GitHub disappears here immediately.
+func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	if a.ghApp == nil {
+		http.Error(w, "relay has no github app configured", http.StatusServiceUnavailable)
+		return
+	}
+	instID, err := a.st.InstallationForAccount(acc.ID)
+	if errors.Is(err, ErrNoInstallation) {
+		http.Error(w, "github app not installed for this account", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "lookup error", http.StatusInternalServerError)
+		return
+	}
+	repos, err := a.ghApp.Repos(r.Context(), instID)
+	if err != nil {
+		log.Printf("relay: list repos for %s: %v", acc.Username, err)
+		http.Error(w, "github unavailable", http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": repos})
 }
 
 // authAccount authenticates the request's bearer account credential, writing
