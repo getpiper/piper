@@ -84,7 +84,11 @@ func (c *TunnelClient) Run(ctx context.Context, relayAddr, token, baseDomain str
 // Register opens a control stream on the current session and asks the relay to
 // assign/return the public hostname for app.
 func (c *TunnelClient) Register(app string) (string, error) {
-	return c.control(tunnel.ControlRequest{Op: "register", App: app})
+	resp, err := c.control(tunnel.ControlRequest{Op: "register", App: app})
+	if err != nil {
+		return "", err
+	}
+	return resp.Hostname, nil
 }
 
 // Deregister asks the relay to drop hostname.
@@ -122,27 +126,50 @@ func (c *TunnelClient) ConfirmCustomDomain(domain string) error {
 	return err
 }
 
-func (c *TunnelClient) control(req tunnel.ControlRequest) (string, error) {
-	sess := c.current()
-	if sess == nil {
-		return "", ErrNotConnected
-	}
-	stream, err := sess.OpenKind(tunnel.KindControl)
+// BindRepo tells the relay that app deploys from repo@branch on this box, so
+// the relay can route that repository's webhooks here.
+func (c *TunnelClient) BindRepo(app, repo, branch string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "bind-repo", App: app, Repo: repo, Branch: branch})
+	return err
+}
+
+// UnbindRepo drops an app's repo binding on the relay.
+func (c *TunnelClient) UnbindRepo(app string) error {
+	_, err := c.control(tunnel.ControlRequest{Op: "unbind-repo", App: app})
+	return err
+}
+
+// GitHubToken asks the relay for an installation token scoped to repo. Brokered
+// boxes hold no GitHub App key, so this is their only way to reach the repo.
+func (c *TunnelClient) GitHubToken(repo string) (string, error) {
+	resp, err := c.control(tunnel.ControlRequest{Op: "gh-token", Repo: repo})
 	if err != nil {
 		return "", err
 	}
+	return resp.Token, nil
+}
+
+func (c *TunnelClient) control(req tunnel.ControlRequest) (tunnel.ControlResponse, error) {
+	sess := c.current()
+	if sess == nil {
+		return tunnel.ControlResponse{}, ErrNotConnected
+	}
+	stream, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		return tunnel.ControlResponse{}, err
+	}
 	defer stream.Close()
 	if err := tunnel.WriteMsg(stream, req); err != nil {
-		return "", err
+		return tunnel.ControlResponse{}, err
 	}
 	var resp tunnel.ControlResponse
 	if err := tunnel.ReadMsg(stream, &resp); err != nil {
-		return "", err
+		return tunnel.ControlResponse{}, err
 	}
 	if resp.Error != "" {
-		return "", errors.New(resp.Error)
+		return tunnel.ControlResponse{}, errors.New(resp.Error)
 	}
-	return resp.Hostname, nil
+	return resp, nil
 }
 
 // healthyThreshold is how long a session must stay up before a subsequent

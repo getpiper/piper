@@ -33,7 +33,7 @@ func TestAcceptTunnelsRebindsCustomDomainOnReconnect(t *testing.T) {
 	defer ln.Close()
 
 	router := NewRouter()
-	go acceptTunnels(ln, st, router)
+	go acceptTunnels(ln, st, router, nil)
 
 	customDomain := "app.example.com"
 

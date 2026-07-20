@@ -64,7 +64,7 @@ func startTestRelay(t *testing.T, tlsCfg *tls.Config, ctrl http.Handler) (*tunne
 				continue
 			}
 			router.Register(sess)
-			go serveControl(sess, st, router)
+			go serveControl(sess, st, router, nil)
 		}
 	}()
 	go func() {
@@ -431,7 +431,7 @@ func TestReconnectRederivesCustomDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tunLn.Close()
-	go acceptTunnels(tunLn, st, router)
+	go acceptTunnels(tunLn, st, router, nil)
 
 	dial := func(tok, base string) *tunnel.Session {
 		t.Helper()
@@ -482,5 +482,66 @@ func TestReconnectRederivesCustomDomains(t *testing.T) {
 	waitRouted("squat.dev", sessB)
 	if got, _ := st.CustomDomains("bob.example.com"); len(got) != 1 || got[0] != "squat.dev" {
 		t.Fatalf("bob's domains after alice's remove = %v, want [squat.dev]", got)
+	}
+}
+
+func TestBindRepoControlOp(t *testing.T) {
+	sess, _, _, base, st := startTestRelay(t, nil, nil)
+
+	control := func(req tunnel.ControlRequest) tunnel.ControlResponse {
+		t.Helper()
+		cs, err := sess.OpenKind(tunnel.KindControl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cs.Close()
+		if err := tunnel.WriteMsg(cs, req); err != nil {
+			t.Fatal(err)
+		}
+		var resp tunnel.ControlResponse
+		if err := tunnel.ReadMsg(cs, &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	if resp := control(tunnel.ControlRequest{
+		Op: "bind-repo", App: "blog", Repo: "alice/blog", Branch: "main",
+	}); resp.Error != "" {
+		t.Fatalf("bind-repo error: %s", resp.Error)
+	}
+	ok, err := st.AgentBoundToRepo(base, "alice/blog")
+	if err != nil || !ok {
+		t.Fatalf("binding not stored: ok=%v err=%v", ok, err)
+	}
+
+	if resp := control(tunnel.ControlRequest{Op: "bind-repo", App: "blog"}); resp.Error == "" {
+		t.Fatal("bind-repo without repo/branch was accepted")
+	}
+
+	if resp := control(tunnel.ControlRequest{Op: "unbind-repo", App: "blog"}); resp.Error != "" {
+		t.Fatalf("unbind-repo error: %s", resp.Error)
+	}
+	if ok, _ := st.AgentBoundToRepo(base, "alice/blog"); ok {
+		t.Fatal("binding survived unbind-repo")
+	}
+}
+
+func TestGHTokenControlOpRejectsUnboundRepo(t *testing.T) {
+	sess, _, _, _, _ := startTestRelay(t, nil, nil)
+	cs, err := sess.OpenKind(tunnel.KindControl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if err := tunnel.WriteMsg(cs, tunnel.ControlRequest{Op: "gh-token", Repo: "someone/else"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp tunnel.ControlResponse
+	if err := tunnel.ReadMsg(cs, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error == "" || resp.Token != "" {
+		t.Fatalf("unbound repo minted a token: %+v", resp)
 	}
 }

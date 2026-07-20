@@ -198,7 +198,6 @@ func main() {
 		}
 		log.Printf("relay: GitHub App %s configured (brokered git deploys enabled)", appID)
 	}
-	_ = ghApp // wired in Task 6
 
 	if !apiAddrIsLoopback(apiAddr) {
 		log.Printf("piper-relay: WARNING control API %s is not loopback-only; it serves bearer credentials in cleartext HTTP and must be fronted with TLS", apiAddr)
@@ -231,5 +230,5 @@ func main() {
 	}
 
 	log.Printf("piper-relay: TLS %s, HTTP %s, tunnel %s", tlsAddr, httpAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, apiHandler))
+	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, apiHandler, ghApp))
 }

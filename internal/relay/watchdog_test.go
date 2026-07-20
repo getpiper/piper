@@ -41,7 +41,7 @@ func serveTunnels(ln net.Listener, st *Store, router *Router, disabled func(stri
 		if err != nil {
 			return
 		}
-		go serveTunnel(conn, st, router, disabled)
+		go serveTunnel(conn, st, router, disabled, nil)
 	}
 }
 
@@ -81,7 +81,7 @@ func TestDisabledWatchdogEvictsLiveSession(t *testing.T) {
 	}
 	defer ln.Close()
 	router := NewRouter()
-	go acceptTunnels(ln, st, router)
+	go acceptTunnels(ln, st, router, nil)
 
 	sess := dialAgent(t, ln.Addr().String(), en.Token, en.BaseDomain)
 	defer sess.Close()
@@ -129,7 +129,7 @@ func TestDeletedAgentWatchdogEvictsLiveSession(t *testing.T) {
 	}
 	defer ln.Close()
 	router := NewRouter()
-	go acceptTunnels(ln, st, router)
+	go acceptTunnels(ln, st, router, nil)
 
 	sess := dialAgent(t, ln.Addr().String(), en.Token, en.BaseDomain)
 	defer sess.Close()
@@ -217,7 +217,7 @@ func TestPostDisableRedialRejected(t *testing.T) {
 	}
 	defer ln.Close()
 	router := NewRouter()
-	go acceptTunnels(ln, st, router)
+	go acceptTunnels(ln, st, router, nil)
 
 	sess := dialAgent(t, ln.Addr().String(), en.Token, en.BaseDomain)
 	defer sess.Close()

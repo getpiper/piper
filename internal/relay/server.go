@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"io"
@@ -57,8 +58,10 @@ func (q *connQueue) push(c net.Conn) {
 // (routed by Host, custom domains only — #228). tlsCfg is the wildcard
 // config for relay-terminated shared-domain apps; nil ⇒ passthrough-only.
 // ctrl, when non-nil and a wildcard cert is armed, is the relay's own HTTP API,
-// served TLS-terminated at SNI "api.<apex>" (#73). Blocks until a listener fails.
-func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler) error {
+// served TLS-terminated at SNI "api.<apex>" (#73). ghApp, when non-nil, lets the
+// relay broker GitHub tokens over the control channel (#289); nil means BYO-only.
+// Blocks until a listener fails.
+func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, router *Router, ctrl http.Handler, ghApp *GitHubApp) error {
 	var ctrlQ *connQueue
 	if ctrl != nil && tlsCfg != nil {
 		ctrlQ = newConnQueue()
@@ -77,7 +80,7 @@ func Serve(tlsAddr, httpAddr, tunnelAddr string, st *Store, tlsCfg *tls.Config, 
 	if err != nil {
 		return err
 	}
-	go acceptTunnels(tunLn, st, router)
+	go acceptTunnels(tunLn, st, router, ghApp)
 
 	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
@@ -122,21 +125,22 @@ func tunnelAuth(st *Store) tunnel.Auth {
 	}
 }
 
-func acceptTunnels(ln net.Listener, st *Store, router *Router) {
+func acceptTunnels(ln net.Listener, st *Store, router *Router, ghApp *GitHubApp) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go serveTunnel(conn, st, router, st.AgentDisabled)
+		go serveTunnel(conn, st, router, st.AgentDisabled, ghApp)
 	}
 }
 
 // serveTunnel authenticates one agent tunnel, registers it, and runs the
 // per-session kill-switch watchdog until the session ends. disabled reports
 // whether the session's account has been disabled; it is a parameter (defaulting
-// to st.AgentDisabled) so tests can inject store-read failures.
-func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string) (bool, error)) {
+// to st.AgentDisabled) so tests can inject store-read failures. ghApp is
+// threaded through to serveControl for token-brokering control ops.
+func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string) (bool, error), ghApp *GitHubApp) {
 	sess, err := tunnel.Serve(conn, tunnelAuth(st))
 	if err != nil {
 		conn.Close()
@@ -162,7 +166,7 @@ func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string)
 		return
 	}
 	log.Printf("agent registered: %s", sess.BaseDomain)
-	go serveControl(sess, st, router)
+	go serveControl(sess, st, router, ghApp)
 
 	ticker := time.NewTicker(disabledPollInterval)
 	defer ticker.Stop()
@@ -200,7 +204,7 @@ func serveTunnel(conn net.Conn, st *Store, router *Router, disabled func(string)
 // serveControl accepts the agent's control streams (KindControl) for the life of
 // the session and dispatches each. Non-control streams are ignored (the agent
 // never opens them). Returns when the session dies.
-func serveControl(sess *tunnel.Session, st *Store, router *Router) {
+func serveControl(sess *tunnel.Session, st *Store, router *Router, ghApp *GitHubApp) {
 	for {
 		kind, stream, err := sess.AcceptKind()
 		if err != nil {
@@ -210,13 +214,13 @@ func serveControl(sess *tunnel.Session, st *Store, router *Router) {
 			stream.Close()
 			continue
 		}
-		go handleControl(stream, sess, st, router)
+		go handleControl(stream, sess, st, router, ghApp)
 	}
 }
 
 // handleControl serves one control request: register or deregister a hostname
 // for this session's account.
-func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Router) {
+func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Router, ghApp *GitHubApp) {
 	defer stream.Close()
 	var req tunnel.ControlRequest
 	if err := tunnel.ReadMsg(stream, &req); err != nil {
@@ -283,6 +287,44 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 			router.UnregisterCustom(req.Domain)
 		}
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "bind-repo":
+		if req.App == "" || req.Repo == "" || req.Branch == "" {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "bind-repo: app, repo and branch required"})
+			return
+		}
+		if err := st.BindRepo(sess.BaseDomain, req.App, req.Repo, req.Branch); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "unbind-repo":
+		if req.App == "" {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "unbind-repo: app required"})
+			return
+		}
+		if err := st.UnbindRepo(sess.BaseDomain, req.App); err != nil {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
+			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{})
+	case "gh-token":
+		if req.Repo == "" {
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "gh-token: repo required"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		tok, exp, err := st.GitHubTokenFor(ctx, ghApp, sess.BaseDomain, req.Repo)
+		cancel()
+		if err != nil {
+			// The detail stays server-side: a box must not learn whether a repo
+			// exists, only that it is not authorized for it here.
+			log.Printf("relay: gh-token for %s repo %s: %v", sess.BaseDomain, req.Repo, err)
+			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "github token unavailable"})
+			return
+		}
+		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{
+			Token: tok, Expires: exp.UTC().Format(time.RFC3339),
+		})
 	default:
 		_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: "unknown op"})
 	}
