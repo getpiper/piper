@@ -59,9 +59,15 @@ type DomainManager interface {
 	AppDomainStatuses(app string) ([]domain.AppDomainStatus, error)
 }
 
+// RepoBinder tells the relay which repository an app deploys from, so brokered
+// webhooks can be routed to this box. Nil on LAN-only boxes.
+type RepoBinder interface {
+	BindRepo(app, repo, branch string) error
+}
+
 // onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
 // exchange endpoint, so the daemon can start serving webhooks without a restart.
-func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager) http.Handler {
+func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager, binder RepoBinder) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -214,12 +220,21 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
-		if err := s.UpdateAppRepo(r.PathValue("name"), in.Repo, in.Branch); errors.Is(err, store.ErrNotFound) {
+		name := r.PathValue("name")
+		if err := s.UpdateAppRepo(name, in.Repo, in.Branch); errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
 			serverError(w, r, err)
 			return
+		}
+		if binder != nil {
+			if err := binder.BindRepo(name, in.Repo, in.Branch); err != nil {
+				// The local binding is authoritative and already stored; a relay
+				// that is briefly unreachable must not fail the link. The binding
+				// is re-pushed when the tunnel reconnects.
+				log.Printf("api: register binding for %s with relay: %v", name, err)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})

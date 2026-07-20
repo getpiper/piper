@@ -404,11 +404,24 @@ func main() {
 	if domMgr != nil {
 		dm = domMgr
 	}
+	// The tunnel client is created here, ahead of api.New, so the link handler
+	// can push repo bindings to the relay; Run and the rest of its wiring still
+	// start later, in the relay block below. binder is declared as the
+	// api.RepoBinder interface (not a *agent.TunnelClient) so that on a
+	// LAN-only box it stays genuinely nil — a nil *agent.TunnelClient boxed into
+	// the interface would be a non-nil interface value and would defeat the
+	// "binder != nil" guard in the link handler.
+	var binder api.RepoBinder
+	var tc *agent.TunnelClient
+	if cfg.RelayAddr != "" {
+		tc = &agent.TunnelClient{}
+		binder = tc
+	}
 	apiHandler := api.New(st, dep, cfg.BaseDomain, "", func() {
 		if wh != nil {
 			wh.start()
 		}
-	}, dm)
+	}, dm, binder)
 
 	// The authenticated entry point. Always on, so LAN-only and relay-connected
 	// boxes run the identical listener topology; the relay tunnel below is its
@@ -450,7 +463,6 @@ func main() {
 				}
 			}
 		}
-		tc := &agent.TunnelClient{}
 		// One mutex shared by every OnConnect callback, so overlapping
 		// (re)connects can't race the list-then-mint and double-provision.
 		var provisionMu sync.Mutex
@@ -458,6 +470,21 @@ func main() {
 			provisionRelayControl(&provisionMu, st, tc.Provision, cfg.BaseDomain)
 			if cfg.Terminated {
 				domMgr.OnRelayConnect() // gated like Resume: box-wide API configs exist only here
+			}
+			// The relay restores its routing table from its own store when a
+			// session registers, but repo bindings live only in the box's
+			// store — there is no agent-side hostname re-registration to hook
+			// instead, so every (re)connect re-pushes them here.
+			apps, err := st.ListApps()
+			if err == nil {
+				for _, a := range apps {
+					if a.Repo == "" {
+						continue
+					}
+					if err := tc.BindRepo(a.Name, a.Repo, a.Branch); err != nil {
+						log.Printf("relay: re-bind %s: %v", a.Name, err)
+					}
+				}
 			}
 		}
 		go tc.Run(ctx, cfg.RelayAddr, cfg.RelayToken, cfg.BaseDomain, dialLocal)
