@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -214,6 +215,19 @@ func main() {
 	router := relay.NewRouter()
 	apiHandler := relay.NewAPIWithTunnel(st, v, tunnelPublic, router, webRedirects)
 
+	ctrl := apiHandler
+	if ghApp != nil {
+		// Replaced by the tunnel deliverer in Task 7.
+		delivery := relay.DeliverFunc(func(ctx context.Context, b relay.Binding, event string, payload []byte) error {
+			log.Printf("relay: would deliver %s to %s/%s", event, b.AgentName, b.App)
+			return nil
+		})
+		outer := http.NewServeMux()
+		outer.Handle("POST /gh", relay.NewGitHubIngress(st, ghApp, delivery))
+		outer.Handle("/", apiHandler)
+		ctrl = outer
+	}
+
 	go func() {
 		log.Printf("piper-relay: control API %s", apiAddr)
 		if err := http.ListenAndServe(apiAddr, apiHandler); err != nil {
@@ -230,5 +244,5 @@ func main() {
 	}
 
 	log.Printf("piper-relay: TLS %s, HTTP %s, tunnel %s", tlsAddr, httpAddr, tunnelAddr)
-	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, apiHandler, ghApp))
+	log.Fatal(relay.Serve(tlsAddr, httpAddr, tunnelAddr, st, tlsCfg, router, ctrl, ghApp))
 }
