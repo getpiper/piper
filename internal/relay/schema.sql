@@ -31,8 +31,9 @@ CREATE TABLE IF NOT EXISTS hostnames (
     hostname    TEXT PRIMARY KEY,
     account_id  TEXT NOT NULL REFERENCES accounts(id),
     app         TEXT NOT NULL,
+    pr          INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
-    UNIQUE(account_id, app)
+    UNIQUE(account_id, app, pr)
 );
 
 CREATE TABLE IF NOT EXISTS org_members (

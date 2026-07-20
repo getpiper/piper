@@ -59,6 +59,7 @@ type fakeDeployer struct {
 	teardownCalls int
 	retired       bool
 	err           error
+	previewHost   string // relay-assigned preview host; empty means "no registrar"
 }
 
 type blockingDeployer struct {
@@ -81,6 +82,8 @@ func (d *blockingDeployer) TeardownPreview(context.Context, string, int) (bool, 
 	return false, nil
 }
 
+func (d *blockingDeployer) PreviewHost(string, int) (string, bool) { return "", false }
+
 func (d *fakeDeployer) Deploy(context.Context, string, string) (store.Deployment, error) {
 	d.mu.Lock()
 	d.calls++
@@ -99,6 +102,14 @@ func (d *fakeDeployer) TeardownPreview(context.Context, string, int) (bool, erro
 	retired := d.retired
 	d.mu.Unlock()
 	return retired, d.err
+}
+func (d *fakeDeployer) PreviewHost(app string, pr int) (string, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.previewHost == "" {
+		return "", false
+	}
+	return d.previewHost, true
 }
 func (d *fakeDeployer) count() int     { d.mu.Lock(); defer d.mu.Unlock(); return d.calls }
 func (d *fakeDeployer) previews() int  { d.mu.Lock(); defer d.mu.Unlock(); return d.previewCalls }
@@ -356,6 +367,30 @@ func TestReportsTheRoutedHostname(t *testing.T) {
 	h.Wait()
 
 	if got, want := p.successURL(), "https://abc123-alice.public.getpiper.dev"; got != want {
+		t.Fatalf("reported %q, want %q", got, want)
+	}
+}
+
+// A preview on a relay-terminated box is reachable only at the hostname the
+// relay assigned; "pr-<N>-<app>.<baseDom>" is two labels under the apex there,
+// so GitHub's Deployments tab linked at a host that fails TLS and has no route
+// (#302).
+func TestReportsTheRoutedPreviewHostname(t *testing.T) {
+	s := newStore(t)
+	s.CreateApp("blog", 8080)
+	s.UpdateAppRepo("blog", "alice/blog", "main")
+	p := &fakeProvider{ev: source.Event{
+		Kind: source.KindPROpened, Repo: "alice/blog", PR: 7, SHA: "s1",
+	}}
+	d := &fakeDeployer{previewHost: "pr7-abc123-alice.public.getpiper.dev"}
+	h := webhook.New(p, s, d, "85b90055-ozykhan.public.getpiper.dev")
+
+	if rec := post(h); rec.Code != http.StatusAccepted {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	h.Wait()
+
+	if got, want := p.successURL(), "https://pr7-abc123-alice.public.getpiper.dev"; got != want {
 		t.Fatalf("reported %q, want %q", got, want)
 	}
 }

@@ -234,7 +234,7 @@ func handleControl(stream net.Conn, sess *tunnel.Session, st *Store, router *Rou
 	}
 	switch req.Op {
 	case "register":
-		host, err := st.RegisterHostname(sess.BaseDomain, req.App)
+		host, err := st.RegisterHostname(sess.BaseDomain, req.App, req.PR)
 		if err != nil {
 			_ = tunnel.WriteMsg(stream, tunnel.ControlResponse{Error: err.Error()})
 			return

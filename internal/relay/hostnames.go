@@ -5,23 +5,32 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 )
 
-// appHostname derives the single-label public hostname for (account, app):
-// "<hex>-<username>.<apex>", where <hex> is the first 8 hex chars of
-// sha256(accountID + "/" + app). It truncates <username> so the whole first
-// label stays within DNS's 63-char limit (the 8-char hash preserves
-// uniqueness). Deterministic — the same (account, app) always maps to the same
-// hostname.
-func appHostname(accountID, app, username, apex string) string {
-	sum := sha256.Sum256([]byte(accountID + "/" + app))
+// appHostname derives the single-label public hostname for (account, app, pr):
+// "<hex>-<username>.<apex>" for production (pr 0), "pr<N>-<hex>-<username>.<apex>"
+// for a PR preview, where <hex> is the first 8 hex chars of sha256 over the
+// same triple. It truncates <username> so the whole first label stays within
+// DNS's 63-char limit (the 8-char hash preserves uniqueness). Deterministic —
+// the same (account, app, pr) always maps to the same hostname.
+//
+// Everything stays in ONE label: the relay serves a "*.<apex>" wildcard, which
+// matches exactly one label, so a preview at "pr-<N>-<app>.<agent>.<apex>"
+// would fail TLS outright (#302).
+func appHostname(accountID, app, username, apex string, pr int) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s/%s/%d", accountID, app, pr)))
 	h := hex.EncodeToString(sum[:])[:8]
-	// first label is "<h>-<username>": budget 63 - len(h) - 1 for the username.
-	if max := 63 - len(h) - 1; len(username) > max {
+	prefix := ""
+	if pr > 0 {
+		prefix = fmt.Sprintf("pr%d-", pr)
+	}
+	// first label is "<prefix><h>-<username>": the rest is the username budget.
+	if max := 63 - len(prefix) - len(h) - 1; len(username) > max {
 		username = username[:max]
 	}
-	return h + "-" + username + "." + apex
+	return prefix + h + "-" + username + "." + apex
 }
 
 // AgentAccount resolves the account owning the agent whose base_domain is
@@ -76,16 +85,21 @@ func (s *Store) AgentDisabled(baseDomain string) (bool, error) {
 }
 
 // RegisterHostname assigns (idempotently) the public hostname for app on the
-// account owning baseDomain, enforcing the per-account app cap. Returns the
-// assigned "<app-hash>-<username>.<apex>".
-func (s *Store) RegisterHostname(baseDomain, app string) (string, error) {
+// account owning baseDomain, enforcing the per-account app cap. pr is 0 for the
+// production host and the PR number for a preview, which gets a hostname of its
+// own so it can never overwrite production's. Returns the assigned
+// "<app-hash>-<username>.<apex>".
+//
+// Only production hosts count against the app cap: the cap bounds apps, and an
+// open PR must not lock an account out of creating one.
+func (s *Store) RegisterHostname(baseDomain, app string, pr int) (string, error) {
 	accountID, username, err := s.AgentAccount(baseDomain)
 	if err != nil {
 		return "", err
 	}
 
 	var existing string
-	err = s.db.QueryRow(`SELECT hostname FROM hostnames WHERE account_id=? AND app=?`, accountID, app).Scan(&existing)
+	err = s.db.QueryRow(`SELECT hostname FROM hostnames WHERE account_id=? AND app=? AND pr=?`, accountID, app, pr).Scan(&existing)
 	if err == nil {
 		return existing, nil // idempotent
 	}
@@ -93,18 +107,20 @@ func (s *Store) RegisterHostname(baseDomain, app string) (string, error) {
 		return "", err
 	}
 
-	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM hostnames WHERE account_id=?`, accountID).Scan(&count); err != nil {
-		return "", err
-	}
-	if count >= s.maxAppsOrDefault() {
-		return "", ErrQuotaExceeded
+	if pr == 0 {
+		var count int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM hostnames WHERE account_id=? AND pr=0`, accountID).Scan(&count); err != nil {
+			return "", err
+		}
+		if count >= s.maxAppsOrDefault() {
+			return "", ErrQuotaExceeded
+		}
 	}
 
-	hostname := appHostname(accountID, app, username, s.apexOrDefault())
+	hostname := appHostname(accountID, app, username, s.apexOrDefault(), pr)
 	_, err = s.db.Exec(
-		`INSERT INTO hostnames(hostname, account_id, app, created_at) VALUES(?,?,?,?)`,
-		hostname, accountID, app, time.Now().UTC().Format(time.RFC3339Nano))
+		`INSERT INTO hostnames(hostname, account_id, app, pr, created_at) VALUES(?,?,?,?,?)`,
+		hostname, accountID, app, pr, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return "", err
 	}
