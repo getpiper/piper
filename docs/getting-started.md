@@ -243,6 +243,15 @@ health-checks the container, and serves it. The live URL shows up on GitHub as
 a Deployment status. `piper github repos` lists what the installation can reach
 at any point; re-run `piper login` to install the App on more repos later.
 
+A box that ever ran `piper github setup` keeps its own App, and that always
+wins over the relay's — so brokered deliveries fail their signature check until
+you give it up:
+
+```bash
+piper github reset                                   # drop this box's own App
+sudo systemctl restart piperd                        # the provider is picked at start
+```
+
 ### Self-hosted relay / bring-your-own GitHub App
 
 Running your own `piper-relay` without a configured App, or serving on your own

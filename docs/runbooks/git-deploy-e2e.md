@@ -513,6 +513,7 @@ sudo systemctl clean --what=state piper-relay
 | Push does nothing, no piperd log | App not installed on the repo, or repo not linked, or pushed a non-tracked branch | Install the App on the repo; `piper app link … --branch <pushed-branch>` |
 | Deploy starts but health-check fails | App doesn't listen on the `--port` you set | Match `piper create --port N` to the container's listen port |
 | Webhook 401 in piperd logs | Signature mismatch — stale App creds | Re-run `piper github setup`; ensure only one `piper-<base>` App is installed |
+| Relay logs `box rejected delivery: 401` on a brokered box | The box still holds its own App, which outranks the relay's; the log shows `using this box's own GitHub App` instead of `(brokered)` | `piper github reset`, then restart piperd |
 
 ---
 
