@@ -342,6 +342,53 @@ it's the default flow in [`getting-started.md`](../getting-started.md).
   **`https://api.<apex>/gh`** — `cmd/piper-relay/main.go` mounts `/gh` there
   alongside the control API.
 
+### Registering the App (once per relay)
+
+**Settings → Developer settings → GitHub Apps → New GitHub App.** Two ordering
+rules first: deploy a relay that actually serves `/gh` *before* anyone installs
+the App (an install landing on an older relay 404s, GitHub retries a few times
+and gives up, and that installation stays unlinked); and set permissions before
+events, because GitHub only offers the event checkboxes your permissions justify.
+
+Generate the webhook secret up front with `openssl rand -hex 32`.
+
+| Field | Value |
+| --- | --- |
+| GitHub App name | must be globally unique across GitHub; the slug derives from it |
+| Callback URL | `https://api.<apex>/v1/login/callback` |
+| Webhook → Active | checked |
+| Webhook URL | `https://api.<apex>/gh` |
+| Webhook secret | the `openssl` value |
+
+**Repository permissions:** Contents *Read-only*, Deployments *Read and write*,
+Pull requests *Read-only*. **Events:** `Push` and `Pull request` — there is
+normally no *Installation* checkbox, because GitHub delivers installation
+lifecycle events to Apps automatically.
+
+Three toggles decide whether this works at all, and none of them announce
+themselves when wrong:
+
+- **Enable Device Flow — ON.** Device flow is the CLI's only login path, and
+  GitHub rejects it outright unless this is checked. Without it `piper login`
+  cannot work at any point.
+- **Request user authorization (OAuth) during installation — ON.** This is what
+  makes one browser screen cover both identity and repository selection, and
+  what puts `installation_id` on the callback. With it off, login still works
+  but the installation is only linked later, when the webhook arrives.
+- **Expire user authorization tokens — ON.** Safe here because the relay uses
+  the user token once, for a single `GET /user` inside `fetchUser`, and never
+  stores it: `Identity` carries only the subject and login, and the extra
+  `refresh_token`/`expires_in` fields are ignored by the decoder. Everything
+  after login runs on *installation* tokens minted from the App key, so nothing
+  ever needs refreshing. Leaving it off just means a leaked user token lives
+  until manually revoked.
+
+After creating it, collect what the form doesn't give you: **Generate a private
+key** (downloads a PKCS#1 `.pem`) and **Generate a client secret** (shown once).
+Read the slug off the App's own URL (`github.com/apps/<slug>`) rather than
+assuming it. Note the App's client ID starts `Iv23li…` — a standalone OAuth
+app's `Ov23li…` id is a different credential and will not work.
+
 ### Relay: add the App credentials to Part B
 
 Before `sudo systemctl enable --now piper-relay`, drop the App's credentials into
@@ -352,9 +399,14 @@ PIPER_RELAY_GITHUB_APP_ID=123456
 PIPER_RELAY_GITHUB_APP_KEY=/etc/piper-relay/github-app.pem   # mode 0600
 PIPER_RELAY_GITHUB_WEBHOOK_SECRET=<whsec>
 PIPER_RELAY_GITHUB_APP_SLUG=piper-bot                        # → InstallURL
-PIPER_RELAY_GITHUB_CLIENT_ID=<oauth-client-id>                # device-flow login
-PIPER_RELAY_GITHUB_CLIENT_SECRET=<oauth-client-secret>
+PIPER_RELAY_GITHUB_CLIENT_ID=<the App's Iv23li... client id>
+PIPER_RELAY_GITHUB_CLIENT_SECRET=<the App's client secret>
 ```
+
+The relay refuses to start if the key file is group- or world-readable, or if
+App credentials are set without `PIPER_RELAY_GITHUB_WEBHOOK_SECRET` — an empty
+secret would leave `/gh` verifying against a forgeable empty HMAC key, so a
+half-configured App is a startup failure rather than a silently open ingress.
 
 `sudo systemctl restart piper-relay` and confirm the log line
 `relay: GitHub App <id> configured (brokered git deploys enabled)`.
