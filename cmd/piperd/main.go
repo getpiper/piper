@@ -498,7 +498,16 @@ func main() {
 		domMgr.ResumeAppDomains()
 		go domMgr.StartRenewals(ctx)
 
-		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken)
+		// The webhook deployer must carry the registrar on exactly the same
+		// condition as the API deployer above: a git-push deploy and an API
+		// deploy have to land on the same hostname. Declared as the interface
+		// so a LAN-only box gets a genuinely nil registrar rather than a
+		// typed-nil that would slip past the deployer's own guard.
+		var whRegistrar deploy.HostnameRegistrar
+		if cfg.Terminated {
+			whRegistrar = tc
+		}
+		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken, whRegistrar)
 		_, err := st.GetGitHubApp()
 		switch decideWebhookProvider(err, cfg, wh.ghToken != nil) {
 		case webhookProviderNone:
@@ -620,13 +629,32 @@ type webhookStarter struct {
 	st      *store.Store
 	rt      *runtime.DockerRuntime
 	ghToken func(repo string) (string, error) // nil unless brokered
-	once    sync.Once
-	srv     *http.Server
-	handler *webhook.Handler
+	// registrar assigns each app its relay-terminated public hostname. Nil on a
+	// LAN-only box; non-nil whenever the API deployer carries one, and it must
+	// be the same one — see newWebhookDeployer.
+	registrar deploy.HostnameRegistrar
+	once      sync.Once
+	srv       *http.Server
+	handler   *webhook.Handler
 }
 
-func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime, ghToken func(repo string) (string, error)) *webhookStarter {
-	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken}
+func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime, ghToken func(repo string) (string, error), registrar deploy.HostnameRegistrar) *webhookStarter {
+	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken, registrar: registrar}
+}
+
+// newWebhookDeployer builds the deployer that serves git-push deploys. It must
+// carry the same hostname registrar as the API deployer: without one, routing
+// falls back to <app>.<baseDom>, which on a relay-terminated box sits two
+// labels under the apex — outside the relay's single-label wildcard
+// certificate and unknown to its router — so the app is unreachable however
+// healthy the container is. reg is nil on a LAN-only box, which keeps that
+// local convention deliberately.
+func newWebhookDeployer(st *store.Store, rt runtime.Runtime, routes deploy.RouteSetter, baseDomain string, reg deploy.HostnameRegistrar) *deploy.Deployer {
+	d := deploy.New(st, rt, routes, baseDomain)
+	if reg != nil {
+		d.SetHostnameRegistrar(reg)
+	}
+	return d
 }
 
 // webhookProvider is the outcome of applying the BYO-over-brokered
@@ -692,7 +720,7 @@ func (w *webhookStarter) run() {
 		return
 	}
 
-	wdep := deploy.New(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain)
+	wdep := newWebhookDeployer(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain, w.registrar)
 	w.handler = webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
 	w.srv = &http.Server{Addr: w.cfg.WebhookAddr, Handler: w.handler}
 	go func() {
