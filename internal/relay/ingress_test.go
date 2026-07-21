@@ -203,6 +203,64 @@ func TestIngressLinksAndUnlinksInstallation(t *testing.T) {
 	}
 }
 
+// TestIngressRoutesOrgInstallToOrgOwnedBox is #290's acceptance criterion: an
+// org-target installation, linked to the Piper org via the sender's membership,
+// routes a push to the org-owned box and never to a non-member's box bound to
+// the same repository.
+func TestIngressRoutesOrgInstallToOrgOwnedBox(t *testing.T) {
+	st := openTestStore(t)
+	alice, _ := st.UpsertAccount("1001", "alice") // owner ⇒ member of the org
+	org, _ := st.CreateOrg(alice.ID, "acme")
+	if err := st.SetOrgGitHub(org.ID, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	en, err := st.EnrollForAccount(org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgAgent := en.BaseDomain
+	if err := st.BindRepo(orgAgent, "blog", "acme/blog", "main"); err != nil {
+		t.Fatal(err)
+	}
+	// A non-member's personal box bound to the very same repo must stay dark.
+	_, malloryAgent := enrolledAgent(t, st, "2002", "mallory")
+	if err := st.BindRepo(malloryAgent, "blog", "acme/blog", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &capturingDeliverer{done: make(chan struct{}, 8)}
+	h := newTestIngress(t, st, d)
+
+	// Alice installs the App on GitHub org "acme" (github id 5000).
+	created := `{"action":"created","installation":{"id":77,` +
+		`"account":{"id":5000,"type":"Organization","login":"acme"}},` +
+		`"sender":{"id":1001,"login":"alice"}}`
+	if rec := postEvent(t, h, "installation", signed("s3cret", []byte(created)), created); rec.Code != http.StatusAccepted {
+		t.Fatalf("install status = %d", rec.Code)
+	}
+	acct, err := st.AccountForInstallation("77")
+	if err != nil || acct != org.ID {
+		t.Fatalf("installation account = (%q,%v), want org %q", acct, err, org.ID)
+	}
+
+	body := `{"ref":"refs/heads/main","after":"abc",` +
+		`"repository":{"full_name":"acme/blog"},"installation":{"id":77}}`
+	rec := postEvent(t, h, "push", signed("s3cret", []byte(body)), body)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("push status = %d", rec.Code)
+	}
+	select {
+	case <-d.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no delivery within 2s")
+	}
+	time.Sleep(50 * time.Millisecond) // let any stray goroutine land
+	seen := d.seen()
+	if len(seen) != 1 || seen[0].AgentName != orgAgent {
+		t.Fatalf("delivered = %+v, want only org box %q", seen, orgAgent)
+	}
+}
+
 func TestIngressPongsPing(t *testing.T) {
 	st := openTestStore(t)
 	h := newTestIngress(t, st, &capturingDeliverer{done: make(chan struct{}, 8)})

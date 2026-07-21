@@ -25,7 +25,15 @@ func (s *Store) LinkInstallation(installationID, senderGithubID, targetType, tar
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(
+	return s.LinkInstallationForAccount(installationID, accountID, targetType, targetLogin)
+}
+
+// LinkInstallationForAccount records an installation against an already-resolved
+// account id. The org-routing path resolves the org account itself
+// (OrgForGitHubInstall) and links through here; LinkInstallation is the
+// sender-resolving convenience over it.
+func (s *Store) LinkInstallationForAccount(installationID, accountID, targetType, targetLogin string) error {
+	_, err := s.db.Exec(
 		`INSERT INTO github_installations(installation_id, account_id, target_type, target_login, created_at)
 		 VALUES(?,?,?,?,?)
 		 ON CONFLICT(installation_id) DO UPDATE SET

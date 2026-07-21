@@ -44,11 +44,14 @@ serve that goal.
   design once a repo picker exists.
 - GitHub Actions provider, raw-webhook provider, cross-fork PRs, relay-side build
   caching, delivery-ID dedupe.
-- **Org-owned installations.** An install whose target is a GitHub organization links to
-  the account of the user who installed it; `target_type` and `target_login` are recorded
-  as display metadata. Resolving org-target installations to *org-owned* agents through
-  `org_members` — described under "Ownership check" as the eventual shape — is a
-  follow-up (#290), not part of the first implementation.
+- **Org-owned installations** — *implemented (#290).* An org owner links their Piper org
+  to a GitHub org (`PUT /v1/orgs/{slug}/github`, stored on the org account's
+  `github_login`; the stable org id is pinned from the first install webhook). An
+  org-target install then routes to the *org account* — verified through the installing
+  sender's `org_members` membership — so the org's own boxes deploy it. Routing and token
+  brokering are unchanged: org boxes are owned directly by the org account. A member's
+  *personal* box is out of scope; an org-target install with no linked Piper org falls
+  back to the installing user, unchanged.
 - Backwards compatibility. Per the pre-1.x policy in `CLAUDE.md`, formats and schemas
   change in place.
 
