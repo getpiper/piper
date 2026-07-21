@@ -50,7 +50,7 @@ func (m *Manager) Resume() {
 	}
 	gen := m.nextGen()
 	m.issueMu.Unlock()
-	go m.issueLoop(dc.Domain, gen)
+	m.spawn(func() { m.issueLoop(dc.Domain, gen) })
 }
 
 // OnRelayConnect re-kicks issuance for a non-active box-wide config when the
@@ -81,7 +81,7 @@ func (m *Manager) OnRelayConnect() {
 	}
 	gen := m.nextGen()
 	m.issueMu.Unlock()
-	go m.issueLoop(dc.Domain, gen)
+	m.spawn(func() { m.issueLoop(dc.Domain, gen) })
 }
 
 // setEnvStatus records the env-managed (PIPER_BASE_DOMAIN) path's real state so

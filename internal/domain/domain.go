@@ -134,6 +134,10 @@ type Manager struct {
 	genMu sync.Mutex     // guards gens
 	gens  map[string]int // per-domain loop generations; a loop exits when superseded
 
+	stopCh   chan struct{}  // closed by Close: loops exit at their next checkpoint
+	stopOnce sync.Once      // makes Close idempotent
+	wg       sync.WaitGroup // joins every spawned lifecycle goroutine on Close
+
 	certMu sync.Mutex                // guards loaded and serializes cert syncs to Caddy
 	loaded map[string]caddy.CertPair // certs currently loaded, keyed like gens
 
@@ -186,6 +190,7 @@ func New(o Options) *Manager {
 		gens:       map[string]int{},
 		loaded:     map[string]caddy.CertPair{},
 		dnsCache:   map[string]dnsCacheEntry{},
+		stopCh:     make(chan struct{}),
 		envStatus:  envStatus,
 		retryDelay: defaultRetryDelay,
 		dnsWait:    defaultDNSWait,
@@ -225,6 +230,60 @@ func (m *Manager) appLock(domain string) *sync.Mutex {
 		m.appMu[domain] = &sync.Mutex{}
 	}
 	return m.appMu[domain]
+}
+
+// Close stops and joins the lifecycle goroutines the manager tracks in its
+// WaitGroup — the box-wide issue loop, per-app domain loops, and relay
+// re-asserts — and blocks until they return. It does not join runEnvRenew:
+// that goroutine is context-owned (it stops via its own ctx) and writes
+// nothing under the data dir, so it plays no part in the TempDir race. Loops
+// exit at their next checkpoint (loop top or backoff sleep); an in-flight ACME
+// run finishes first, so Close can block for an Obtain the same way
+// RemoveAppDomain's run lock can.
+//
+// Close is a shutdown join, not safe to call concurrently with a live
+// AddAppDomain/Set/Resume/OnRelayConnect spawn — that races a WaitGroup Add
+// against Wait — so callers must ensure no lifecycle is being started
+// concurrently. Tests Close before t.TempDir teardown so a loop still writing
+// its cert dir can't race the RemoveAll (#279).
+func (m *Manager) Close() {
+	m.stopOnce.Do(func() { close(m.stopCh) })
+	m.wg.Wait()
+}
+
+// spawn runs fn as a lifecycle goroutine joined by Close. The generation must
+// be bumped by the caller before spawning — supersede semantics rely on the
+// bump landing synchronously, ahead of the loop's first gen check.
+func (m *Manager) spawn(fn func()) {
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		fn()
+	}()
+}
+
+// stopped reports whether Close has been called.
+func (m *Manager) stopped() bool {
+	select {
+	case <-m.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// sleepOrStopped waits out a loop backoff, reporting false if Close stopped
+// the manager first — a stopped loop exits instead of sleeping through the
+// join (production backoffs run to an hour).
+func (m *Manager) sleepOrStopped(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-m.stopCh:
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // setCert loads (or refreshes) key's cert in Caddy by re-syncing the complete
@@ -323,18 +382,19 @@ func (m *Manager) Set(domainName, provider, token string) (Status, error) {
 		return Status{}, err
 	}
 	m.issueMu.Unlock()
-	go m.issueLoop(d, m.nextGen())
+	gen := m.nextGen()
+	m.spawn(func() { m.issueLoop(d, gen) })
 	return m.Status()
 }
 
 // issueLoop drives one config to activation with capped-backoff retries. It
 // exits when the stored config no longer matches domain (replaced or deleted),
-// activation succeeds, or a newer Set/Resume supersedes this generation — the
-// last guard stops a same-domain re-PUT from leaving a second loop retrying
-// alongside this one (#112).
+// activation succeeds, Close stops the manager, or a newer Set/Resume
+// supersedes this generation — the last guard stops a same-domain re-PUT from
+// leaving a second loop retrying alongside this one (#112).
 func (m *Manager) issueLoop(domain string, gen int) {
 	for attempt := 0; ; attempt++ {
-		if m.currentGen() != gen {
+		if m.stopped() || m.currentGen() != gen {
 			return
 		}
 		dc, err := m.st.GetDomainConfig()
@@ -354,7 +414,9 @@ func (m *Manager) issueLoop(domain string, gen int) {
 		} else {
 			_ = m.st.UpdateDomainStatus(dc.Domain, StatusFailed, err.Error(), time.Time{})
 		}
-		time.Sleep(m.retryDelay(attempt))
+		if !m.sleepOrStopped(m.retryDelay(attempt)) {
+			return
+		}
 	}
 }
 
