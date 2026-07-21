@@ -23,6 +23,7 @@ func (a *api) registerOrgRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/invites", a.myInvites)
 	mux.HandleFunc("POST /v1/invites/{slug}/accept", a.inviteAccept)
 	mux.HandleFunc("POST /v1/invites/{slug}/decline", a.inviteDecline)
+	mux.HandleFunc("PUT /v1/orgs/{slug}/github", a.orgSetGitHub)
 	mux.HandleFunc("DELETE /v1/orgs/{slug}", a.orgDelete)
 }
 
@@ -136,6 +137,35 @@ func (a *api) orgSetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"username": r.PathValue("username"), "role": req.Role})
+}
+
+// orgSetGitHub links the org to the GitHub organization whose installations
+// should route to it. Owner-only, mirroring the other org-management writes.
+func (a *api) orgSetGitHub(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	orgID, role, ok := a.orgForMember(w, r, acc.ID)
+	if !ok {
+		return
+	}
+	if role != "owner" {
+		http.Error(w, "owner role required", http.StatusForbidden)
+		return
+	}
+	var req struct {
+		GitHubLogin string `json:"github_login"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.GitHubLogin) == "" {
+		http.Error(w, "github_login required", http.StatusBadRequest)
+		return
+	}
+	if err := a.st.SetOrgGitHub(orgID, req.GitHubLogin); err != nil {
+		http.Error(w, "org error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *api) orgRemoveMember(w http.ResponseWriter, r *http.Request) {

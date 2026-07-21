@@ -32,6 +32,7 @@ type ghEnvelope struct {
 	Installation struct {
 		ID      int64 `json:"id"`
 		Account struct {
+			ID    int64  `json:"id"`
 			Type  string `json:"type"`
 			Login string `json:"login"`
 		} `json:"account"`
@@ -142,11 +143,29 @@ func handleInstallationEvent(st *Store, env ghEnvelope, installationID string) {
 	switch env.Action {
 	case "created", "new_permissions_accepted", "unsuspend":
 		senderID := strconv.FormatInt(env.Sender.ID, 10)
+		login := env.Installation.Account.Login
+		if env.Installation.Account.Type == "Organization" {
+			// Route to the Piper org account this GitHub org is linked to,
+			// verified through the installing sender's membership.
+			orgGitHubID := strconv.FormatInt(env.Installation.Account.ID, 10)
+			if orgID, err := st.OrgForGitHubInstall(orgGitHubID, login, senderID); err == nil {
+				if err := st.LinkInstallationForAccount(installationID, orgID, "org", login); err != nil {
+					log.Printf("relay: link org installation %s: %v", installationID, err)
+				}
+				return
+			} else if !errors.Is(err, ErrNoOrg) {
+				log.Printf("relay: resolve org for installation %s: %v", installationID, err)
+			} else {
+				// No linked Piper org: fall back to the installing user, so the
+				// install still serves their personal boxes (unchanged behavior).
+				log.Printf("relay: org-target installation %s has no linked piper org; linking installer %s", installationID, env.Sender.Login)
+			}
+		}
 		typ := "user"
 		if env.Installation.Account.Type == "Organization" {
 			typ = "org"
 		}
-		if err := st.LinkInstallation(installationID, senderID, typ, env.Installation.Account.Login); err != nil {
+		if err := st.LinkInstallation(installationID, senderID, typ, login); err != nil {
 			log.Printf("relay: link installation %s: %v", installationID, err)
 		}
 	case "deleted", "suspend":
