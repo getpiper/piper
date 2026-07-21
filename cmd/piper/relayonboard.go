@@ -128,7 +128,11 @@ func githubRepos(stdout, stderr io.Writer) int {
 		return 1
 	}
 	for _, r := range repos {
-		fmt.Fprintln(stdout, r)
+		if r.Visibility != "" && r.Visibility != "public" {
+			fmt.Fprintf(stdout, "%s (%s)\n", r.FullName, r.Visibility)
+			continue
+		}
+		fmt.Fprintln(stdout, r.FullName)
 	}
 	return 0
 }

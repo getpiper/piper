@@ -111,7 +111,10 @@ func TestGitHubRepos(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []string{"alice/one", "alice/two"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
+			{"full_name": "alice/one", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"},
+			{"full_name": "alice/two", "visibility": "private", "pushed_at": ""},
+		}})
 	}))
 	defer srv.Close()
 
@@ -119,8 +122,12 @@ func TestGitHubRepos(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GitHubRepos: %v", err)
 	}
-	if len(repos) != 2 || repos[0] != "alice/one" || repos[1] != "alice/two" {
-		t.Fatalf("repos = %+v", repos)
+	want := []Repo{
+		{FullName: "alice/one", Visibility: "public", PushedAt: "2026-07-20T12:34:56Z"},
+		{FullName: "alice/two", Visibility: "private", PushedAt: ""},
+	}
+	if len(repos) != len(want) || repos[0] != want[0] || repos[1] != want[1] {
+		t.Fatalf("repos = %+v, want %+v", repos, want)
 	}
 }
 

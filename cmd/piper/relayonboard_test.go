@@ -92,7 +92,10 @@ func TestWaitForInstallPollsUntilInstalled(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []string{"alice/blog", "alice/api"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
+			{"full_name": "alice/blog", "visibility": "public", "pushed_at": ""},
+			{"full_name": "alice/api", "visibility": "private", "pushed_at": ""},
+		}})
 	}))
 	defer srv.Close()
 
@@ -115,7 +118,10 @@ func TestGitHubReposCommandListsRepos(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []string{"alice/blog", "alice/api"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
+			{"full_name": "alice/blog", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"},
+			{"full_name": "alice/api", "visibility": "private", "pushed_at": ""},
+		}})
 	}))
 	defer srv.Close()
 	if err := config.SaveClient(config.ClientConfig{
@@ -128,7 +134,7 @@ func TestGitHubReposCommandListsRepos(t *testing.T) {
 	if code := run([]string{"github", "repos"}, &out, &errb); code != 0 {
 		t.Fatalf("code = %d, err = %s", code, errb.String())
 	}
-	if got := out.String(); got != "alice/blog\nalice/api\n" {
+	if got := out.String(); got != "alice/blog\nalice/api (private)\n" {
 		t.Fatalf("stdout = %q", got)
 	}
 }
