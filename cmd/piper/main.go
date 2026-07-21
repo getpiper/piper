@@ -376,6 +376,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "stopped %s\n", args[1])
 		return 0
+	case "start":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: piper start <name>")
+			return 2
+		}
+		c, ok := dialClient(*remote, stderr)
+		if !ok {
+			return 1
+		}
+		if err := c.StartApp(args[1]); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "started %s\n", args[1])
+		return 0
 	case "delete":
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "usage: piper delete <name> [--yes]")
@@ -639,7 +654,7 @@ func confirmPrompt(stdout io.Writer, question string) bool {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|delete|app|domains|github|agent> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|start|delete|app|domains|github|agent> [args]")
 	fmt.Fprintln(w, "       piper                # no subcommand in a terminal: interactive TUI")
 	return 2
 }

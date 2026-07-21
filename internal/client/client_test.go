@@ -545,6 +545,7 @@ func TestClientMethodsReportHTTPError(t *testing.T) {
 			return err
 		},
 		"stop":   func() error { return c.StopApp("blog") },
+		"start":  func() error { return c.StartApp("blog") },
 		"delete": func() error { return c.DeleteApp("blog") },
 	}
 	for name, call := range tests {
@@ -576,6 +577,30 @@ func TestStopAppErrorIncludesBody(t *testing.T) {
 	}))
 	defer srv.Close()
 	err := New(srv.URL, "").StopApp("ghost")
+	if err == nil || !strings.Contains(err.Error(), "unknown app") {
+		t.Fatalf("err = %v, want body in message", err)
+	}
+}
+
+func TestStartApp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/start" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, "").StartApp("blog"); err != nil {
+		t.Fatalf("StartApp: %v", err)
+	}
+}
+
+func TestStartAppErrorIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unknown app", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "").StartApp("ghost")
 	if err == nil || !strings.Contains(err.Error(), "unknown app") {
 		t.Fatalf("err = %v, want body in message", err)
 	}
