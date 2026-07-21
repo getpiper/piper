@@ -199,7 +199,7 @@ func TestRunGithubSetupWithOrg(t *testing.T) {
 			if body.Code != "testcode" {
 				t.Errorf("exchange code = %q, want testcode", body.Code)
 			}
-			w.WriteHeader(http.StatusNoContent)
+			_ = json.NewEncoder(w).Encode(map[string]string{"slug": "piper-abc"})
 			return
 		}
 		t.Errorf("unexpected backend request: %s %s", r.Method, r.URL.Path)
@@ -259,8 +259,8 @@ func TestRunGithubSetupWithOrg(t *testing.T) {
 	if code := run([]string{"github", "setup", "--org", "myorg"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "GitHub App configured") {
-		t.Errorf("stdout = %q", got)
+	if got := stdout.String(); !strings.Contains(got, "https://github.com/apps/piper-abc/installations/new") {
+		t.Errorf("stdout missing install deep-link: %q", got)
 	}
 }
 
@@ -278,7 +278,7 @@ func TestRunGithubSetupDefault(t *testing.T) {
 			return
 		}
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/github/exchange" {
-			w.WriteHeader(http.StatusNoContent)
+			_ = json.NewEncoder(w).Encode(map[string]string{"slug": "piper-abc"})
 			return
 		}
 	}))
@@ -333,8 +333,8 @@ func TestRunGithubSetupDefault(t *testing.T) {
 	if code := run([]string{"github", "setup"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "GitHub App configured") {
-		t.Errorf("stdout = %q", got)
+	if got := stdout.String(); !strings.Contains(got, "https://github.com/apps/piper-abc/installations/new") {
+		t.Errorf("stdout missing install deep-link: %q", got)
 	}
 }
 
