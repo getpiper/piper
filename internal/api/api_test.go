@@ -24,8 +24,10 @@ type fakeDeployer struct {
 	gotApp        string
 	gotFile       string
 	stopped       []string
+	started       []string
 	deleted       []string
 	stopErr       error
+	startErr      error
 	deleteErr     error
 	panicOnFinish bool
 }
@@ -53,6 +55,14 @@ func (f *fakeDeployer) Stop(_ context.Context, app string) error {
 		return f.stopErr
 	}
 	f.stopped = append(f.stopped, app)
+	return nil
+}
+
+func (f *fakeDeployer) Start(_ context.Context, app string) error {
+	if f.startErr != nil {
+		return f.startErr
+	}
+	f.started = append(f.started, app)
 	return nil
 }
 
@@ -1042,6 +1052,42 @@ func TestStopEndpointUnknownApp(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/stop", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestStartEndpoint(t *testing.T) {
+	s := newTestStore(t)
+	deployer := &fakeDeployer{store: s}
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/start", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(deployer.started) != 1 || deployer.started[0] != "blog" {
+		t.Fatalf("started = %v, want [blog]", deployer.started)
+	}
+}
+
+func TestStartEndpointUnknownApp(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s, startErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/start", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// A non-ErrNotFound deployer error maps to 500 (not 404): the start handler must
+// distinguish "unknown app" from a real backend failure.
+func TestStartEndpointServerError(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s, startErr: errors.New("start failed")}, "piper.localhost", "", nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/start", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }
 
