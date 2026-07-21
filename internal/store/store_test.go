@@ -37,7 +37,7 @@ func TestUpdateAppRepoAndAppByRepo(t *testing.T) {
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateAppRepo("blog", "alice/blog", "main"); err != nil {
+	if err := s.UpdateAppRepo("blog", "alice/blog", "main", "apps/web"); err != nil {
 		t.Fatalf("UpdateAppRepo: %v", err)
 	}
 
@@ -45,7 +45,7 @@ func TestUpdateAppRepoAndAppByRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppByRepo: %v", err)
 	}
-	if got.Name != "blog" || got.Repo != "alice/blog" || got.Branch != "main" {
+	if got.Name != "blog" || got.Repo != "alice/blog" || got.Branch != "main" || got.RootDir != "apps/web" {
 		t.Fatalf("got %+v", got)
 	}
 

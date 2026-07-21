@@ -162,7 +162,7 @@ func TestUnknownRepoNoOp(t *testing.T) {
 func TestPushDeploysAndReports(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPush, Repo: "alice/blog", Ref: "refs/heads/main", SHA: "s1",
 	}}
@@ -185,7 +185,7 @@ func TestPushDeploysAndReports(t *testing.T) {
 func TestWrongBranchNoOp(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPush, Repo: "alice/blog", Ref: "refs/heads/dev", SHA: "s1",
 	}}
@@ -201,7 +201,7 @@ func TestWrongBranchNoOp(t *testing.T) {
 func TestDeployFailureReportsFailure(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPush, Repo: "alice/blog", Ref: "refs/heads/main", SHA: "s1",
 	}}
@@ -218,7 +218,7 @@ func TestDeployFailureReportsFailure(t *testing.T) {
 func TestWaitContextTimesOutAndCancelStopsInFlightDeploy(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPush, Repo: "alice/blog", Ref: "refs/heads/main", SHA: "s1",
 	}}
@@ -265,7 +265,7 @@ func TestStopAcceptingRejectsNewWork(t *testing.T) {
 func TestPROpenedDeploysPreviewAndReports(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPROpened, Repo: "alice/blog", PR: 7, SHA: "s1", Ref: "feature",
 	}}
@@ -288,7 +288,7 @@ func TestPROpenedDeploysPreviewAndReports(t *testing.T) {
 func TestPRSyncedIsIdempotentOnSHA(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	ev := source.Event{Kind: source.KindPRSynced, Repo: "alice/blog", PR: 7, SHA: "s1"}
 	p := &fakeProvider{ev: ev}
 	d := &fakeDeployer{}
@@ -305,7 +305,7 @@ func TestPRSyncedIsIdempotentOnSHA(t *testing.T) {
 func TestPRClosedWithPreviewTearsDownAndReportsInactive(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPRClosed, Repo: "alice/blog", PR: 7, SHA: "s1",
 	}}
@@ -325,7 +325,7 @@ func TestPRClosedWithPreviewTearsDownAndReportsInactive(t *testing.T) {
 func TestPRClosedWithoutPreviewReportsNothing(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPRClosed, Repo: "alice/blog", PR: 7, SHA: "s1",
 	}}
@@ -352,7 +352,7 @@ func TestPRClosedWithoutPreviewReportsNothing(t *testing.T) {
 func TestReportsTheRoutedHostname(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	if err := s.SetAppHostname("blog", "abc123-alice.public.getpiper.dev"); err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestReportsTheRoutedHostname(t *testing.T) {
 func TestReportsTheRoutedPreviewHostname(t *testing.T) {
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 	p := &fakeProvider{ev: source.Event{
 		Kind: source.KindPROpened, Repo: "alice/blog", PR: 7, SHA: "s1",
 	}}

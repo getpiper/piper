@@ -110,6 +110,44 @@ func TestDeploySuccessRoutesAndRecords(t *testing.T) {
 	}
 }
 
+func TestDeployBuildsFromRootDir(t *testing.T) {
+	s, _ := newStore(t)
+	if err := s.UpdateAppRepo("blog", "alice/blog", "main", "apps/web"); err != nil {
+		t.Fatalf("UpdateAppRepo: %v", err)
+	}
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	checkout := t.TempDir()
+	if _, err := d.Deploy(context.Background(), "blog", checkout); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	want := filepath.Join(checkout, "apps/web")
+	if rt.BuildSrcDir != want {
+		t.Fatalf("build context = %q, want %q", rt.BuildSrcDir, want)
+	}
+}
+
+func TestDeployEmptyRootDirBuildsCheckout(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	d := New(s, rt, newFakeCaddy(), "piper.localhost")
+
+	checkout := t.TempDir()
+	if _, err := d.Deploy(context.Background(), "blog", checkout); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if rt.BuildSrcDir != checkout {
+		t.Fatalf("build context = %q, want %q (checkout root)", rt.BuildSrcDir, checkout)
+	}
+}
+
 func TestDeploySecondStopsPrevious(t *testing.T) {
 	s, _ := newStore(t)
 	rt := &runtime.FakeRuntime{

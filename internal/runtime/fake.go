@@ -20,6 +20,7 @@ type FakeRuntime struct {
 	StopContextErrs []error
 	Pruned          []PruneCall
 	PruneErr        error
+	BuildSrcDir     string // captures the srcDir of the last Build call
 }
 
 // PruneCall records one PruneAppImages invocation for assertions.
@@ -28,7 +29,8 @@ type PruneCall struct {
 	Keep int
 }
 
-func (f *FakeRuntime) Build(_ context.Context, _, _ string, progress io.Writer) (BuildResult, error) {
+func (f *FakeRuntime) Build(_ context.Context, srcDir, _ string, progress io.Writer) (BuildResult, error) {
+	f.BuildSrcDir = srcDir
 	if progress != nil && f.BuildOutput != "" {
 		_, _ = io.WriteString(progress, f.BuildOutput)
 	}

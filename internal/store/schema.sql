@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS apps (
     port           INTEGER NOT NULL,
     repo           TEXT NOT NULL DEFAULT '',
     branch         TEXT NOT NULL DEFAULT '',
+    root_dir       TEXT NOT NULL DEFAULT '',
     hostname       TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL
 );

@@ -84,7 +84,7 @@ func TestWebhookIntegrationRealProvider(t *testing.T) {
 
 	s := newStore(t)
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 
 	d := &fakeDeployer{}
 	h := webhook.New(prov, s, d, "alice.dev")
@@ -230,7 +230,7 @@ func TestPRPreviewLifecycleEndToEnd(t *testing.T) {
 	}
 	defer s.Close()
 	s.CreateApp("blog", 8080)
-	s.UpdateAppRepo("blog", "alice/blog", "main")
+	s.UpdateAppRepo("blog", "alice/blog", "main", "")
 
 	rt := &runtime.FakeRuntime{
 		BuildResultVal: runtime.BuildResult{ImageID: "img"},

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -153,8 +154,14 @@ func (d *Deployer) buildRunHealthy(ctx context.Context, app store.App, srcDir st
 	if progress != nil {
 		out = io.MultiWriter(&log, progress)
 	}
+	// For a monorepo-linked app, build from the configured subpath of the
+	// checkout rather than its root (#316); an empty RootDir builds the root.
+	buildDir := srcDir
+	if app.RootDir != "" {
+		buildDir = filepath.Join(srcDir, app.RootDir)
+	}
 	_, _ = io.WriteString(out, "→ building image\n")
-	build, err := d.runtime.Build(ctx, srcDir, tag, progress)
+	build, err := d.runtime.Build(ctx, buildDir, tag, progress)
 	_, _ = io.WriteString(&log, build.Log)
 	if err != nil {
 		_, _ = io.WriteString(&log, "\nerror: "+err.Error()+"\n")

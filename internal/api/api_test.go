@@ -347,6 +347,36 @@ func TestLinkApp(t *testing.T) {
 	}
 }
 
+func TestLinkAppPersistsRootDir(t *testing.T) {
+	s := newTestStore(t)
+	s.CreateApp("blog", 8080)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	body := strings.NewReader(`{"repo":"alice/blog","branch":"main","root_dir":"apps/web"}`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	got, _ := s.AppByRepo("alice/blog")
+	if got.RootDir != "apps/web" {
+		t.Fatalf("root_dir not persisted: %+v", got)
+	}
+}
+
+func TestLinkAppRejectsEscapingRootDir(t *testing.T) {
+	s := newTestStore(t)
+	s.CreateApp("blog", 8080)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	for _, bad := range []string{`"../etc"`, `"apps/../../etc"`, `"/abs/path"`} {
+		body := strings.NewReader(`{"repo":"alice/blog","branch":"main","root_dir":` + bad + `}`)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("root_dir %s: code = %d, want 400", bad, rec.Code)
+		}
+	}
+}
+
 type fakeBinder struct {
 	app, repo, branch string
 	calls             int

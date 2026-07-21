@@ -97,7 +97,7 @@ func (f fakeAPI) DeleteApp(name string) error {
 	return f.deleteErr
 }
 
-func (f fakeAPI) LinkApp(name, repo, branch string) error {
+func (f fakeAPI) LinkApp(name, repo, branch, rootDir string) error {
 	if f.rec != nil {
 		f.rec.linkName, f.rec.linkRepo, f.rec.linkBranch = name, repo, branch
 	}

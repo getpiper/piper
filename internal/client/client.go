@@ -248,8 +248,8 @@ func (c *Client) FollowDeploy(ctx context.Context, name, id string, progress io.
 	}
 }
 
-func (c *Client) LinkApp(name, repo, branch string) error {
-	body, _ := json.Marshal(map[string]string{"repo": repo, "branch": branch})
+func (c *Client) LinkApp(name, repo, branch, rootDir string) error {
+	body, _ := json.Marshal(map[string]string{"repo": repo, "branch": branch, "root_dir": rootDir})
 	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/link", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err

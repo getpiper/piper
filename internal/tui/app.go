@@ -201,7 +201,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return actionResultMsg{err: c.DeleteApp(name), popLevels: 2} }
 	case linkAppMsg:
 		name, repo, branch, c := msg.name, msg.repo, msg.branch, m.client
-		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch), popLevels: 1} }
+		// The TUI link form collects no root directory; monorepo subpaths are a
+		// dashboard-wizard flow (#316). Pass "" to build the repo root.
+		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch, ""), popLevels: 1} }
 	case removeDomainMsg:
 		app, dom, c := msg.app, msg.domain, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.RemoveAppDomain(app, dom), popLevels: 1} }
