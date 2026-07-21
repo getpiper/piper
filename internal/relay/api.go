@@ -41,6 +41,7 @@ func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Rout
 	mux.HandleFunc("GET /v1/login/callback", a.loginCallback)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
 	mux.HandleFunc("GET /v1/github/repos", a.githubRepos)
+	mux.HandleFunc("GET /v1/github/status", a.githubStatus)
 	a.registerOrgRoutes(mux)
 	if router != nil {
 		proxy := NewControlProxy(st, router)
@@ -325,6 +326,37 @@ func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"repos": repos})
+}
+
+// githubStatus tells the web dashboard whether the relay holds a GitHub App and
+// whether it is installed for the caller's account, plus the exact
+// install-and-authorize URL to remedy a not-installed account (#315). Unlike
+// githubRepos it never 404s on a missing installation: not-installed is the
+// answer the wizard's Connect step needs, not an error — and it answers 200 even
+// with no App configured so the dashboard learns github_app:false rather than
+// reading a 503 as an outage.
+func (a *api) githubStatus(w http.ResponseWriter, r *http.Request) {
+	acc, ok := a.authAccount(w, r)
+	if !ok {
+		return
+	}
+	resp := map[string]any{
+		"github_app":  a.ghApp != nil,
+		"installed":   false,
+		"account":     acc.Username,
+		"install_url": "",
+	}
+	if a.ghApp != nil {
+		resp["install_url"] = a.ghApp.InstallURL()
+		_, err := a.st.InstallationForAccount(acc.ID)
+		if err == nil {
+			resp["installed"] = true
+		} else if !errors.Is(err, ErrNoInstallation) {
+			http.Error(w, "lookup error", http.StatusInternalServerError)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // authAccount authenticates the request's bearer account credential, writing
