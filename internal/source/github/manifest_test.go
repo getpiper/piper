@@ -61,7 +61,7 @@ func TestExchangeCode(t *testing.T) {
 		if !strings.HasPrefix(r.URL.Path, "/app-manifests/") || !strings.HasSuffix(r.URL.Path, "/conversions") {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		io.WriteString(w, `{"id":123,"pem":"-----PEM-----","webhook_secret":"whsec"}`)
+		io.WriteString(w, `{"id":123,"slug":"piper-abc","pem":"-----PEM-----","webhook_secret":"whsec"}`)
 	}))
 	defer srv.Close()
 
@@ -69,7 +69,7 @@ func TestExchangeCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := AppCredentials{AppID: 123, PrivateKeyPEM: "-----PEM-----", WebhookSecret: "whsec"}
+	want := AppCredentials{AppID: 123, Slug: "piper-abc", PrivateKeyPEM: "-----PEM-----", WebhookSecret: "whsec"}
 	if got != want {
 		t.Fatalf("got %+v want %+v", got, want)
 	}
