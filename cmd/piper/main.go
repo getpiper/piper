@@ -200,12 +200,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.SetOutput(stderr)
 		token := fs.String("token", "", "API token from `piperd token create` (LAN login)")
 		addr := fs.String("addr", "", "piperd address (LAN login)")
-		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL (device-flow login)")
+		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL")
+		web := fs.Bool("web", false, "one-trip browser login through the relay's GitHub App")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
 		if *token != "" {
 			return login(*addr, *token, stdout, stderr)
+		}
+		if *web {
+			return relayLoginWeb(*relay, stdout, stderr)
 		}
 		return relayLogin(*relay, stdout, stderr)
 	case "connect":

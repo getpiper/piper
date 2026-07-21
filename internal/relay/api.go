@@ -25,7 +25,8 @@ func NewAPI(st *Store, v Verifier) http.Handler { return NewAPIWithTunnel(st, v,
 // "github_app": false and boxes stay on the BYO path.
 func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Router, webRedirects []string, ghApp *GitHubApp) http.Handler {
 	a := &api{st: st, v: v, tunnelEndpoint: tunnelEndpoint,
-		webRedirects: webRedirects, webStates: map[string]webState{}, ghApp: ghApp}
+		webRedirects: webRedirects, webStates: map[string]webState{},
+		cliStates: map[string]*cliLogin{}, ghApp: ghApp}
 	if wv, ok := v.(WebVerifier); ok {
 		a.webv = wv
 	}
@@ -33,6 +34,10 @@ func NewAPIWithTunnel(st *Store, v Verifier, tunnelEndpoint string, router *Rout
 	mux.HandleFunc("POST /v1/login/device", a.loginDevice)
 	mux.HandleFunc("POST /v1/login/poll", a.loginPoll)
 	mux.HandleFunc("GET /v1/login/web", a.loginWeb)
+	mux.HandleFunc("POST /v1/login/cli/start", a.cliLoginStart)
+	mux.HandleFunc("GET /v1/login/cli", a.cliLoginPage)
+	mux.HandleFunc("POST /v1/login/cli", a.cliLoginConfirm)
+	mux.HandleFunc("POST /v1/login/cli/poll", a.cliLoginPoll)
 	mux.HandleFunc("GET /v1/login/callback", a.loginCallback)
 	mux.HandleFunc("POST /v1/enroll", a.enroll)
 	mux.HandleFunc("GET /v1/github/repos", a.githubRepos)
@@ -57,7 +62,8 @@ type api struct {
 	ghApp          *GitHubApp // nil ⇒ relay serves BYO users only
 
 	mu        sync.Mutex
-	webStates map[string]webState // state → pending browser flow
+	webStates map[string]webState  // state → pending dashboard browser flow
+	cliStates map[string]*cliLogin // handle → pending CLI browser login (#291)
 
 	// Shared per-IP bucket for the two unauthenticated login endpoints (#106):
 	// one budget per IP, so hammering one endpoint can't dodge the limit by
@@ -131,6 +137,11 @@ func (a *api) loginWeb(w http.ResponseWriter, r *http.Request) {
 // (login-CSRF guard); then code → identity → account → credential, delivered
 // in the URL fragment so it never reaches server logs.
 func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
+	// The App's single callback URL serves both browser flows; a CLI handle
+	// (#291) is completed here and collected by the CLI's poll.
+	if a.cliCallback(w, r) {
+		return
+	}
 	if !a.webLoginEnabled() {
 		http.Error(w, "web login not configured", http.StatusServiceUnavailable)
 		return

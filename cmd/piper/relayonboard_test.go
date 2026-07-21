@@ -74,6 +74,64 @@ func TestRelayLoginStoresCredential(t *testing.T) {
 	}
 }
 
+func TestRelayLoginWebStoresCredentialAndWaitsForInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	pollSleep = func(time.Duration) {}
+	defer func() { pollSleep = time.Sleep }()
+	var opened string
+	openBrowserFn = func(u string) error { opened = u; return nil }
+	defer func() { openBrowserFn = openBrowser }()
+
+	var polls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/login/cli/start":
+			_ = json.NewEncoder(w).Encode(map[string]string{"handle": "h-1", "user_code": "ABCD-1234"})
+		case "/v1/login/cli/poll":
+			polls++
+			if polls == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "authorization_pending"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"account_credential": "cred-web", "username": "alice",
+				"install_url": "https://github.com/apps/piper/installations/new",
+			})
+		case "/v1/github/repos":
+			_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
+				{"full_name": "alice/blog", "visibility": "public", "pushed_at": ""},
+			}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"login", "--web", "--relay", srv.URL}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, err = %s", code, errb.String())
+	}
+	// The browser is pointed at the relay's code-entry page, and the user code
+	// is shown in the terminal.
+	if opened != srv.URL+"/v1/login/cli" {
+		t.Fatalf("opened browser at %q, want the code-entry page", opened)
+	}
+	if !strings.Contains(out.String(), "ABCD-1234") {
+		t.Fatalf("stdout did not show the user code: %q", out.String())
+	}
+	cc, err := config.LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.RelayAPI != srv.URL || cc.AccountCredential != "cred-web" {
+		t.Fatalf("cc = %+v", cc)
+	}
+}
+
 // TestWaitForInstallPollsUntilInstalled cribs TestRelayLoginStoresCredential's
 // httptest-stub-relay shape. The stub's /v1/github/repos answers 404 ("not
 // installed yet") twice, then 200 with two repos, pinning that waitForInstall
