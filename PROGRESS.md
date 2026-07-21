@@ -72,6 +72,7 @@ Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the
 - ✅ `source/github` — App JWT + installation token, webhook parse (HMAC), tarball fetch, Deployments API, manifest onboarding — [#31](https://github.com/getpiper/piper/pull/31)
 - ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#31](https://github.com/getpiper/piper/pull/31)
 - ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#31](https://github.com/getpiper/piper/pull/31)
+- ✅ `app link --root-dir` — monorepo build subpath persisted per app; deploy builds from `<checkout>/<root_dir>` — [#316](https://github.com/getpiper/piper/issues/316)
 - ✅ `piperd` — webhook served over the tunnel in relay mode — [#31](https://github.com/getpiper/piper/pull/31)
 - ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#50](https://github.com/getpiper/piper/pull/50)
 - ✅ Previews on a relay-terminated box — relay assigns a single-label hostname per `(account, app, pr)`, released on PR close — [#302](https://github.com/getpiper/piper/issues/302)

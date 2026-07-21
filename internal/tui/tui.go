@@ -23,7 +23,7 @@ type API interface {
 	StopApp(name string) error
 	StartApp(name string) error
 	DeleteApp(name string) error
-	LinkApp(name, repo, branch string) error
+	LinkApp(name, repo, branch, rootDir string) error
 	AppDomains(app string) ([]domain.AppDomainStatus, error)
 	AddAppDomain(app, dom string) (domain.AppDomainStatus, error)
 	RemoveAppDomain(app, dom string) error

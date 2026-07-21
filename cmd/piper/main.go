@@ -441,7 +441,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-const appLinkUsage = "usage: piper app link <name> --repo owner/name [--branch main]"
+const appLinkUsage = "usage: piper app link <name> --repo owner/name [--branch main] [--root-dir apps/web]"
 
 func cmdApp(remote string, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "link" {
@@ -457,6 +457,7 @@ func cmdApp(remote string, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	repo := fs.String("repo", "", "GitHub repo, owner/name")
 	branch := fs.String("branch", "main", "tracked branch")
+	rootDir := fs.String("root-dir", "", "monorepo build subpath (relative repo path)")
 	if err := fs.Parse(args[2:]); err != nil {
 		return 2
 	}
@@ -468,11 +469,15 @@ func cmdApp(remote string, args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
-	if err := c.LinkApp(name, *repo, *branch); err != nil {
+	if err := c.LinkApp(name, *repo, *branch, *rootDir); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "linked %s -> %s (%s)\n", name, *repo, *branch)
+	if *rootDir != "" {
+		fmt.Fprintf(stdout, "linked %s -> %s (%s) root %s\n", name, *repo, *branch, *rootDir)
+	} else {
+		fmt.Fprintf(stdout, "linked %s -> %s (%s)\n", name, *repo, *branch)
+	}
 	return 0
 }
 

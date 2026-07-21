@@ -456,7 +456,7 @@ func TestLinkApp(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "")
-	if err := c.LinkApp("blog", "alice/blog", "main"); err != nil {
+	if err := c.LinkApp("blog", "alice/blog", "main", "apps/web"); err != nil {
 		t.Fatal(err)
 	}
 	if gotPath != "/v1/apps/blog/link" {
@@ -464,6 +464,9 @@ func TestLinkApp(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"alice/blog"`) || !strings.Contains(gotBody, `"main"`) {
 		t.Fatalf("body = %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"root_dir":"apps/web"`) {
+		t.Fatalf("body = %s, want root_dir", gotBody)
 	}
 }
 

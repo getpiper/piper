@@ -26,6 +26,7 @@ type App struct {
 	Port      int
 	Repo      string
 	Branch    string
+	RootDir   string // build subpath for monorepos; "" builds the repo root
 	Hostname  string
 	CreatedAt time.Time
 }
@@ -72,12 +73,12 @@ func (s *Store) CreateApp(name string, port int) (App, error) {
 
 func (s *Store) GetApp(name string) (App, error) {
 	return s.scanApp(s.db.QueryRow(
-		`SELECT name, port, repo, branch, hostname, created_at FROM apps WHERE name=?`, name))
+		`SELECT name, port, repo, branch, root_dir, hostname, created_at FROM apps WHERE name=?`, name))
 }
 
 func (s *Store) AppByRepo(repo string) (App, error) {
 	return s.scanApp(s.db.QueryRow(
-		`SELECT name, port, repo, branch, hostname, created_at FROM apps WHERE repo=?`, repo))
+		`SELECT name, port, repo, branch, root_dir, hostname, created_at FROM apps WHERE repo=?`, repo))
 }
 
 // SetAppHostname records the public hostname the app is currently routed on —
@@ -94,8 +95,8 @@ func (s *Store) SetAppHostname(name, hostname string) error {
 	return nil
 }
 
-func (s *Store) UpdateAppRepo(name, repo, branch string) error {
-	res, err := s.db.Exec(`UPDATE apps SET repo=?, branch=? WHERE name=?`, repo, branch, name)
+func (s *Store) UpdateAppRepo(name, repo, branch, rootDir string) error {
+	res, err := s.db.Exec(`UPDATE apps SET repo=?, branch=?, root_dir=? WHERE name=?`, repo, branch, rootDir, name)
 	if err != nil {
 		return err
 	}
@@ -136,7 +137,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func (s *Store) scanApp(row rowScanner) (App, error) {
 	var a App
 	var ts string
-	err := row.Scan(&a.Name, &a.Port, &a.Repo, &a.Branch, &a.Hostname, &ts)
+	err := row.Scan(&a.Name, &a.Port, &a.Repo, &a.Branch, &a.RootDir, &a.Hostname, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -148,7 +149,7 @@ func (s *Store) scanApp(row rowScanner) (App, error) {
 }
 
 func (s *Store) ListApps() ([]App, error) {
-	rows, err := s.db.Query(`SELECT name, port, repo, branch, hostname, created_at FROM apps ORDER BY name`)
+	rows, err := s.db.Query(`SELECT name, port, repo, branch, root_dir, hostname, created_at FROM apps ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

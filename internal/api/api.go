@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -217,15 +218,21 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 	})
 	mux.HandleFunc("POST /v1/apps/{name}/link", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Repo   string `json:"repo"`
-			Branch string `json:"branch"`
+			Repo    string `json:"repo"`
+			Branch  string `json:"branch"`
+			RootDir string `json:"root_dir"` // optional monorepo build subpath
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Repo == "" || in.Branch == "" {
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
+		rootDir, ok := cleanRootDir(in.RootDir)
+		if !ok {
+			http.Error(w, "root_dir must be a relative path within the repo", http.StatusBadRequest)
+			return
+		}
 		name := r.PathValue("name")
-		if err := s.UpdateAppRepo(name, in.Repo, in.Branch); errors.Is(err, store.ErrNotFound) {
+		if err := s.UpdateAppRepo(name, in.Repo, in.Branch, rootDir); errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {
@@ -563,6 +570,28 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// cleanRootDir validates and normalizes an app's monorepo build subpath. It
+// must stay inside the checkout — deploy joins it onto the clone dir, so an
+// absolute path or a ".." escape would build from outside the repo. Empty is
+// valid (build the repo root) and normalizes to empty. Returns the cleaned,
+// forward-slash relative path and whether it was acceptable.
+func cleanRootDir(p string) (string, bool) {
+	if p == "" {
+		return "", true
+	}
+	if path.IsAbs(p) {
+		return "", false
+	}
+	c := path.Clean(p)
+	if c == ".." || strings.HasPrefix(c, "../") {
+		return "", false
+	}
+	if c == "." {
+		return "", true
+	}
+	return c, true
 }
 
 func untar(r io.Reader, dir string) error {

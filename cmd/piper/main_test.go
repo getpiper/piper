@@ -177,6 +177,29 @@ func TestRunList(t *testing.T) {
 	}
 }
 
+func TestRunAppLinkSendsRootDir(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/link" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"app", "link", "blog", "--repo", "alice/blog", "--root-dir", "apps/web"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(gotBody, `"root_dir":"apps/web"`) {
+		t.Fatalf("body = %s, want root_dir", gotBody)
+	}
+}
+
 func TestRunGithubSetupWithOrg(t *testing.T) {
 	// Mock backend endpoints
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
