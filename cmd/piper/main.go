@@ -200,12 +200,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.SetOutput(stderr)
 		token := fs.String("token", "", "API token from `piperd token create` (LAN login)")
 		addr := fs.String("addr", "", "piperd address (LAN login)")
-		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL (device-flow login)")
+		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL")
+		web := fs.Bool("web", false, "one-trip browser login through the relay's GitHub App")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
 		if *token != "" {
 			return login(*addr, *token, stdout, stderr)
+		}
+		if *web {
+			return relayLoginWeb(*relay, stdout, stderr)
 		}
 		return relayLogin(*relay, stdout, stderr)
 	case "connect":
@@ -375,6 +379,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "stopped %s\n", args[1])
+		return 0
+	case "start":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: piper start <name>")
+			return 2
+		}
+		c, ok := dialClient(*remote, stderr)
+		if !ok {
+			return 1
+		}
+		if err := c.StartApp(args[1]); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "started %s\n", args[1])
 		return 0
 	case "delete":
 		if len(args) < 2 {
@@ -563,11 +582,17 @@ func githubSetup(remote, org string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: timed out waiting for GitHub App approval")
 		return 1
 	}
-	if err := c.ExchangeGitHub(code); err != nil {
+	slug, err := c.ExchangeGitHub(code)
+	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, "GitHub App configured. Install it on your repo, then run: piper app link <name> --repo owner/name")
+	if slug != "" {
+		fmt.Fprintf(stdout, "GitHub App configured. Install it: https://github.com/apps/%s/installations/new\n", url.PathEscape(slug))
+	} else {
+		fmt.Fprintln(stdout, "GitHub App configured. Install it on your repo.")
+	}
+	fmt.Fprintln(stdout, "Then run: piper app link <name> --repo owner/name")
 	return 0
 }
 
@@ -639,7 +664,7 @@ func confirmPrompt(stdout io.Writer, question string) bool {
 }
 
 func usage(w io.Writer) int {
-	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|delete|app|domains|github|agent> [args]")
+	fmt.Fprintln(w, "usage: piper [--remote <base-domain>] [--version] <version|login|connect|create|deploy|list|status|stop|start|delete|app|domains|github|agent> [args]")
 	fmt.Fprintln(w, "       piper                # no subcommand in a terminal: interactive TUI")
 	return 2
 }

@@ -510,6 +510,84 @@ func (d *Deployer) Stop(ctx context.Context, appName string) error {
 	return d.store.UpdateDeploymentStatus(dep.ID, "stopped")
 }
 
+// addCustomDomainRoute re-arms the app's custom-domain routes over the
+// box-terminated :443 — <app>.<custom> when the box-wide BYO domain is active,
+// plus each active per-app domain. The inverse of removeCustomDomainRoute and
+// mirror of finish's post-deploy arming; these are secondary hostnames, so a
+// Caddy error is logged and skipped rather than failing the start (#115).
+func (d *Deployer) addCustomDomainRoute(appName string, hostPort int) {
+	if dc, err := d.store.GetDomainConfig(); err == nil && dc.Status == "active" {
+		host := appName + "." + dc.Domain
+		if err := d.routes.UpsertRouteTLS(host, hostPort); err != nil {
+			log.Printf("start %s: custom-domain route %s: %v", appName, host, err)
+		}
+	}
+	doms, err := d.store.ListAppDomains(appName)
+	if err != nil {
+		log.Printf("start %s: list app domains: %v", appName, err)
+		return
+	}
+	for _, ad := range doms {
+		if ad.Status != "active" {
+			continue
+		}
+		if err := d.routes.UpsertRouteTLS(ad.Domain, hostPort); err != nil {
+			log.Printf("start %s: app-domain route %s: %v", appName, ad.Domain, err)
+		}
+	}
+}
+
+// Start brings a stopped app back up: re-run its latest deployment's built image
+// as a fresh container, health-check it, re-add the primary host route and
+// re-attach any active custom-domain routes, and flip that same deployment row
+// back to "running". The inverse of Stop — but a re-run, not a docker restart,
+// because Stop removes the container; the image survives because Stop doesn't
+// prune it. A no-op when the latest deployment isn't "stopped" (already running,
+// failed, or never deployed): there is nothing to start. On a run/route failure
+// the container is cleaned up and the row stays "stopped", so a retry is safe.
+func (d *Deployer) Start(ctx context.Context, appName string) error {
+	defer d.lockApp(appName)()
+	app, err := d.store.GetApp(appName)
+	if err != nil {
+		return err
+	}
+	dep, err := d.store.LatestDeployment(appName)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if dep.Status != "stopped" {
+		return nil
+	}
+	run, err := d.runtime.Run(ctx, dep.ImageID, app.Port, map[string]string{"PORT": fmt.Sprint(app.Port)})
+	if err != nil {
+		d.stopPartial(ctx, run.ContainerID)
+		return fmt.Errorf("run: %w", err)
+	}
+	if err := d.runtime.WaitHealthy(ctx, run.HostPort); err != nil {
+		d.stopPartial(ctx, run.ContainerID)
+		return fmt.Errorf("health: %w", err)
+	}
+	host, ok := d.primaryHost(appName)
+	if !ok {
+		d.stopPartial(ctx, run.ContainerID)
+		return fmt.Errorf("resolve hostname for %s", appName)
+	}
+	if err := d.routes.UpsertRoute(host, run.HostPort); err != nil {
+		d.stopPartial(ctx, run.ContainerID)
+		return fmt.Errorf("route: %w", err)
+	}
+	if err := d.store.SetAppHostname(appName, host); err != nil {
+		d.stopPartial(ctx, run.ContainerID)
+		return fmt.Errorf("record hostname: %w", err)
+	}
+	d.addCustomDomainRoute(appName, run.HostPort)
+	logs, _ := d.store.DeploymentLogs(appName, dep.ID)
+	return d.store.FinalizeDeployment(dep.ID, dep.ImageID, run.ContainerID, run.HostPort, "running", logs)
+}
+
 // Delete tears the app down completely: stops every running deployment
 // (production and previews), drops all its routes, releases the relay
 // hostname, and deletes the app plus its whole deployment history. Relay

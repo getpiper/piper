@@ -126,6 +126,49 @@ func (c *Client) LoginPoll(ctx context.Context, deviceCode string) (Account, err
 	}
 }
 
+// CLILoginStart begins a brokered browser login (#291), returning the handle to
+// poll and the user code the human enters in the browser to bind the session.
+func (c *Client) CLILoginStart(ctx context.Context) (handle, userCode string, err error) {
+	resp, err := c.post(ctx, "/v1/login/cli/start", nil, "")
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("relay cli login start: %s", resp.Status)
+	}
+	var out struct {
+		Handle   string `json:"handle"`
+		UserCode string `json:"user_code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", err
+	}
+	return out.Handle, out.UserCode, nil
+}
+
+// CLILoginPoll polls once for completion of a brokered browser login. It returns
+// ErrAuthPending until the user finishes in the browser, then the Account.
+func (c *Client) CLILoginPoll(ctx context.Context, handle string) (Account, error) {
+	resp, err := c.post(ctx, "/v1/login/cli/poll", map[string]string{"handle": handle}, "")
+	if err != nil {
+		return Account{}, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var acc Account
+		if err := json.NewDecoder(resp.Body).Decode(&acc); err != nil {
+			return Account{}, err
+		}
+		return acc, nil
+	case http.StatusAccepted:
+		return Account{}, ErrAuthPending
+	default:
+		return Account{}, fmt.Errorf("relay cli login poll: %s", resp.Status)
+	}
+}
+
 // Enroll claims a box for the account behind accountCredential, returning the
 // enrollment token, assigned base domain, and tunnel endpoint.
 func (c *Client) Enroll(ctx context.Context, accountCredential string) (Enrollment, error) {
@@ -150,10 +193,18 @@ func (c *Client) Enroll(ctx context.Context, accountCredential string) (Enrollme
 	}
 }
 
+// Repo is one installation-accessible repository as the relay reports it: full
+// name plus the visibility badge and last-pushed timestamp the picker renders.
+type Repo struct {
+	FullName   string `json:"full_name"`
+	Visibility string `json:"visibility"`
+	PushedAt   string `json:"pushed_at"`
+}
+
 // GitHubRepos lists the repositories the account's GitHub App installation can
 // reach. A relay 404 (not installed yet) maps to ErrNoInstallation so a poll
 // loop can retry on that specific condition and fail fast on everything else.
-func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]string, error) {
+func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]Repo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/github/repos", nil)
 	if err != nil {
 		return nil, err
@@ -167,7 +218,7 @@ func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]s
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var body struct {
-			Repos []string `json:"repos"`
+			Repos []Repo `json:"repos"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return nil, err

@@ -193,6 +193,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stopAppMsg:
 		name, c := msg.name, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.StopApp(name), popLevels: 1} }
+	case startAppMsg:
+		name, c := msg.name, m.client
+		return m, func() tea.Msg { return actionResultMsg{err: c.StartApp(name), popLevels: 1} }
 	case deleteAppMsg:
 		name, c := msg.name, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.DeleteApp(name), popLevels: 2} }

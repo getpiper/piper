@@ -19,6 +19,7 @@ type apiCalls struct {
 	deployName string
 	deployDir  string
 	stopped    string
+	started    string
 	deleted    string
 	linkName   string
 	linkRepo   string
@@ -42,6 +43,7 @@ type fakeAPI struct {
 	createErr error
 	deployErr error
 	stopErr   error
+	startErr  error
 	deleteErr error
 	linkErr   error
 
@@ -81,6 +83,13 @@ func (f fakeAPI) StopApp(name string) error {
 	return f.stopErr
 }
 
+func (f fakeAPI) StartApp(name string) error {
+	if f.rec != nil {
+		f.rec.started = name
+	}
+	return f.startErr
+}
+
 func (f fakeAPI) DeleteApp(name string) error {
 	if f.rec != nil {
 		f.rec.deleted = name
@@ -95,8 +104,8 @@ func (f fakeAPI) LinkApp(name, repo, branch string) error {
 	return f.linkErr
 }
 
-func (f fakeAPI) Manifest(string) (string, error) { return f.manifest, f.manifestErr }
-func (f fakeAPI) ExchangeGitHub(string) error     { return f.exchangeErr }
+func (f fakeAPI) Manifest(string) (string, error)       { return f.manifest, f.manifestErr }
+func (f fakeAPI) ExchangeGitHub(string) (string, error) { return "", f.exchangeErr }
 
 func (f fakeAPI) AppDomains(string) ([]domain.AppDomainStatus, error) { return f.domains, f.err }
 
@@ -234,6 +243,11 @@ func TestRootRunsCreateStopDeleteIntents(t *testing.T) {
 	_, cmd = m.Update(stopAppMsg{name: "blog"})
 	if res := cmd().(actionResultMsg); res.popLevels != 1 || rec.stopped != "blog" {
 		t.Fatalf("stop: got %#v rec=%+v", res, rec)
+	}
+
+	_, cmd = m.Update(startAppMsg{name: "blog"})
+	if res := cmd().(actionResultMsg); res.popLevels != 1 || rec.started != "blog" {
+		t.Fatalf("start: got %#v rec=%+v", res, rec)
 	}
 
 	_, cmd = m.Update(deleteAppMsg{name: "blog"})

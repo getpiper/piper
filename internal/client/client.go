@@ -273,6 +273,18 @@ func (c *Client) StopApp(name string) error {
 	return nil
 }
 
+func (c *Client) StartApp(name string) error {
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/start", "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("start", resp)
+	}
+	return nil
+}
+
 func (c *Client) DeleteApp(name string) error {
 	resp, err := c.do(http.MethodDelete, "/v1/apps/"+name, "", nil)
 	if err != nil {
@@ -356,17 +368,26 @@ func (c *Client) Manifest(redirectURL string) (string, error) {
 	return out.Manifest, nil
 }
 
-func (c *Client) ExchangeGitHub(code string) error {
+// ExchangeGitHub exchanges a manifest code for App credentials stored on the
+// box and returns the created App's slug, so the caller can deep-link its
+// install page.
+func (c *Client) ExchangeGitHub(code string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"code": code})
 	resp, err := c.do(http.MethodPost, "/v1/github/exchange", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		return responseError("exchange", resp)
+	if resp.StatusCode != http.StatusOK {
+		return "", responseError("exchange", resp)
 	}
-	return nil
+	var out struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Slug, nil
 }
 
 // ResetGitHub drops the box's own GitHub App and returns the webhook credential

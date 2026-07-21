@@ -143,14 +143,24 @@ func (g *GitHubApp) RepoToken(ctx context.Context, installationID, repo string) 
 	})
 }
 
-// Repos lists the repositories an installation can reach, as "owner/name".
-// This is what a dashboard's repo picker renders; no list is ever cached.
-func (g *GitHubApp) Repos(ctx context.Context, installationID string) ([]string, error) {
+// Repo is one installation-accessible repository, as the picker renders it:
+// full name plus the visibility badge and last-pushed timestamp. Fields are
+// passed straight through from GitHub (pushed_at is "" for a never-pushed repo).
+type Repo struct {
+	FullName   string `json:"full_name"`
+	Visibility string `json:"visibility"`
+	PushedAt   string `json:"pushed_at"`
+}
+
+// Repos lists the repositories an installation can reach. This is what a
+// dashboard's repo picker renders; no list is ever cached. per_page=100 caps a
+// single page; full Link-header pagination is a follow-up (#308).
+func (g *GitHubApp) Repos(ctx context.Context, installationID string) ([]Repo, error) {
 	tok, _, err := g.installationToken(ctx, installationID, nil)
 	if err != nil {
 		return nil, err
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, g.apiBase+"/installation/repositories", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, g.apiBase+"/installation/repositories?per_page=100", nil)
 	req.Header.Set("Authorization", "token "+tok)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := g.http.Do(req)
@@ -163,16 +173,13 @@ func (g *GitHubApp) Repos(ctx context.Context, installationID string) ([]string,
 		return nil, fmt.Errorf("list repositories: %s: %s", resp.Status, b)
 	}
 	var out struct {
-		Repositories []struct {
-			FullName string `json:"full_name"`
-		} `json:"repositories"`
+		Repositories []Repo `json:"repositories"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(out.Repositories))
-	for _, r := range out.Repositories {
-		names = append(names, r.FullName)
+	if out.Repositories == nil {
+		out.Repositories = []Repo{}
 	}
-	return names, nil
+	return out.Repositories, nil
 }

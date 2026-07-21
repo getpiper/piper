@@ -29,13 +29,13 @@ Separately, the relay authenticates users against a *standalone* GitHub OAuth Ap
 two different pieces of Piper.
 
 Goal: **one GitHub consent screen, no App-creation dance, no manual install step, no
-public DNS or certificate prerequisite** for users of a public relay. The CLI's login is
-device flow, so `piper login` still makes two short browser stops — enter the device
-code, then the App install page — because device flow cannot install an App; a true
-one-browser-trip CLI login is follow-up
-[#291](https://github.com/getpiper/piper/issues/291). Web/dashboard onboarding gets the
-single install-and-authorize trip today. Everything else in this document exists to
-serve that goal.
+public DNS or certificate prerequisite** for users of a public relay. `piper login`
+defaults to device flow (two short browser stops — enter the device code, then the App
+install page); `piper login --web` is the one-browser-trip path (#291): the relay brokers
+an authorization-code login bound by a user code, and bounces a first-timer's same browser
+session to the install page, with installation linking still riding the webhook.
+Web/dashboard onboarding gets the single install-and-authorize trip too. Everything else
+in this document exists to serve that goal.
 
 ## Non-goals
 
@@ -44,11 +44,14 @@ serve that goal.
   design once a repo picker exists.
 - GitHub Actions provider, raw-webhook provider, cross-fork PRs, relay-side build
   caching, delivery-ID dedupe.
-- **Org-owned installations.** An install whose target is a GitHub organization links to
-  the account of the user who installed it; `target_type` and `target_login` are recorded
-  as display metadata. Resolving org-target installations to *org-owned* agents through
-  `org_members` — described under "Ownership check" as the eventual shape — is a
-  follow-up (#290), not part of the first implementation.
+- **Org-owned installations** — *implemented (#290).* An org owner links their Piper org
+  to a GitHub org (`PUT /v1/orgs/{slug}/github`, stored on the org account's
+  `github_login`; the stable org id is pinned from the first install webhook). An
+  org-target install then routes to the *org account* — verified through the installing
+  sender's `org_members` membership — so the org's own boxes deploy it. Routing and token
+  brokering are unchanged: org boxes are owned directly by the org account. A member's
+  *personal* box is out of scope; an org-target install with no linked Piper org falls
+  back to the installing user, unchanged.
 - Backwards compatibility. Per the pre-1.x policy in `CLAUDE.md`, formats and schemas
   change in place.
 
@@ -237,14 +240,35 @@ PR-heavy repo cannot grow it without bound.
 - `piper github repos` — new; lists installation-accessible repositories. The
   dashboard's repo picker calls the same relay endpoint.
 
+### Repo-list shape ([#308](https://github.com/getpiper/piper/issues/308))
+
+`GET /v1/github/repos` returns one object per repository, not a bare name, so the
+picker can render a visibility badge and sort by recency:
+
+```json
+{"repos": [
+  {"full_name": "owner/name", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"}
+]}
+```
+
+Fields are passed straight through from GitHub's `GET /installation/repositories`
+(`visibility` is `public`/`private`/`internal`; `pushed_at` is RFC3339, `""` for a
+never-pushed repo). The request sends `per_page=100`; full Link-header pagination
+across installations with >100 repos is a follow-up, not built here. `piper github
+repos` prints `full_name`, marking non-public repos.
+
 ## Flows
 
 ### Onboarding — desktop
 
 1. `piper login` → GitHub device flow (enter the code, authorize), then the CLI prints
-   the App's install URL and polls until the installation appears. One consent screen
-   covers authorize + pick repositories; a redirect-based one-trip CLI login is
-   follow-up [#291](https://github.com/getpiper/piper/issues/291).
+   the App's install URL and polls until the installation appears. `piper login --web`
+   (#291) collapses this to one browser trip: the relay mints a handle + user code, the
+   user enters the code on the relay's page and authorizes, and a first-timer's same
+   browser session is bounced to the install page — the box runs no loopback listener,
+   it only polls the handle. The user code binds that browser to the CLI session
+   (device-flow-parity login-CSRF guard), and installation linking still rides the
+   webhook, so no unsigned `installation_id` is trusted at the callback.
 2. The relay learns the installation from the `installation.created` webhook (sender →
    account by `github_id`) and the CLI's poll sees it appear. Dashboard web logins get
    the same linkage synchronously: their callback carries `code`, `installation_id`,

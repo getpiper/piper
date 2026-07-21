@@ -211,6 +211,27 @@ func TestAppDetailStopAndDeleteKeysPushConfirm(t *testing.T) {
 	}
 }
 
+func TestAppDetailSKeyStartsWhenStopped(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog", Port: 8080}, Status: "stopped"},
+	})
+	v := m.(appDetailView)
+	if !strings.Contains(v.footer(), "s start") {
+		t.Fatalf("footer = %q, want it to offer start", v.footer())
+	}
+	_, cmd := v.Update(keyRunes('s'))
+	if cmd == nil {
+		t.Fatal("s should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	if pm.view.title() != "confirm" || !strings.Contains(pm.view.View(), "Start blog") {
+		t.Fatalf("wrong confirm: title=%q view=%s", pm.view.title(), pm.view.View())
+	}
+}
+
 func TestAppDetailDKeyPushesDeploy(t *testing.T) {
 	_, cmd := newAppDetailView("blog", false).Update(keyRunes('d'))
 	if cmd == nil {

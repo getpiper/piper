@@ -21,13 +21,14 @@ type API interface {
 	CreateApp(name string, port int) error
 	Deploy(name, srcDir string) (store.Deployment, error)
 	StopApp(name string) error
+	StartApp(name string) error
 	DeleteApp(name string) error
 	LinkApp(name, repo, branch string) error
 	AppDomains(app string) ([]domain.AppDomainStatus, error)
 	AddAppDomain(app, dom string) (domain.AppDomainStatus, error)
 	RemoveAppDomain(app, dom string) error
 	Manifest(redirectURL string) (string, error)
-	ExchangeGitHub(code string) error
+	ExchangeGitHub(code string) (string, error)
 }
 
 // Dialer builds a client for a saved box. cmd/piper supplies the real one
@@ -116,6 +117,7 @@ type (
 		port int
 	}
 	stopAppMsg   struct{ name string }
+	startAppMsg  struct{ name string }
 	deleteAppMsg struct{ name string }
 	// linkAppMsg is the link form's intent; the root runs LinkApp off the UI
 	// thread and reports via actionResultMsg (pop back to app detail on success).

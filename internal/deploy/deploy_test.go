@@ -961,6 +961,181 @@ func TestStopTerminatedRelayDownSkipsRouteBestEffort(t *testing.T) {
 	}
 }
 
+func TestStartReRunsStoppedAndAddsRoute(t *testing.T) {
+	s, path := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// The restart re-runs the built image as a fresh container on a new port.
+	rt.RunResultVal = runtime.RunResult{ContainerID: "c2", HostPort: 40002}
+	if err := d.Start(context.Background(), "blog"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if routes.upserts["blog.piper.localhost"] != 40002 {
+		t.Errorf("route = %v, want blog.piper.localhost->40002", routes.upserts)
+	}
+	// The same row flips back to running with the new container and port.
+	dep, err := s.LatestRunning("blog")
+	if err != nil {
+		t.Fatalf("LatestRunning after start: %v", err)
+	}
+	if dep.ContainerID != "c2" || dep.HostPort != 40002 || dep.Status != "running" {
+		t.Errorf("latest = %+v, want c2/40002/running", dep)
+	}
+	// No extra deployment row was created — the stopped row was reused.
+	if n := deploymentCountWithStatus(t, path, "running"); n != 1 {
+		t.Errorf("running rows = %d, want 1", n)
+	}
+	if n := deploymentCountWithStatus(t, path, "stopped"); n != 0 {
+		t.Errorf("stopped rows = %d, want 0", n)
+	}
+}
+
+func TestStartNothingStoppedIsNoOp(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// The app is already running: Start must not re-run or re-route it.
+	rt.RunResultVal = runtime.RunResult{ContainerID: "c2", HostPort: 40002}
+	if err := d.Start(context.Background(), "blog"); err != nil {
+		t.Fatalf("Start no-op err = %v, want nil", err)
+	}
+	if routes.upserts["blog.piper.localhost"] != 40001 {
+		t.Errorf("route = %v, want unchanged 40001", routes.upserts)
+	}
+	dep, _ := s.LatestRunning("blog")
+	if dep.ContainerID != "c1" {
+		t.Errorf("container = %q, want unchanged c1", dep.ContainerID)
+	}
+}
+
+func TestStartNeverDeployedIsNoOp(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if err := d.Start(context.Background(), "blog"); err != nil {
+		t.Fatalf("Start never-deployed err = %v, want nil", err)
+	}
+	if len(routes.upserts) != 0 {
+		t.Errorf("no-op start touched routes: %v", routes.upserts)
+	}
+}
+
+func TestStartUnknownAppIsNotFound(t *testing.T) {
+	s, _ := newStore(t)
+	d := New(s, &runtime.FakeRuntime{}, newFakeCaddy(), "piper.localhost")
+	if err := d.Start(context.Background(), "ghost"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Start(ghost) err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStartRestoresCustomDomainRoute(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if err := s.SetDomainConfig("shop.dev", "cloudflare", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDomainStatus("shop.dev", "active", "", time.Now().Add(60*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	rt.RunResultVal = runtime.RunResult{ContainerID: "c2", HostPort: 40002}
+	if err := d.Start(context.Background(), "blog"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	want := "blog.shop.dev->40002"
+	var found bool
+	for _, r := range routes.tlsRoutes {
+		if r == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tlsRoutes = %v, want to include %q", routes.tlsRoutes, want)
+	}
+}
+
+func TestStartTerminatedRestoresAssignedHostname(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "public.getpiper.co")
+	d.SetHostnameRegistrar(&fakeRegistrar{})
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	rt.RunResultVal = runtime.RunResult{ContainerID: "c2", HostPort: 40002}
+	if err := d.Start(context.Background(), "blog"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if routes.upserts["hash-blog-alice.public.getpiper.co"] != 40002 {
+		t.Errorf("route = %v, want the assigned hostname -> 40002", routes.upserts)
+	}
+}
+
+func TestStartRunFailureLeavesStopped(t *testing.T) {
+	s, _ := newStore(t)
+	rt := &runtime.FakeRuntime{
+		BuildResultVal: runtime.BuildResult{ImageID: "img1"},
+		RunResultVal:   runtime.RunResult{ContainerID: "c1", HostPort: 40001},
+	}
+	routes := newFakeCaddy()
+	d := New(s, rt, routes, "piper.localhost")
+	if _, err := d.Deploy(context.Background(), "blog", t.TempDir()); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if err := d.Stop(context.Background(), "blog"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	rt.RunErr = errors.New("no such image")
+	if err := d.Start(context.Background(), "blog"); err == nil {
+		t.Fatal("Start with run failure err = nil, want error")
+	}
+	// The row stays stopped so the dashboard can retry; nothing is routed.
+	dep, err := s.LatestDeployment("blog")
+	if err != nil || dep.Status != "stopped" {
+		t.Errorf("latest = %+v (err %v), want stopped", dep, err)
+	}
+}
+
 func TestDeleteTearsDownProductionAndPreviews(t *testing.T) {
 	s, _ := newStore(t)
 	rt := &runtime.FakeRuntime{

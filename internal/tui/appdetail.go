@@ -38,7 +38,11 @@ func (v appDetailView) footer() string {
 	if _, ok := v.selectedDomain(); ok {
 		return "a add domain · x remove · ↵ details · d deploy · r refresh · esc back · ? help"
 	}
-	return "d deploy · s stop · x delete · l link · a domain · ↵ logs · r refresh · esc back · ? help"
+	stopOrStart := "s stop"
+	if v.app.Status == "stopped" {
+		stopOrStart = "s start"
+	}
+	return "d deploy · " + stopOrStart + " · x delete · l link · a domain · ↵ logs · r refresh · esc back · ? help"
 }
 
 // selectedDomain returns the domain row under the cursor, if the cursor is in
@@ -103,6 +107,9 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			hasDockerfile := statErr == nil
 			return v, func() tea.Msg { return pushMsg{newDeployView(v.name, cwd, hasDockerfile)} }
 		case "s":
+			if v.app.Status == "stopped" {
+				return v, func() tea.Msg { return pushMsg{newStartConfirm(v.name)} }
+			}
 			return v, func() tea.Msg { return pushMsg{newStopConfirm(v.name)} }
 		case "x":
 			if d, ok := v.selectedDomain(); ok {

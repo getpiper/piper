@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/getpiper/piper/internal/config"
@@ -82,10 +83,67 @@ func relayLogin(relayAPI string, stdout, stderr io.Writer) int {
 	}
 }
 
+// relayLoginWeb runs the one-trip brokered browser login (#291): the relay mints
+// a handle + user code, the user enters the code in the browser and authorizes,
+// and — for a first-timer — the same browser session is bounced to the install
+// page. The box holds no loopback listener; it only polls the handle. Unlike the
+// device flow, this ends with the install already underway, so a first-timer's
+// login and install are one browser trip.
+func relayLoginWeb(relayAPI string, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	rc := relayclient.New(relayAPI)
+	handle, code, err := rc.CLILoginStart(ctx)
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	verifyURL := strings.TrimRight(relayAPI, "/") + "/v1/login/cli"
+	fmt.Fprintf(stdout, "To sign in, open:\n\n    %s\n\nand enter the code: %s\n\n", verifyURL, code)
+	_ = openBrowserFn(verifyURL)
+
+	deadline := time.Now().Add(10 * time.Minute)
+	for {
+		if time.Now().After(deadline) {
+			fmt.Fprintln(stderr, "error: login timed out; run `piper login --web` again")
+			return 1
+		}
+		pollSleep(2 * time.Second)
+		acc, err := rc.CLILoginPoll(ctx, handle)
+		if errors.Is(err, relayclient.ErrAuthPending) {
+			continue
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		cc, err := config.LoadClient()
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		cc.RelayAPI = relayAPI
+		cc.AccountCredential = acc.AccountCredential
+		if err := config.SaveClient(cc); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "logged in to relay as %s\n", acc.Username)
+		if acc.InstallURL != "" {
+			if err := waitForInstall(rc, acc.AccountCredential, acc.InstallURL); err != nil {
+				fmt.Fprintln(stderr, "error:", err)
+				return 1
+			}
+		}
+		return 0
+	}
+}
+
 // waitForInstall polls the relay until the account's GitHub App installation is
-// on record. Device flow cannot install, so this is how `piper login` learns
-// the user finished the install page — in another tab, or on another device
-// for a headless box. A one-trip browser login for the CLI is follow-up #291.
+// on record. Both login flows end here when the account has no installation yet:
+// the device flow (which cannot install) and `login --web` (where the browser
+// was already bounced to the install page). It is how the CLI learns the user
+// finished installing — in another tab, or on another device for a headless box.
 func waitForInstall(rc *relayclient.Client, cred, installURL string) error {
 	fmt.Printf("Install the Piper GitHub App on the repos you want to deploy:\n  %s\n\nWaiting…", installURL)
 	deadline := time.Now().Add(10 * time.Minute)
@@ -128,7 +186,11 @@ func githubRepos(stdout, stderr io.Writer) int {
 		return 1
 	}
 	for _, r := range repos {
-		fmt.Fprintln(stdout, r)
+		if r.Visibility != "" && r.Visibility != "public" {
+			fmt.Fprintf(stdout, "%s (%s)\n", r.FullName, r.Visibility)
+			continue
+		}
+		fmt.Fprintln(stdout, r.FullName)
 	}
 	return 0
 }
