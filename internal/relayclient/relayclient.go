@@ -150,10 +150,18 @@ func (c *Client) Enroll(ctx context.Context, accountCredential string) (Enrollme
 	}
 }
 
+// Repo is one installation-accessible repository as the relay reports it: full
+// name plus the visibility badge and last-pushed timestamp the picker renders.
+type Repo struct {
+	FullName   string `json:"full_name"`
+	Visibility string `json:"visibility"`
+	PushedAt   string `json:"pushed_at"`
+}
+
 // GitHubRepos lists the repositories the account's GitHub App installation can
 // reach. A relay 404 (not installed yet) maps to ErrNoInstallation so a poll
 // loop can retry on that specific condition and fail fast on everything else.
-func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]string, error) {
+func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]Repo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/github/repos", nil)
 	if err != nil {
 		return nil, err
@@ -167,7 +175,7 @@ func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]s
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var body struct {
-			Repos []string `json:"repos"`
+			Repos []Repo `json:"repos"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return nil, err
