@@ -60,7 +60,7 @@ func TestGitHubAppRoundTrip(t *testing.T) {
 	if _, err := s.GetGitHubApp(); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
-	want := GitHubApp{AppID: 42, PrivateKey: "-----KEY-----", WebhookSecret: "shh"}
+	want := GitHubApp{AppID: 42, Slug: "piper-abc", PrivateKey: "-----KEY-----", WebhookSecret: "shh"}
 	if err := s.SaveGitHubApp(want); err != nil {
 		t.Fatal(err)
 	}

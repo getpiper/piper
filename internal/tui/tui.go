@@ -28,7 +28,7 @@ type API interface {
 	AddAppDomain(app, dom string) (domain.AppDomainStatus, error)
 	RemoveAppDomain(app, dom string) error
 	Manifest(redirectURL string) (string, error)
-	ExchangeGitHub(code string) error
+	ExchangeGitHub(code string) (string, error)
 }
 
 // Dialer builds a client for a saved box. cmd/piper supplies the real one

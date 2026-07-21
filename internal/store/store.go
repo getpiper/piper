@@ -224,23 +224,24 @@ func (s *Store) FailBuildingDeployments() (int64, error) {
 
 type GitHubApp struct {
 	AppID         int64
+	Slug          string
 	PrivateKey    string
 	WebhookSecret string
 }
 
 func (s *Store) SaveGitHubApp(a GitHubApp) error {
 	_, err := s.db.Exec(
-		`INSERT INTO github_app(id, app_id, private_key, webhook_secret) VALUES(1,?,?,?)
-		 ON CONFLICT(id) DO UPDATE SET app_id=excluded.app_id,
+		`INSERT INTO github_app(id, app_id, slug, private_key, webhook_secret) VALUES(1,?,?,?,?)
+		 ON CONFLICT(id) DO UPDATE SET app_id=excluded.app_id, slug=excluded.slug,
 		   private_key=excluded.private_key, webhook_secret=excluded.webhook_secret`,
-		a.AppID, a.PrivateKey, a.WebhookSecret)
+		a.AppID, a.Slug, a.PrivateKey, a.WebhookSecret)
 	return err
 }
 
 func (s *Store) GetGitHubApp() (GitHubApp, error) {
 	var a GitHubApp
-	err := s.db.QueryRow(`SELECT app_id, private_key, webhook_secret FROM github_app WHERE id=1`).
-		Scan(&a.AppID, &a.PrivateKey, &a.WebhookSecret)
+	err := s.db.QueryRow(`SELECT app_id, slug, private_key, webhook_secret FROM github_app WHERE id=1`).
+		Scan(&a.AppID, &a.Slug, &a.PrivateKey, &a.WebhookSecret)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GitHubApp{}, ErrNotFound
 	}

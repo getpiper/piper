@@ -320,7 +320,7 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 			return
 		}
 		if err := s.SaveGitHubApp(store.GitHubApp{
-			AppID: creds.AppID, PrivateKey: creds.PrivateKeyPEM, WebhookSecret: creds.WebhookSecret,
+			AppID: creds.AppID, Slug: creds.Slug, PrivateKey: creds.PrivateKeyPEM, WebhookSecret: creds.WebhookSecret,
 		}); err != nil {
 			serverError(w, r, err)
 			return
@@ -328,7 +328,29 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		if onGitHubApp != nil {
 			onGitHubApp()
 		}
-		w.WriteHeader(http.StatusNoContent)
+		// Return the created App's slug so the caller can deep-link its install
+		// page (https://github.com/apps/<slug>/installations/new) instead of
+		// hunting for it in GitHub's installed-apps list.
+		writeJSON(w, http.StatusOK, map[string]string{"slug": creds.Slug})
+	})
+	// Read-only status: whether a GitHub App is configured on this box, and its
+	// slug so a caller can deep-link the install page. A dashboard gates its
+	// Connect step on this instead of always offering a skippable one.
+	mux.HandleFunc("GET /v1/github", func(w http.ResponseWriter, r *http.Request) {
+		app, err := s.GetGitHubApp()
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, map[string]any{"configured": false})
+			return
+		}
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configured": true,
+			"app_id":     app.AppID,
+			"slug":       app.Slug,
+		})
 	})
 	// Dropping the stored App is the only way off BYO: while the row exists it
 	// is treated as a deliberate operator override and shadows any App a relay
