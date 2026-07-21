@@ -29,13 +29,13 @@ Separately, the relay authenticates users against a *standalone* GitHub OAuth Ap
 two different pieces of Piper.
 
 Goal: **one GitHub consent screen, no App-creation dance, no manual install step, no
-public DNS or certificate prerequisite** for users of a public relay. The CLI's login is
-device flow, so `piper login` still makes two short browser stops — enter the device
-code, then the App install page — because device flow cannot install an App; a true
-one-browser-trip CLI login is follow-up
-[#291](https://github.com/getpiper/piper/issues/291). Web/dashboard onboarding gets the
-single install-and-authorize trip today. Everything else in this document exists to
-serve that goal.
+public DNS or certificate prerequisite** for users of a public relay. `piper login`
+defaults to device flow (two short browser stops — enter the device code, then the App
+install page); `piper login --web` is the one-browser-trip path (#291): the relay brokers
+an authorization-code login bound by a user code, and bounces a first-timer's same browser
+session to the install page, with installation linking still riding the webhook.
+Web/dashboard onboarding gets the single install-and-authorize trip too. Everything else
+in this document exists to serve that goal.
 
 ## Non-goals
 
@@ -259,9 +259,13 @@ repos` prints `full_name`, marking non-public repos.
 ### Onboarding — desktop
 
 1. `piper login` → GitHub device flow (enter the code, authorize), then the CLI prints
-   the App's install URL and polls until the installation appears. One consent screen
-   covers authorize + pick repositories; a redirect-based one-trip CLI login is
-   follow-up [#291](https://github.com/getpiper/piper/issues/291).
+   the App's install URL and polls until the installation appears. `piper login --web`
+   (#291) collapses this to one browser trip: the relay mints a handle + user code, the
+   user enters the code on the relay's page and authorizes, and a first-timer's same
+   browser session is bounced to the install page — the box runs no loopback listener,
+   it only polls the handle. The user code binds that browser to the CLI session
+   (device-flow-parity login-CSRF guard), and installation linking still rides the
+   webhook, so no unsigned `installation_id` is trusted at the callback.
 2. The relay learns the installation from the `installation.created` webhook (sender →
    account by `github_id`) and the CLI's poll sees it appear. Dashboard web logins get
    the same linkage synchronously: their callback carries `code`, `installation_id`,

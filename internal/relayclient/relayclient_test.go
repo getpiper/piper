@@ -66,6 +66,54 @@ func TestLoginPollPendingThenSuccess(t *testing.T) {
 	}
 }
 
+func TestCLILoginStartAndPoll(t *testing.T) {
+	var polls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/login/cli/start":
+			_ = json.NewEncoder(w).Encode(map[string]string{"handle": "h-1", "user_code": "ABCD-1234"})
+		case "/v1/login/cli/poll":
+			var body struct {
+				Handle string `json:"handle"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Handle != "h-1" {
+				t.Errorf("handle = %q", body.Handle)
+			}
+			polls++
+			if polls == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "authorization_pending"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"account_credential": "cred-xyz", "username": "alice",
+				"install_url": "https://github.com/apps/piper/installations/new",
+			})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL)
+
+	handle, code, err := c.CLILoginStart(context.Background())
+	if err != nil || handle != "h-1" || code != "ABCD-1234" {
+		t.Fatalf("start = (%q,%q,%v)", handle, code, err)
+	}
+	if _, err := c.CLILoginPoll(context.Background(), "h-1"); err != ErrAuthPending {
+		t.Fatalf("first poll err = %v, want ErrAuthPending", err)
+	}
+	acc, err := c.CLILoginPoll(context.Background(), "h-1")
+	if err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+	if acc.AccountCredential != "cred-xyz" || acc.Username != "alice" ||
+		acc.InstallURL != "https://github.com/apps/piper/installations/new" {
+		t.Fatalf("account = %+v", acc)
+	}
+}
+
 func TestEnroll(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer cred-xyz" {
