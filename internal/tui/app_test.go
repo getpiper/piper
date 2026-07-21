@@ -104,8 +104,8 @@ func (f fakeAPI) LinkApp(name, repo, branch string) error {
 	return f.linkErr
 }
 
-func (f fakeAPI) Manifest(string) (string, error) { return f.manifest, f.manifestErr }
-func (f fakeAPI) ExchangeGitHub(string) error     { return f.exchangeErr }
+func (f fakeAPI) Manifest(string) (string, error)       { return f.manifest, f.manifestErr }
+func (f fakeAPI) ExchangeGitHub(string) (string, error) { return "", f.exchangeErr }
 
 func (f fakeAPI) AppDomains(string) ([]domain.AppDomainStatus, error) { return f.domains, f.err }
 

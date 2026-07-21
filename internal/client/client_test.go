@@ -473,7 +473,7 @@ func TestManifestAndExchange(t *testing.T) {
 		case "/v1/github/manifest":
 			io.WriteString(w, `{"manifest":"{\"name\":\"x\"}"}`)
 		case "/v1/github/exchange":
-			w.WriteHeader(http.StatusNoContent)
+			io.WriteString(w, `{"slug":"piper-abc"}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -485,8 +485,12 @@ func TestManifestAndExchange(t *testing.T) {
 	if err != nil || !strings.Contains(m, `"name"`) {
 		t.Fatalf("Manifest m=%q err=%v", m, err)
 	}
-	if err := c.ExchangeGitHub("thecode"); err != nil {
+	slug, err := c.ExchangeGitHub("thecode")
+	if err != nil {
 		t.Fatalf("ExchangeGitHub: %v", err)
+	}
+	if slug != "piper-abc" {
+		t.Fatalf("slug = %q, want piper-abc", slug)
 	}
 }
 

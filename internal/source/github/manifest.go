@@ -57,6 +57,7 @@ func slugName(name string) string {
 
 type AppCredentials struct {
 	AppID         int64
+	Slug          string
 	PrivateKeyPEM string
 	WebhookSecret string
 }
@@ -80,11 +81,12 @@ func ExchangeCode(ctx context.Context, apiBase, code string) (AppCredentials, er
 	}
 	var out struct {
 		ID            int64  `json:"id"`
+		Slug          string `json:"slug"`
 		PEM           string `json:"pem"`
 		WebhookSecret string `json:"webhook_secret"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return AppCredentials{}, err
 	}
-	return AppCredentials{AppID: out.ID, PrivateKeyPEM: out.PEM, WebhookSecret: out.WebhookSecret}, nil
+	return AppCredentials{AppID: out.ID, Slug: out.Slug, PrivateKeyPEM: out.PEM, WebhookSecret: out.WebhookSecret}, nil
 }

@@ -197,7 +197,8 @@ func beginManifestFlow(ctx context.Context, c API, org string) tea.Msg {
 		defer formLn.Close()
 		select {
 		case code := <-codeCh:
-			return githubDoneMsg{err: c.ExchangeGitHub(code)}
+			_, err := c.ExchangeGitHub(code)
+			return githubDoneMsg{err: err}
 		case <-time.After(5 * time.Minute):
 			return githubDoneMsg{err: fmt.Errorf("timed out waiting for GitHub App approval")}
 		case <-ctx.Done():

@@ -411,7 +411,7 @@ func TestExchangeSavesCredsAndInvokesCallback(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		io.WriteString(w, `{"id":42,"pem":"KEY","webhook_secret":"SEKRIT"}`)
+		io.WriteString(w, `{"id":42,"slug":"piper-abc","pem":"KEY","webhook_secret":"SEKRIT"}`)
 	}))
 	defer gh.Close()
 
@@ -422,8 +422,17 @@ func TestExchangeSavesCredsAndInvokesCallback(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body := strings.NewReader(`{"code":"thecode"}`)
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/github/exchange", body))
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode exchange response: %v", err)
+	}
+	if out.Slug != "piper-abc" {
+		t.Fatalf("slug = %q, want piper-abc", out.Slug)
 	}
 	if !called {
 		t.Fatal("onGitHubApp callback was not invoked after exchange")
@@ -432,8 +441,52 @@ func TestExchangeSavesCredsAndInvokesCallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetGitHubApp: %v", err)
 	}
-	if saved.AppID != 42 || saved.WebhookSecret != "SEKRIT" {
+	if saved.AppID != 42 || saved.Slug != "piper-abc" || saved.WebhookSecret != "SEKRIT" {
 		t.Fatalf("creds not persisted: %+v", saved)
+	}
+}
+
+// TestGitHubStatus covers the read-only status endpoint the dashboard gates its
+// Connect step on: unconfigured reports configured:false, and a stored App
+// reports its id and slug so the dashboard can deep-link the install page.
+func TestGitHubStatus(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/github", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var before struct {
+		Configured bool   `json:"configured"`
+		Slug       string `json:"slug"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &before); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if before.Configured {
+		t.Fatalf("configured = true with no App stored: %s", rec.Body.String())
+	}
+
+	if err := s.SaveGitHubApp(store.GitHubApp{AppID: 42, Slug: "piper-abc", PrivateKey: "KEY", WebhookSecret: "SEKRIT"}); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/github", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d", rec.Code)
+	}
+	var after struct {
+		Configured bool   `json:"configured"`
+		AppID      int64  `json:"app_id"`
+		Slug       string `json:"slug"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &after); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !after.Configured || after.AppID != 42 || after.Slug != "piper-abc" {
+		t.Fatalf("status = %+v", after)
 	}
 }
 

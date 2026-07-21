@@ -44,6 +44,33 @@ func apiReq(t *testing.T, api http.Handler, method, path, cred, body string) *ht
 	return rr
 }
 
+func TestOrgSetGitHub(t *testing.T) {
+	api, st, aliceCred, bobCred := orgAPIFixture(t)
+	if rr := apiReq(t, api, "POST", "/v1/orgs", aliceCred, `{"name":"acme"}`); rr.Code != http.StatusOK {
+		t.Fatalf("create org: %d", rr.Code)
+	}
+
+	// A non-member cannot see the org, let alone set its GitHub link.
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/github", bobCred, `{"github_login":"acme"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("non-member: %d, want 404", rr.Code)
+	}
+	// Missing bearer is unauthorized.
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/github", "", `{"github_login":"acme"}`); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("no cred: %d, want 401", rr.Code)
+	}
+
+	// The owner links the GitHub org.
+	if rr := apiReq(t, api, "PUT", "/v1/orgs/acme/github", aliceCred, `{"github_login":"Acme-Inc"}`); rr.Code != http.StatusNoContent {
+		t.Fatalf("owner set: %d (body %s)", rr.Code, rr.Body.String())
+	}
+
+	// The link now resolves an install for the GitHub org, verified through
+	// alice's membership.
+	if _, err := st.OrgForGitHubInstall("5000", "acme-inc", "sub-alice"); err != nil {
+		t.Fatalf("OrgForGitHubInstall after set: %v", err)
+	}
+}
+
 func TestOrgCreateAndList(t *testing.T) {
 	api, _, aliceCred, bobCred := orgAPIFixture(t)
 

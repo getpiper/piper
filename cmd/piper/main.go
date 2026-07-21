@@ -582,11 +582,17 @@ func githubSetup(remote, org string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: timed out waiting for GitHub App approval")
 		return 1
 	}
-	if err := c.ExchangeGitHub(code); err != nil {
+	slug, err := c.ExchangeGitHub(code)
+	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, "GitHub App configured. Install it on your repo, then run: piper app link <name> --repo owner/name")
+	if slug != "" {
+		fmt.Fprintf(stdout, "GitHub App configured. Install it: https://github.com/apps/%s/installations/new\n", url.PathEscape(slug))
+	} else {
+		fmt.Fprintln(stdout, "GitHub App configured. Install it on your repo.")
+	}
+	fmt.Fprintln(stdout, "Then run: piper app link <name> --repo owner/name")
 	return 0
 }
 
