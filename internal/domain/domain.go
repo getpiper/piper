@@ -232,13 +232,20 @@ func (m *Manager) appLock(domain string) *sync.Mutex {
 	return m.appMu[domain]
 }
 
-// Close stops every lifecycle goroutine the manager spawned — box-wide issue
-// loops, per-app domain loops, relay re-asserts — and blocks until all have
-// returned. Loops exit at their next checkpoint (loop top or backoff sleep);
-// an in-flight ACME run finishes first, so Close can block for an Obtain the
-// same way RemoveAppDomain's run lock can. Tests Close before t.TempDir
-// teardown so a loop still writing its cert dir can't race the RemoveAll
-// (#279).
+// Close stops and joins the lifecycle goroutines the manager tracks in its
+// WaitGroup — the box-wide issue loop, per-app domain loops, and relay
+// re-asserts — and blocks until they return. It does not join runEnvRenew:
+// that goroutine is context-owned (it stops via its own ctx) and writes
+// nothing under the data dir, so it plays no part in the TempDir race. Loops
+// exit at their next checkpoint (loop top or backoff sleep); an in-flight ACME
+// run finishes first, so Close can block for an Obtain the same way
+// RemoveAppDomain's run lock can.
+//
+// Close is a shutdown join, not safe to call concurrently with a live
+// AddAppDomain/Set/Resume/OnRelayConnect spawn — that races a WaitGroup Add
+// against Wait — so callers must ensure no lifecycle is being started
+// concurrently. Tests Close before t.TempDir teardown so a loop still writing
+// its cert dir can't race the RemoveAll (#279).
 func (m *Manager) Close() {
 	m.stopOnce.Do(func() { close(m.stopCh) })
 	m.wg.Wait()
