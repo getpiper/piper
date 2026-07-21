@@ -542,3 +542,123 @@ func TestGitHubReposWithoutInstallation(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+type ghStatus struct {
+	GitHubApp  bool   `json:"github_app"`
+	Installed  bool   `json:"installed"`
+	Account    string `json:"account"`
+	InstallURL string `json:"install_url"`
+}
+
+// statusAPI builds the account API with a GitHub App that has a slug, so
+// install_url is populated (reposAPI omits the slug).
+func statusAPI(t *testing.T, st *Store) http.Handler {
+	t.Helper()
+	app, err := NewGitHubApp(GitHubAppConfig{
+		AppID: "1", PrivateKeyPEM: relayTestKeyPEM(t), WebhookSecret: "s", Slug: "piper-relay",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewAPIWithTunnel(st, NewFakeVerifier(), "", nil, nil, app)
+}
+
+func getStatus(t *testing.T, h http.Handler, cred string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/github/status", nil)
+	if cred != "" {
+		req.Header.Set("Authorization", "Bearer "+cred)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func accountWithCred(t *testing.T, st *Store) string {
+	t.Helper()
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := st.MintAccountCredential(acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cred
+}
+
+func TestGitHubStatusInstalled(t *testing.T) {
+	st := openTestStore(t)
+	cred := accountWithCred(t, st)
+	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getStatus(t, statusAPI(t, st), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got ghStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := ghStatus{
+		GitHubApp:  true,
+		Installed:  true,
+		Account:    "alice",
+		InstallURL: "https://github.com/apps/piper-relay/installations/new",
+	}
+	if got != want {
+		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+}
+
+func TestGitHubStatusNotInstalled(t *testing.T) {
+	st := openTestStore(t)
+	cred := accountWithCred(t, st)
+
+	rec := getStatus(t, statusAPI(t, st), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got ghStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := ghStatus{
+		GitHubApp:  true,
+		Installed:  false,
+		Account:    "alice",
+		InstallURL: "https://github.com/apps/piper-relay/installations/new",
+	}
+	if got != want {
+		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+}
+
+func TestGitHubStatusRequiresCredential(t *testing.T) {
+	rec := getStatus(t, statusAPI(t, openTestStore(t)), "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestGitHubStatusNoAppConfigured(t *testing.T) {
+	st := openTestStore(t)
+	cred := accountWithCred(t, st)
+
+	// No GitHub App wired: status still answers (200) so the dashboard learns
+	// the App isn't available, rather than a 503 it would treat as an outage.
+	rec := getStatus(t, NewAPI(st, NewFakeVerifier()), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got ghStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := ghStatus{GitHubApp: false, Installed: false, Account: "alice", InstallURL: ""}
+	if got != want {
+		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+}
