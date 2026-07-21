@@ -446,7 +446,9 @@ func ghAPIStub(t *testing.T) *httptest.Server {
 		case "/app/installations/55/access_tokens":
 			_, _ = w.Write([]byte(`{"token":"t","expires_at":"2026-07-20T12:00:00Z"}`))
 		case "/installation/repositories":
-			_, _ = w.Write([]byte(`{"repositories":[{"full_name":"alice/blog"},{"full_name":"alice/api"}]}`))
+			_, _ = w.Write([]byte(`{"repositories":[` +
+				`{"full_name":"alice/blog","visibility":"public","pushed_at":"2026-07-20T12:34:56Z"},` +
+				`{"full_name":"alice/api","visibility":"private","pushed_at":""}]}`))
 		default:
 			t.Errorf("unexpected GitHub path %q", r.URL.Path)
 		}
@@ -498,13 +500,17 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
 	var body struct {
-		Repos []string `json:"repos"`
+		Repos []Repo `json:"repos"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Repos) != 2 || body.Repos[0] != "alice/blog" || body.Repos[1] != "alice/api" {
-		t.Fatalf("repos = %v", body.Repos)
+	want := []Repo{
+		{FullName: "alice/blog", Visibility: "public", PushedAt: "2026-07-20T12:34:56Z"},
+		{FullName: "alice/api", Visibility: "private", PushedAt: ""},
+	}
+	if len(body.Repos) != len(want) || body.Repos[0] != want[0] || body.Repos[1] != want[1] {
+		t.Fatalf("repos = %+v, want %+v", body.Repos, want)
 	}
 }
 

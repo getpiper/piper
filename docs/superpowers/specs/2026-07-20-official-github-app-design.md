@@ -237,6 +237,23 @@ PR-heavy repo cannot grow it without bound.
 - `piper github repos` — new; lists installation-accessible repositories. The
   dashboard's repo picker calls the same relay endpoint.
 
+### Repo-list shape ([#308](https://github.com/getpiper/piper/issues/308))
+
+`GET /v1/github/repos` returns one object per repository, not a bare name, so the
+picker can render a visibility badge and sort by recency:
+
+```json
+{"repos": [
+  {"full_name": "owner/name", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"}
+]}
+```
+
+Fields are passed straight through from GitHub's `GET /installation/repositories`
+(`visibility` is `public`/`private`/`internal`; `pushed_at` is RFC3339, `""` for a
+never-pushed repo). The request sends `per_page=100`; full Link-header pagination
+across installations with >100 repos is a follow-up, not built here. `piper github
+repos` prints `full_name`, marking non-public repos.
+
 ## Flows
 
 ### Onboarding — desktop

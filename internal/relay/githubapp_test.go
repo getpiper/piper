@@ -114,7 +114,12 @@ func TestReposListsInstallationRepositories(t *testing.T) {
 		if r.URL.Path != "/installation/repositories" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"repositories":[{"full_name":"alice/blog"},{"full_name":"alice/api"}]}`))
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Errorf("per_page = %q, want 100", got)
+		}
+		_, _ = w.Write([]byte(`{"repositories":[` +
+			`{"full_name":"alice/blog","visibility":"public","pushed_at":"2026-07-20T12:34:56Z"},` +
+			`{"full_name":"alice/api","visibility":"private","pushed_at":""}]}`))
 	}))
 	defer srv.Close()
 
@@ -128,7 +133,11 @@ func TestReposListsInstallationRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Repos: %v", err)
 	}
-	if len(repos) != 2 || repos[0] != "alice/blog" || repos[1] != "alice/api" {
-		t.Fatalf("repos = %v", repos)
+	want := []Repo{
+		{FullName: "alice/blog", Visibility: "public", PushedAt: "2026-07-20T12:34:56Z"},
+		{FullName: "alice/api", Visibility: "private", PushedAt: ""},
+	}
+	if len(repos) != len(want) || repos[0] != want[0] || repos[1] != want[1] {
+		t.Fatalf("repos = %+v, want %+v", repos, want)
 	}
 }
