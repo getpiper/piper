@@ -273,6 +273,18 @@ func (c *Client) StopApp(name string) error {
 	return nil
 }
 
+func (c *Client) StartApp(name string) error {
+	resp, err := c.do(http.MethodPost, "/v1/apps/"+name+"/start", "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError("start", resp)
+	}
+	return nil
+}
+
 func (c *Client) DeleteApp(name string) error {
 	resp, err := c.do(http.MethodDelete, "/v1/apps/"+name, "", nil)
 	if err != nil {

@@ -16,6 +16,17 @@ func TestStopConfirmYesEmitsStop(t *testing.T) {
 	}
 }
 
+func TestStartConfirmYesEmitsStart(t *testing.T) {
+	v := newStartConfirm("blog")
+	if !strings.Contains(v.View(), "Start blog") {
+		t.Fatalf("prompt missing:\n%s", v.View())
+	}
+	_, cmd := v.Update(keyRunes('y'))
+	if _, ok := cmd().(startAppMsg); !ok {
+		t.Fatalf("y should emit startAppMsg, got %T", cmd())
+	}
+}
+
 func TestStopConfirmNoPops(t *testing.T) {
 	_, cmd := newStopConfirm("blog").Update(keyRunes('n'))
 	if cmd == nil {

@@ -23,6 +23,7 @@ type Deployerer interface {
 	Begin(app string) (store.Deployment, error)
 	Finish(ctx context.Context, dep store.Deployment, srcDir string) error
 	Stop(ctx context.Context, app string) error
+	Start(ctx context.Context, app string) error
 	Delete(ctx context.Context, app string) error
 }
 
@@ -243,6 +244,16 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 	})
 	mux.HandleFunc("POST /v1/apps/{name}/stop", func(w http.ResponseWriter, r *http.Request) {
 		if err := d.Stop(r.Context(), r.PathValue("name")); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		} else if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /v1/apps/{name}/start", func(w http.ResponseWriter, r *http.Request) {
+		if err := d.Start(r.Context(), r.PathValue("name")); errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unknown app", http.StatusNotFound)
 			return
 		} else if err != nil {

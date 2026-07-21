@@ -38,6 +38,15 @@ func newStopConfirm(name string) confirmView {
 	}
 }
 
+func newStartConfirm(name string) confirmView {
+	return confirmView{
+		name:   name,
+		prompt: fmt.Sprintf("Start %s? Its latest deployment is brought back up.", name),
+		mode:   confirmYesNo,
+		intent: func(n string) tea.Msg { return startAppMsg{n} },
+	}
+}
+
 func newRemoveBoxConfirm(name string) confirmView {
 	return confirmView{
 		name:   name,
