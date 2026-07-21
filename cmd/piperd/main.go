@@ -421,7 +421,11 @@ func main() {
 		if wh != nil {
 			wh.start()
 		}
-	}, dm, binder)
+	}, dm, binder, func() string {
+		// What `piper github reset` leaves behind: the same decision, re-run as
+		// if the row it just deleted had never been there.
+		return decideWebhookProvider(store.ErrNotFound, cfg, wh != nil && wh.ghToken != nil).name()
+	})
 
 	// The authenticated entry point. Always on, so LAN-only and relay-connected
 	// boxes run the identical listener topology; the relay tunnel below is its
@@ -498,7 +502,16 @@ func main() {
 		domMgr.ResumeAppDomains()
 		go domMgr.StartRenewals(ctx)
 
-		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken)
+		// The webhook deployer must carry the registrar on exactly the same
+		// condition as the API deployer above: a git-push deploy and an API
+		// deploy have to land on the same hostname. Declared as the interface
+		// so a LAN-only box gets a genuinely nil registrar rather than a
+		// typed-nil that would slip past the deployer's own guard.
+		var whRegistrar deploy.HostnameRegistrar
+		if cfg.Terminated {
+			whRegistrar = tc
+		}
+		wh = newWebhookStarter(cfg, st, rt, tc.GitHubToken, whRegistrar)
 		_, err := st.GetGitHubApp()
 		switch decideWebhookProvider(err, cfg, wh.ghToken != nil) {
 		case webhookProviderNone:
@@ -620,13 +633,32 @@ type webhookStarter struct {
 	st      *store.Store
 	rt      *runtime.DockerRuntime
 	ghToken func(repo string) (string, error) // nil unless brokered
-	once    sync.Once
-	srv     *http.Server
-	handler *webhook.Handler
+	// registrar assigns each app its relay-terminated public hostname. Nil on a
+	// LAN-only box; non-nil whenever the API deployer carries one, and it must
+	// be the same one — see newWebhookDeployer.
+	registrar deploy.HostnameRegistrar
+	once      sync.Once
+	srv       *http.Server
+	handler   *webhook.Handler
 }
 
-func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime, ghToken func(repo string) (string, error)) *webhookStarter {
-	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken}
+func newWebhookStarter(cfg config.Config, st *store.Store, rt *runtime.DockerRuntime, ghToken func(repo string) (string, error), registrar deploy.HostnameRegistrar) *webhookStarter {
+	return &webhookStarter{cfg: cfg, st: st, rt: rt, ghToken: ghToken, registrar: registrar}
+}
+
+// newWebhookDeployer builds the deployer that serves git-push deploys. It must
+// carry the same hostname registrar as the API deployer: without one, routing
+// falls back to <app>.<baseDom>, which on a relay-terminated box sits two
+// labels under the apex — outside the relay's single-label wildcard
+// certificate and unknown to its router — so the app is unreachable however
+// healthy the container is. reg is nil on a LAN-only box, which keeps that
+// local convention deliberately.
+func newWebhookDeployer(st *store.Store, rt runtime.Runtime, routes deploy.RouteSetter, baseDomain string, reg deploy.HostnameRegistrar) *deploy.Deployer {
+	d := deploy.New(st, rt, routes, baseDomain)
+	if reg != nil {
+		d.SetHostnameRegistrar(reg)
+	}
+	return d
 }
 
 // webhookProvider is the outcome of applying the BYO-over-brokered
@@ -660,6 +692,31 @@ func decideWebhookProvider(ghErr error, cfg config.Config, hasGHToken bool) webh
 	}
 }
 
+// name is the wire spelling the control API reports to `piper github reset`.
+func (p webhookProvider) name() string {
+	switch p {
+	case webhookProviderBYO:
+		return "byo"
+	case webhookProviderBrokered:
+		return "brokered"
+	default:
+		return "none"
+	}
+}
+
+// shadowWarning is the line that makes a passed-over brokered App visible.
+// The precedence rule is right — a locally stored App is a deliberate trust
+// boundary and must win — but a box that once ran `piper github setup` then
+// enrolled on a brokering relay silently verifies deliveries against the wrong
+// secret, and the only signal is the absence of the brokered log line (#299).
+func shadowWarning(prov webhookProvider, cfg config.Config) string {
+	if prov != webhookProviderBYO || !cfg.GitHubBrokered {
+		return ""
+	}
+	return "webhook: the relay offers a brokered GitHub App, shadowed by this box's own; " +
+		"run `piper github reset` to use the relay's"
+}
+
 func (w *webhookStarter) start() { w.once.Do(w.run) }
 
 func (w *webhookStarter) run() {
@@ -677,6 +734,9 @@ func (w *webhookStarter) run() {
 		}
 		prov = p
 		log.Printf("webhook: using this box's own GitHub App %d", gh.AppID)
+		if warn := shadowWarning(webhookProviderBYO, w.cfg); warn != "" {
+			log.Print(warn)
+		}
 	case webhookProviderBrokered:
 		prov = github.NewWithTokens(
 			github.Config{WebhookSecret: w.cfg.WebhookSecret},
@@ -692,7 +752,7 @@ func (w *webhookStarter) run() {
 		return
 	}
 
-	wdep := deploy.New(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain)
+	wdep := newWebhookDeployer(w.st, w.rt, caddy.NewClient(w.cfg.CaddyAdmin), w.cfg.BaseDomain, w.registrar)
 	w.handler = webhook.New(prov, w.st, wdep, w.cfg.BaseDomain)
 	w.srv = &http.Server{Addr: w.cfg.WebhookAddr, Handler: w.handler}
 	go func() {

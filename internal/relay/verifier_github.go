@@ -29,12 +29,6 @@ type GitHubVerifier struct {
 	httpc                  *http.Client
 	sleep                  func(time.Duration) // poll delay seam; tests override
 
-	// AppSlug is the GitHub App's URL slug. When set, the browser flow uses the
-	// App's install page instead of the plain OAuth authorize endpoint: with
-	// "Request user authorization during installation" enabled, one screen both
-	// authorizes the user and selects which repositories the App may reach.
-	AppSlug string
-
 	mu    sync.Mutex
 	flows map[string]*githubFlow
 }
@@ -220,12 +214,12 @@ func (g *GitHubVerifier) Poll(_ context.Context, handle string) (Identity, error
 
 // AuthCodeURL is the GitHub authorize URL for the browser flow. No
 // redirect_uri parameter: the OAuth app's single registered callback URL
-// (the relay's /v1/login/callback) is used.
+// (the relay's /v1/login/callback) is used. Always the authorize endpoint,
+// never the App install page: installations/new only yields a code as a side
+// effect of an actual install, so it dead-ends on the installation's settings
+// page once the App is already installed (#305). Installing the App is a
+// separate step after login, and linking rides the installation webhook.
 func (g *GitHubVerifier) AuthCodeURL(state string) string {
-	if g.AppSlug != "" {
-		return "https://github.com/apps/" + url.PathEscape(g.AppSlug) +
-			"/installations/new?state=" + url.QueryEscape(state)
-	}
 	return g.oauthBase + "/login/oauth/authorize?client_id=" +
 		url.QueryEscape(g.clientID) + "&state=" + url.QueryEscape(state)
 }

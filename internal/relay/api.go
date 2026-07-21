@@ -160,36 +160,10 @@ func (a *api) loginCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "account error", http.StatusInternalServerError)
 		return
 	}
-	// GitHub's install-and-authorize redirect carries the installation id
-	// alongside the code, so one browser trip yields both identity and
-	// installation. The installation webhook may also arrive first or later;
-	// LinkInstallation is idempotent either way.
-	//
-	// The redirect itself is not signed: a user can re-open their own callback
-	// URL with any installation_id and, without this check, rebind someone
-	// else's installation to their account. So before linking, confirm with
-	// GitHub that the installation actually belongs to the identity we just
-	// authenticated. A verification failure or mismatch must not fail the
-	// login — it only skips the linking, same as before.
-	//
-	// An org-target installation's account is the org, which never matches
-	// id.Subject (the installing user) here — that's expected. It falls
-	// through to the HMAC-signed "installation" webhook, which already links
-	// it and which LinkInstallation is idempotent against (org routing itself
-	// is deferred follow-up #290).
-	if instID := r.URL.Query().Get("installation_id"); instID != "" && a.ghApp != nil {
-		owner, err := a.ghApp.InstallationAccountID(r.Context(), instID)
-		switch {
-		case err != nil:
-			log.Printf("relay: verify installation %s: %v", instID, err)
-		case owner != id.Subject:
-			log.Printf("relay: refusing to link installation %s to %s", instID, acc.Username)
-		default:
-			if err := a.st.LinkInstallation(instID, id.Subject, "user", id.Login); err != nil {
-				log.Printf("relay: link installation %s to %s: %v", instID, acc.Username, err)
-			}
-		}
-	}
+	// Login carries no installation linking: the authorize redirect never
+	// includes an installation_id, and installations link through the
+	// HMAC-signed "installation" webhook instead — an unsigned query
+	// parameter here could otherwise rebind someone else's installation.
 	cred, err := a.st.MintAccountCredential(acc.ID)
 	if err != nil {
 		http.Error(w, "credential error", http.StatusInternalServerError)

@@ -23,6 +23,9 @@ type Deployer interface {
 	Deploy(ctx context.Context, app, srcDir string) (store.Deployment, error)
 	DeployPreview(ctx context.Context, app string, pr int, srcDir string) (store.Deployment, error)
 	TeardownPreview(ctx context.Context, app string, pr int) (retired bool, err error)
+	// PreviewHost is the host the preview is actually routed at — relay-assigned
+	// where a registrar exists, constructed from the base domain otherwise.
+	PreviewHost(app string, pr int) (string, bool)
 }
 
 type Handler struct {
@@ -189,7 +192,16 @@ func (h *Handler) processPush(ctx context.Context, ev source.Event) {
 		return
 	}
 
+	// Report the host the deploy actually routed, which the deployer recorded on
+	// the app row, rather than guessing "<app>.<baseDom>". On a relay-terminated
+	// box the routed host is a flattened single-label name the relay assigned;
+	// the guess sits two labels under the apex, outside the relay's wildcard
+	// certificate, so GitHub's Deployments tab would link somewhere unreachable.
+	// Re-read after the deploy: the row read above predates it.
 	url := "https://" + app.Name + "." + h.baseDom
+	if routed, err := h.store.GetApp(app.Name); err == nil && routed.Hostname != "" {
+		url = "https://" + routed.Hostname
+	}
 	_ = h.prov.Report(ctx, ev, source.StatusSuccess, url)
 
 	h.mu.Lock()
@@ -242,7 +254,15 @@ func (h *Handler) processPreview(ctx context.Context, ev source.Event) {
 		return
 	}
 
+	// Report the host the preview actually routed, for the same reason the push
+	// path re-reads the app row: on a relay-terminated box the constructed
+	// "pr-<N>-<app>.<baseDom>" sits two labels under the apex, outside the
+	// relay's wildcard certificate and unknown to its router, so the Deployments
+	// tab would link somewhere unreachable (#302).
 	url := fmt.Sprintf("https://pr-%d-%s.%s", ev.PR, app.Name, h.baseDom)
+	if routed, ok := h.deploy.PreviewHost(app.Name, ev.PR); ok {
+		url = "https://" + routed
+	}
 	_ = h.prov.Report(ctx, ev, source.StatusSuccess, url)
 
 	h.mu.Lock()

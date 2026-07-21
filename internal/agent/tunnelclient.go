@@ -82,9 +82,11 @@ func (c *TunnelClient) Run(ctx context.Context, relayAddr, token, baseDomain str
 }
 
 // Register opens a control stream on the current session and asks the relay to
-// assign/return the public hostname for app.
-func (c *TunnelClient) Register(app string) (string, error) {
-	resp, err := c.control(tunnel.ControlRequest{Op: "register", App: app})
+// assign/return the public hostname for app. pr is 0 for the app's production
+// host and the PR number for a preview, which gets a hostname of its own so it
+// never overwrites production's (#302).
+func (c *TunnelClient) Register(app string, pr int) (string, error) {
+	resp, err := c.control(tunnel.ControlRequest{Op: "register", App: app, PR: pr})
 	if err != nil {
 		return "", err
 	}

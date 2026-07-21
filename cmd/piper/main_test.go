@@ -495,3 +495,56 @@ func TestBareInvocationTTYLaunchesTUI(t *testing.T) {
 		t.Fatalf("remote not forwarded: %q", gotRemote)
 	}
 }
+
+// TestRunGithubReset covers the way off BYO (#299): the box drops its own App
+// and says what will serve webhooks after a restart, so the operator does not
+// have to guess whether the relay's brokered App takes over.
+func TestRunGithubReset(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/github/app" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		io.WriteString(w, `{"provider":"brokered"}`)
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	old := stdinReader
+	stdinReader = strings.NewReader("y\n")
+	t.Cleanup(func() { stdinReader = old })
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"github", "reset"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "removed") {
+		t.Errorf("stdout = %q, want confirmation that the App was removed", got)
+	}
+	if !strings.Contains(got, "brokered") {
+		t.Errorf("stdout = %q, want the provider the box will use next", got)
+	}
+	if !strings.Contains(got, "restart") {
+		t.Errorf("stdout = %q, want the restart instruction", got)
+	}
+}
+
+func TestRunGithubResetAborts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("declined reset must not reach the API")
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	old := stdinReader
+	stdinReader = strings.NewReader("n\n")
+	t.Cleanup(func() { stdinReader = old })
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"github", "reset"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "aborted") {
+		t.Errorf("stdout = %q, want aborted", stdout.String())
+	}
+}

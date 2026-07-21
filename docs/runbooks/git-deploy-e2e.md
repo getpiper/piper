@@ -371,10 +371,12 @@ themselves when wrong:
 - **Enable Device Flow — ON.** Device flow is the CLI's only login path, and
   GitHub rejects it outright unless this is checked. Without it `piper login`
   cannot work at any point.
-- **Request user authorization (OAuth) during installation — ON.** This is what
-  makes one browser screen cover both identity and repository selection, and
-  what puts `installation_id` on the callback. With it off, login still works
-  but the installation is only linked later, when the webhook arrives.
+- **Request user authorization (OAuth) during installation — OFF.** Login
+  never rides an install: the CLI uses the device flow and the browser flow
+  uses GitHub's OAuth authorize endpoint (#305), and installations are linked
+  by the `installation` webhook in both cases. Leaving it ON only makes GitHub
+  bounce the browser to the OAuth callback after each install with a `code`
+  but no `state`, which the relay rejects as a stray login ("bad state").
 - **Expire user authorization tokens — ON.** Safe here because the relay uses
   the user token once, for a single `GET /user` inside `fetchUser`, and never
   stores it: `Identity` carries only the subject and login, and the extra
@@ -513,6 +515,7 @@ sudo systemctl clean --what=state piper-relay
 | Push does nothing, no piperd log | App not installed on the repo, or repo not linked, or pushed a non-tracked branch | Install the App on the repo; `piper app link … --branch <pushed-branch>` |
 | Deploy starts but health-check fails | App doesn't listen on the `--port` you set | Match `piper create --port N` to the container's listen port |
 | Webhook 401 in piperd logs | Signature mismatch — stale App creds | Re-run `piper github setup`; ensure only one `piper-<base>` App is installed |
+| Relay logs `box rejected delivery: 401` on a brokered box | The box still holds its own App, which outranks the relay's; the log shows `using this box's own GitHub App` instead of `(brokered)` | `piper github reset`, then restart piperd |
 
 ---
 

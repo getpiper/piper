@@ -153,7 +153,7 @@ func TestTunnelClientRegister(t *testing.T) {
 	var err error
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		host, err = c.Register("blog")
+		host, err = c.Register("blog", 0)
 		if err == nil {
 			break
 		}

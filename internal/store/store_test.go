@@ -82,6 +82,27 @@ func TestGitHubAppRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDeleteGitHubApp covers giving up BYO: the row must go so the box stops
+// claiming an explicit override and can fall back to a relay's brokered App
+// (#299). Deleting when there is nothing stored is not an error — the caller
+// wants "no BYO App", which is already true.
+func TestDeleteGitHubApp(t *testing.T) {
+	s := openTemp(t)
+
+	if err := s.DeleteGitHubApp(); err != nil {
+		t.Fatalf("delete with no row: %v", err)
+	}
+	if err := s.SaveGitHubApp(GitHubApp{AppID: 42, PrivateKey: "-----KEY-----", WebhookSecret: "shh"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteGitHubApp(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := s.GetGitHubApp(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after delete: want ErrNotFound, got %v", err)
+	}
+}
+
 func TestSetAppHostname(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
