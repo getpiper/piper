@@ -63,6 +63,36 @@ func (s *Store) AccountForInstallation(installationID string) (string, error) {
 	return id, err
 }
 
+// Installation is one GitHub App installation linked to an account, carrying
+// the display identity of its target — the user or org the App is installed on
+// (github_installations.target_type / target_login).
+type Installation struct {
+	ID          string `json:"installation_id"`
+	TargetType  string `json:"target_type"`
+	TargetLogin string `json:"target_login"`
+}
+
+// InstallationsForAccount lists every installation linked to the account,
+// newest first. Empty (not an error) when the account has none.
+func (s *Store) InstallationsForAccount(accountID string) ([]Installation, error) {
+	rows, err := s.db.Query(
+		`SELECT installation_id, target_type, target_login FROM github_installations
+		  WHERE account_id=? ORDER BY created_at DESC`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Installation
+	for rows.Next() {
+		var in Installation
+		if err := rows.Scan(&in.ID, &in.TargetType, &in.TargetLogin); err != nil {
+			return nil, err
+		}
+		out = append(out, in)
+	}
+	return out, rows.Err()
+}
+
 // InstallationForAccount returns the installation an account's agents mint
 // tokens through. The most recent one wins if an account somehow holds several.
 func (s *Store) InstallationForAccount(accountID string) (string, error) {

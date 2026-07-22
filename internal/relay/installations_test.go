@@ -76,3 +76,44 @@ func TestUnlinkInstallation(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoInstallation", err)
 	}
 }
+
+func TestInstallationsForAccountReturnsAllNewestFirst(t *testing.T) {
+	st := openTestStore(t)
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("66", "1001", "org", "getpiper"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.InstallationsForAccount(acc.ID)
+	if err != nil {
+		t.Fatalf("InstallationsForAccount: %v", err)
+	}
+	want := []Installation{
+		{ID: "66", TargetType: "org", TargetLogin: "getpiper"},
+		{ID: "55", TargetType: "user", TargetLogin: "alice"},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("installations = %+v, want %+v", got, want)
+	}
+}
+
+func TestInstallationsForAccountEmpty(t *testing.T) {
+	st := openTestStore(t)
+	acc, err := st.UpsertAccount("1001", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.InstallationsForAccount(acc.ID)
+	if err != nil {
+		t.Fatalf("InstallationsForAccount: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("installations = %+v, want empty", got)
+	}
+}
