@@ -2,7 +2,6 @@ package relay
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -271,8 +270,8 @@ func TestLoginCallbackIgnoresInstallationID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.InstallationForAccount(acc.ID); !errors.Is(err, ErrNoInstallation) {
-		t.Fatalf("InstallationForAccount err = %v, want ErrNoInstallation (callback must not link)", err)
+	if insts, err := st.InstallationsForAccount(acc.ID); err != nil || len(insts) != 0 {
+		t.Fatalf("InstallationsForAccount = %+v, err = %v, want none (callback must not link)", insts, err)
 	}
 }
 
@@ -443,7 +442,7 @@ func ghAPIStub(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/app/installations/55/access_tokens":
+		case "/app/installations/55/access_tokens", "/app/installations/66/access_tokens":
 			_, _ = w.Write([]byte(`{"token":"t","expires_at":"2026-07-20T12:00:00Z"}`))
 		case "/installation/repositories":
 			_, _ = w.Write([]byte(`{"repositories":[` +
@@ -467,9 +466,13 @@ func reposAPI(t *testing.T, st *Store, gh *httptest.Server) http.Handler {
 	return NewAPIWithTunnel(st, NewFakeVerifier(), "", nil, nil, app)
 }
 
-func getRepos(t *testing.T, h http.Handler, cred string) *httptest.ResponseRecorder {
+func getRepos(t *testing.T, h http.Handler, cred, instID string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/v1/github/repos", nil)
+	target := "/v1/github/repos"
+	if instID != "" {
+		target += "?installation_id=" + url.QueryEscape(instID)
+	}
+	req := httptest.NewRequest(http.MethodGet, target, nil)
 	if cred != "" {
 		req.Header.Set("Authorization", "Bearer "+cred)
 	}
@@ -495,7 +498,7 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := getRepos(t, reposAPI(t, st, gh), cred)
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "55")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -517,37 +520,57 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 func TestGitHubReposRequiresCredential(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
-	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "")
+	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "", "55")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
 
-func TestGitHubReposWithoutInstallation(t *testing.T) {
+func TestGitHubReposRequiresInstallationID(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
-
 	st := openTestStore(t)
-	acc, err := st.UpsertAccount("1001", "alice")
-	if err != nil {
-		t.Fatal(err)
+	cred := accountWithCred(t, st)
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
-	cred, err := st.MintAccountCredential(acc.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+}
 
-	rec := getRepos(t, reposAPI(t, st, gh), cred)
+func TestGitHubReposUnknownInstallation(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+	st := openTestStore(t)
+	cred := accountWithCred(t, st)
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "999")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
 
+// TestGitHubReposForeignInstallation: an installation owned by a different
+// account must not be readable, reported as 404 (no existence leak).
+func TestGitHubReposForeignInstallation(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+	st := openTestStore(t)
+	cred := accountWithCred(t, st) // account 1001 / alice
+	if _, err := st.UpsertAccount("2002", "mallory"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("77", "2002", "user", "mallory"); err != nil {
+		t.Fatal(err)
+	}
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "77")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for foreign installation", rec.Code)
+	}
+}
+
 type ghStatus struct {
-	GitHubApp  bool   `json:"github_app"`
-	Installed  bool   `json:"installed"`
-	Account    string `json:"account"`
-	InstallURL string `json:"install_url"`
+	GitHubApp     bool           `json:"github_app"`
+	Installations []Installation `json:"installations"`
+	InstallURL    string         `json:"install_url"`
 }
 
 // statusAPI builds the account API with a GitHub App that has a slug, so
@@ -593,6 +616,9 @@ func TestGitHubStatusInstalled(t *testing.T) {
 	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.LinkInstallation("66", "1001", "org", "getpiper"); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := getStatus(t, statusAPI(t, st), cred)
 	if rec.Code != http.StatusOK {
@@ -602,14 +628,37 @@ func TestGitHubStatusInstalled(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := ghStatus{
-		GitHubApp:  true,
-		Installed:  true,
-		Account:    "alice",
-		InstallURL: "https://github.com/apps/piper-relay/installations/new",
+	wantInst := []Installation{
+		{ID: "66", TargetType: "org", TargetLogin: "getpiper"},
+		{ID: "55", TargetType: "user", TargetLogin: "alice"},
 	}
-	if got != want {
-		t.Fatalf("status = %+v, want %+v", got, want)
+	if !got.GitHubApp || got.InstallURL != "https://github.com/apps/piper-relay/installations/new" ||
+		len(got.Installations) != len(wantInst) ||
+		got.Installations[0] != wantInst[0] || got.Installations[1] != wantInst[1] {
+		t.Fatalf("status = %+v, want github_app + %+v", got, wantInst)
+	}
+}
+
+// TestGitHubStatusLabelsOrgInstallByOrgLogin is the #321 Gap-2 regression: a
+// personal login whose only installation targets an org must report the org as
+// the installation's target_login, not the logged-in username.
+func TestGitHubStatusLabelsOrgInstallByOrgLogin(t *testing.T) {
+	st := openTestStore(t)
+	cred := accountWithCred(t, st) // account "1001", login "alice"
+	if err := st.LinkInstallation("66", "1001", "org", "getpiper"); err != nil {
+		t.Fatal(err)
+	}
+	rec := getStatus(t, statusAPI(t, st), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got ghStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Installations) != 1 ||
+		got.Installations[0].TargetLogin != "getpiper" || got.Installations[0].TargetType != "org" {
+		t.Fatalf("installations = %+v, want single org getpiper (not login alice)", got.Installations)
 	}
 }
 
@@ -625,14 +674,9 @@ func TestGitHubStatusNotInstalled(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := ghStatus{
-		GitHubApp:  true,
-		Installed:  false,
-		Account:    "alice",
-		InstallURL: "https://github.com/apps/piper-relay/installations/new",
-	}
-	if got != want {
-		t.Fatalf("status = %+v, want %+v", got, want)
+	if !got.GitHubApp || got.InstallURL != "https://github.com/apps/piper-relay/installations/new" ||
+		len(got.Installations) != 0 {
+		t.Fatalf("status = %+v, want github_app + no installations", got)
 	}
 }
 
@@ -657,8 +701,7 @@ func TestGitHubStatusNoAppConfigured(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := ghStatus{GitHubApp: false, Installed: false, Account: "alice", InstallURL: ""}
-	if got != want {
-		t.Fatalf("status = %+v, want %+v", got, want)
+	if got.GitHubApp || got.InstallURL != "" || len(got.Installations) != 0 {
+		t.Fatalf("status = %+v, want github_app:false + no installations", got)
 	}
 }

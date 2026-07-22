@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -201,11 +202,46 @@ type Repo struct {
 	PushedAt   string `json:"pushed_at"`
 }
 
-// GitHubRepos lists the repositories the account's GitHub App installation can
-// reach. A relay 404 (not installed yet) maps to ErrNoInstallation so a poll
-// loop can retry on that specific condition and fail fast on everything else.
-func (c *Client) GitHubRepos(ctx context.Context, accountCredential string) ([]Repo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/github/repos", nil)
+// Installation is one GitHub App installation the account holds, as the relay
+// reports it: the opaque id plus the target it is installed on.
+type Installation struct {
+	ID          string `json:"installation_id"`
+	TargetType  string `json:"target_type"`
+	TargetLogin string `json:"target_login"`
+}
+
+// GitHubStatus lists every GitHub App installation linked to the account. It
+// never 404s on a missing installation — an empty slice is the answer — so a
+// poll loop can wait for the first installation to appear.
+func (c *Client) GitHubStatus(ctx context.Context, accountCredential string) ([]Installation, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/github/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accountCredential)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("relay github status: %s", resp.Status)
+	}
+	var body struct {
+		Installations []Installation `json:"installations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	return body.Installations, nil
+}
+
+// GitHubRepos lists the repositories the given installation can reach. The
+// installation id comes from GitHubStatus; the relay authorizes it against the
+// account and maps an unknown/foreign id to a 404 → ErrNoInstallation.
+func (c *Client) GitHubRepos(ctx context.Context, accountCredential, installationID string) ([]Repo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.base+"/v1/github/repos?installation_id="+url.QueryEscape(installationID), nil)
 	if err != nil {
 		return nil, err
 	}

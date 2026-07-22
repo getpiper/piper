@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"html"
 	"io"
 	"log"
@@ -192,7 +191,7 @@ func (a *api) cliCallback(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	installURL := ""
-	if _, err := a.st.InstallationForAccount(acc.ID); errors.Is(err, ErrNoInstallation) {
+	if insts, _ := a.st.InstallationsForAccount(acc.ID); len(insts) == 0 {
 		installURL = a.ghApp.InstallURL()
 	}
 

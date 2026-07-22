@@ -101,6 +101,10 @@ func TestRelayLoginWebStoresCredentialAndWaitsForInstall(t *testing.T) {
 				"account_credential": "cred-web", "username": "alice",
 				"install_url": "https://github.com/apps/piper/installations/new",
 			})
+		case "/v1/github/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{
+				{"installation_id": "66", "target_type": "org", "target_login": "getpiper"},
+			}})
 		case "/v1/github/repos":
 			_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
 				{"full_name": "alice/blog", "visibility": "public", "pushed_at": ""},
@@ -133,27 +137,36 @@ func TestRelayLoginWebStoresCredentialAndWaitsForInstall(t *testing.T) {
 }
 
 // TestWaitForInstallPollsUntilInstalled cribs TestRelayLoginStoresCredential's
-// httptest-stub-relay shape. The stub's /v1/github/repos answers 404 ("not
-// installed yet") twice, then 200 with two repos, pinning that waitForInstall
-// keeps retrying on ErrNoInstallation and returns nil once the install lands.
+// httptest-stub-relay shape. The stub's /v1/github/status answers with an empty
+// installations list twice, then one installation, pinning that waitForInstall
+// keeps retrying while there is no installation and returns nil once one lands.
 func TestWaitForInstallPollsUntilInstalled(t *testing.T) {
 	pollSleep = func(time.Duration) {}
 	defer func() { pollSleep = time.Sleep }()
 
 	var polls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/github/repos" {
+		switch r.URL.Path {
+		case "/v1/github/status":
+			polls++
+			if polls < 3 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{
+				{"installation_id": "66", "target_type": "org", "target_login": "getpiper"},
+			}})
+		case "/v1/github/repos":
+			if got := r.URL.Query().Get("installation_id"); got != "66" {
+				t.Errorf("installation_id = %q, want 66", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
+				{"full_name": "alice/blog", "visibility": "public", "pushed_at": ""},
+				{"full_name": "alice/api", "visibility": "private", "pushed_at": ""},
+			}})
+		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		polls++
-		if polls < 3 {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
-			{"full_name": "alice/blog", "visibility": "public", "pushed_at": ""},
-			{"full_name": "alice/api", "visibility": "private", "pushed_at": ""},
-		}})
 	}))
 	defer srv.Close()
 
@@ -172,14 +185,26 @@ func TestGitHubReposCommandListsRepos(t *testing.T) {
 	t.Setenv("PIPER_TOKEN", "")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/github/repos" || r.Header.Get("Authorization") != "Bearer cred-xyz" {
+		if r.Header.Get("Authorization") != "Bearer cred-xyz" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
-			{"full_name": "alice/blog", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"},
-			{"full_name": "alice/api", "visibility": "private", "pushed_at": ""},
-		}})
+		switch r.URL.Path {
+		case "/v1/github/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{
+				{"installation_id": "66", "target_type": "org", "target_login": "getpiper"},
+			}})
+		case "/v1/github/repos":
+			if got := r.URL.Query().Get("installation_id"); got != "66" {
+				t.Errorf("installation_id = %q, want 66", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
+				{"full_name": "alice/blog", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"},
+				{"full_name": "alice/api", "visibility": "private", "pushed_at": ""},
+			}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer srv.Close()
 	if err := config.SaveClient(config.ClientConfig{
@@ -202,8 +227,11 @@ func TestGitHubReposCommandNotInstalledYet(t *testing.T) {
 	t.Setenv("PIPER_ADDR", "")
 	t.Setenv("PIPER_TOKEN", "")
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/github/status" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{}})
 	}))
 	defer srv.Close()
 	if err := config.SaveClient(config.ClientConfig{
