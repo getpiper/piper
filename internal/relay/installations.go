@@ -92,16 +92,3 @@ func (s *Store) InstallationsForAccount(accountID string) ([]Installation, error
 	}
 	return out, rows.Err()
 }
-
-// InstallationForAccount returns the installation an account's agents mint
-// tokens through. The most recent one wins if an account somehow holds several.
-func (s *Store) InstallationForAccount(accountID string) (string, error) {
-	var id string
-	err := s.db.QueryRow(
-		`SELECT installation_id FROM github_installations
-		  WHERE account_id=? ORDER BY created_at DESC LIMIT 1`, accountID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNoInstallation
-	}
-	return id, err
-}

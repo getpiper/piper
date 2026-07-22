@@ -2,7 +2,6 @@ package relay
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -271,8 +270,8 @@ func TestLoginCallbackIgnoresInstallationID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.InstallationForAccount(acc.ID); !errors.Is(err, ErrNoInstallation) {
-		t.Fatalf("InstallationForAccount err = %v, want ErrNoInstallation (callback must not link)", err)
+	if insts, err := st.InstallationsForAccount(acc.ID); err != nil || len(insts) != 0 {
+		t.Fatalf("InstallationsForAccount = %+v, err = %v, want none (callback must not link)", insts, err)
 	}
 }
 

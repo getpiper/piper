@@ -24,12 +24,12 @@ func TestLinkInstallationBindsToSenderAccount(t *testing.T) {
 		t.Fatalf("account = %q, want %q", got, acc.ID)
 	}
 
-	inst, err := st.InstallationForAccount(acc.ID)
+	insts, err := st.InstallationsForAccount(acc.ID)
 	if err != nil {
-		t.Fatalf("InstallationForAccount: %v", err)
+		t.Fatalf("InstallationsForAccount: %v", err)
 	}
-	if inst != "55" {
-		t.Fatalf("installation = %q, want 55", inst)
+	if len(insts) != 1 || insts[0].ID != "55" {
+		t.Fatalf("installations = %+v, want single id 55", insts)
 	}
 }
 
