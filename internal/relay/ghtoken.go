@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -37,9 +38,19 @@ func (s *Store) GitHubTokenFor(ctx context.Context, app *GitHubApp, agentName, r
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	installationID, err := s.InstallationForAccount(accountID)
+	// The installation that can mint a token for owner/name is the one whose
+	// target_login is that owner — an installation only reaches its own
+	// account's repos. This replaces most-recent-wins, which broke deploys
+	// from any non-newest installation.
+	insts, err := s.InstallationsForAccount(accountID)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	return app.RepoToken(ctx, installationID, repo)
+	owner, _, _ := strings.Cut(normalizeRepo(repo), "/")
+	for _, in := range insts {
+		if strings.EqualFold(in.TargetLogin, owner) {
+			return app.RepoToken(ctx, in.ID, repo)
+		}
+	}
+	return "", time.Time{}, ErrNoInstallation
 }
