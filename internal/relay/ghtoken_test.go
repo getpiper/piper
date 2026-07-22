@@ -80,10 +80,13 @@ func TestGitHubTokenForPicksInstallationByRepoOwner(t *testing.T) {
 
 	st := openTestStore(t)
 	_, agent := enrolledAgent(t, st, "1001", "alice")
-	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
+	// The owner-matching org install (66, "GetPiper") is linked FIRST, so the
+	// personal install (55) is the most-recent — a most-recent-wins bug would
+	// mint from 55, not 66. Mixed-case target_login also forces EqualFold.
+	if err := st.LinkInstallation("66", "1001", "org", "GetPiper"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.LinkInstallation("66", "1001", "org", "getpiper"); err != nil {
+	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.BindRepo(agent, "app", "getpiper/app", "main"); err != nil {

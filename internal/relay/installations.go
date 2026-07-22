@@ -77,7 +77,7 @@ type Installation struct {
 func (s *Store) InstallationsForAccount(accountID string) ([]Installation, error) {
 	rows, err := s.db.Query(
 		`SELECT installation_id, target_type, target_login FROM github_installations
-		  WHERE account_id=? ORDER BY created_at DESC`, accountID)
+		  WHERE account_id=? ORDER BY created_at DESC, rowid DESC`, accountID)
 	if err != nil {
 		return nil, err
 	}
