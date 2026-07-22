@@ -328,32 +328,33 @@ func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"repos": repos})
 }
 
-// githubStatus tells the web dashboard whether the relay holds a GitHub App and
-// whether it is installed for the caller's account, plus the exact
-// install-and-authorize URL to remedy a not-installed account (#315). Unlike
-// githubRepos it never 404s on a missing installation: not-installed is the
-// answer the wizard's Connect step needs, not an error — and it answers 200 even
-// with no App configured so the dashboard learns github_app:false rather than
-// reading a 503 as an outage.
+// githubStatus tells the web dashboard whether the relay holds a GitHub App and,
+// if so, every installation linked to the caller's account — each with its own
+// target identity (target_type / target_login), so the wizard's label always
+// matches the repos an installation serves (#321). Plus the install-and-authorize
+// URL to add an installation (#315). It never 404s on a missing installation:
+// an empty list is the answer the Connect step needs, not an error — and it
+// answers 200 even with no App configured so the dashboard learns
+// github_app:false rather than reading a 503 as an outage.
 func (a *api) githubStatus(w http.ResponseWriter, r *http.Request) {
 	acc, ok := a.authAccount(w, r)
 	if !ok {
 		return
 	}
 	resp := map[string]any{
-		"github_app":  a.ghApp != nil,
-		"installed":   false,
-		"account":     acc.Username,
-		"install_url": "",
+		"github_app":    a.ghApp != nil,
+		"installations": []Installation{},
+		"install_url":   "",
 	}
 	if a.ghApp != nil {
 		resp["install_url"] = a.ghApp.InstallURL()
-		_, err := a.st.InstallationForAccount(acc.ID)
-		if err == nil {
-			resp["installed"] = true
-		} else if !errors.Is(err, ErrNoInstallation) {
+		insts, err := a.st.InstallationsForAccount(acc.ID)
+		if err != nil {
 			http.Error(w, "lookup error", http.StatusInternalServerError)
 			return
+		}
+		if insts != nil {
+			resp["installations"] = insts
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

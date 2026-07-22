@@ -544,10 +544,9 @@ func TestGitHubReposWithoutInstallation(t *testing.T) {
 }
 
 type ghStatus struct {
-	GitHubApp  bool   `json:"github_app"`
-	Installed  bool   `json:"installed"`
-	Account    string `json:"account"`
-	InstallURL string `json:"install_url"`
+	GitHubApp     bool           `json:"github_app"`
+	Installations []Installation `json:"installations"`
+	InstallURL    string         `json:"install_url"`
 }
 
 // statusAPI builds the account API with a GitHub App that has a slug, so
@@ -593,6 +592,9 @@ func TestGitHubStatusInstalled(t *testing.T) {
 	if err := st.LinkInstallation("55", "1001", "user", "alice"); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.LinkInstallation("66", "1001", "org", "getpiper"); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := getStatus(t, statusAPI(t, st), cred)
 	if rec.Code != http.StatusOK {
@@ -602,14 +604,37 @@ func TestGitHubStatusInstalled(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := ghStatus{
-		GitHubApp:  true,
-		Installed:  true,
-		Account:    "alice",
-		InstallURL: "https://github.com/apps/piper-relay/installations/new",
+	wantInst := []Installation{
+		{ID: "66", TargetType: "org", TargetLogin: "getpiper"},
+		{ID: "55", TargetType: "user", TargetLogin: "alice"},
 	}
-	if got != want {
-		t.Fatalf("status = %+v, want %+v", got, want)
+	if !got.GitHubApp || got.InstallURL != "https://github.com/apps/piper-relay/installations/new" ||
+		len(got.Installations) != len(wantInst) ||
+		got.Installations[0] != wantInst[0] || got.Installations[1] != wantInst[1] {
+		t.Fatalf("status = %+v, want github_app + %+v", got, wantInst)
+	}
+}
+
+// TestGitHubStatusLabelsOrgInstallByOrgLogin is the #321 Gap-2 regression: a
+// personal login whose only installation targets an org must report the org as
+// the installation's target_login, not the logged-in username.
+func TestGitHubStatusLabelsOrgInstallByOrgLogin(t *testing.T) {
+	st := openTestStore(t)
+	cred := accountWithCred(t, st) // account "1001", login "alice"
+	if err := st.LinkInstallation("66", "1001", "org", "getpiper"); err != nil {
+		t.Fatal(err)
+	}
+	rec := getStatus(t, statusAPI(t, st), cred)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got ghStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Installations) != 1 ||
+		got.Installations[0].TargetLogin != "getpiper" || got.Installations[0].TargetType != "org" {
+		t.Fatalf("installations = %+v, want single org getpiper (not login alice)", got.Installations)
 	}
 }
 
@@ -625,14 +650,9 @@ func TestGitHubStatusNotInstalled(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := ghStatus{
-		GitHubApp:  true,
-		Installed:  false,
-		Account:    "alice",
-		InstallURL: "https://github.com/apps/piper-relay/installations/new",
-	}
-	if got != want {
-		t.Fatalf("status = %+v, want %+v", got, want)
+	if !got.GitHubApp || got.InstallURL != "https://github.com/apps/piper-relay/installations/new" ||
+		len(got.Installations) != 0 {
+		t.Fatalf("status = %+v, want github_app + no installations", got)
 	}
 }
 
@@ -657,8 +677,7 @@ func TestGitHubStatusNoAppConfigured(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := ghStatus{GitHubApp: false, Installed: false, Account: "alice", InstallURL: ""}
-	if got != want {
-		t.Fatalf("status = %+v, want %+v", got, want)
+	if got.GitHubApp || got.InstallURL != "" || len(got.Installations) != 0 {
+		t.Fatalf("status = %+v, want github_app:false + no installations", got)
 	}
 }
