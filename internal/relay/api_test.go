@@ -443,7 +443,7 @@ func ghAPIStub(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/app/installations/55/access_tokens":
+		case "/app/installations/55/access_tokens", "/app/installations/66/access_tokens":
 			_, _ = w.Write([]byte(`{"token":"t","expires_at":"2026-07-20T12:00:00Z"}`))
 		case "/installation/repositories":
 			_, _ = w.Write([]byte(`{"repositories":[` +
@@ -467,9 +467,13 @@ func reposAPI(t *testing.T, st *Store, gh *httptest.Server) http.Handler {
 	return NewAPIWithTunnel(st, NewFakeVerifier(), "", nil, nil, app)
 }
 
-func getRepos(t *testing.T, h http.Handler, cred string) *httptest.ResponseRecorder {
+func getRepos(t *testing.T, h http.Handler, cred, instID string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/v1/github/repos", nil)
+	target := "/v1/github/repos"
+	if instID != "" {
+		target += "?installation_id=" + url.QueryEscape(instID)
+	}
+	req := httptest.NewRequest(http.MethodGet, target, nil)
 	if cred != "" {
 		req.Header.Set("Authorization", "Bearer "+cred)
 	}
@@ -495,7 +499,7 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := getRepos(t, reposAPI(t, st, gh), cred)
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "55")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -517,29 +521,50 @@ func TestGitHubReposListsInstallationRepos(t *testing.T) {
 func TestGitHubReposRequiresCredential(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
-	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "")
+	rec := getRepos(t, reposAPI(t, openTestStore(t), gh), "", "55")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
 
-func TestGitHubReposWithoutInstallation(t *testing.T) {
+func TestGitHubReposRequiresInstallationID(t *testing.T) {
 	gh := ghAPIStub(t)
 	defer gh.Close()
-
 	st := openTestStore(t)
-	acc, err := st.UpsertAccount("1001", "alice")
-	if err != nil {
-		t.Fatal(err)
+	cred := accountWithCred(t, st)
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
-	cred, err := st.MintAccountCredential(acc.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+}
 
-	rec := getRepos(t, reposAPI(t, st, gh), cred)
+func TestGitHubReposUnknownInstallation(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+	st := openTestStore(t)
+	cred := accountWithCred(t, st)
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "999")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestGitHubReposForeignInstallation: an installation owned by a different
+// account must not be readable, reported as 404 (no existence leak).
+func TestGitHubReposForeignInstallation(t *testing.T) {
+	gh := ghAPIStub(t)
+	defer gh.Close()
+	st := openTestStore(t)
+	cred := accountWithCred(t, st) // account 1001 / alice
+	if _, err := st.UpsertAccount("2002", "mallory"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkInstallation("77", "2002", "user", "mallory"); err != nil {
+		t.Fatal(err)
+	}
+	rec := getRepos(t, reposAPI(t, st, gh), cred, "77")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for foreign installation", rec.Code)
 	}
 }
 

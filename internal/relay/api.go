@@ -298,9 +298,12 @@ func (a *api) enroll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// githubRepos lists the repositories the caller's installation can reach. No
-// list is cached: it is read live through a fresh installation token, so a
-// repository revoked in GitHub disappears here immediately.
+// githubRepos lists the repositories reachable through the installation named by
+// ?installation_id=, which must belong to the caller (#321). No list is cached:
+// it is read live through a fresh installation token, so a repository revoked in
+// GitHub disappears here immediately. An unknown or foreign installation id is
+// reported as 404 identically — the picker never learns another account's
+// installation exists.
 func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
 	acc, ok := a.authAccount(w, r)
 	if !ok {
@@ -310,8 +313,13 @@ func (a *api) githubRepos(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "relay has no github app configured", http.StatusServiceUnavailable)
 		return
 	}
-	instID, err := a.st.InstallationForAccount(acc.ID)
-	if errors.Is(err, ErrNoInstallation) {
+	instID := r.URL.Query().Get("installation_id")
+	if instID == "" {
+		http.Error(w, "installation_id required", http.StatusBadRequest)
+		return
+	}
+	owner, err := a.st.AccountForInstallation(instID)
+	if errors.Is(err, ErrNoInstallation) || (err == nil && owner != acc.ID) {
 		http.Error(w, "github app not installed for this account", http.StatusNotFound)
 		return
 	}
