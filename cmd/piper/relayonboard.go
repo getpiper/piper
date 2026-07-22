@@ -148,13 +148,21 @@ func waitForInstall(rc *relayclient.Client, cred, installURL string) error {
 	fmt.Printf("Install the Piper GitHub App on the repos you want to deploy:\n  %s\n\nWaiting…", installURL)
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
-		repos, err := rc.GitHubRepos(context.Background(), cred)
-		if err == nil {
-			fmt.Printf("\rInstalled — %d repo(s) available.\n", len(repos))
-			return nil
-		}
-		if !errors.Is(err, relayclient.ErrNoInstallation) {
+		insts, err := rc.GitHubStatus(context.Background(), cred)
+		if err != nil {
 			return err
+		}
+		if len(insts) > 0 {
+			n := 0
+			for _, in := range insts {
+				// Best-effort repo count for the message; a transient error here
+				// must not fail a login whose install already succeeded.
+				if repos, err := rc.GitHubRepos(context.Background(), cred, in.ID); err == nil {
+					n += len(repos)
+				}
+			}
+			fmt.Printf("\rInstalled — %d repo(s) available.\n", n)
+			return nil
 		}
 		fmt.Print(".")
 		pollSleep(3 * time.Second)
@@ -163,7 +171,7 @@ func waitForInstall(rc *relayclient.Client, cred, installURL string) error {
 }
 
 // githubRepos lists the repositories the logged-in account's GitHub App
-// installation can reach, read live from the relay.
+// installations can reach, read live from the relay across every installation.
 func githubRepos(stdout, stderr io.Writer) int {
 	cc, err := config.LoadClient()
 	if err != nil {
@@ -176,21 +184,29 @@ func githubRepos(stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	repos, err := relayclient.New(cc.RelayAPI).GitHubRepos(ctx, cc.AccountCredential)
-	if errors.Is(err, relayclient.ErrNoInstallation) {
-		fmt.Fprintln(stdout, "No repositories yet — run `piper login` to install the Piper GitHub App on the repos you want to deploy.")
-		return 0
-	}
+	rc := relayclient.New(cc.RelayAPI)
+	insts, err := rc.GitHubStatus(ctx, cc.AccountCredential)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	for _, r := range repos {
-		if r.Visibility != "" && r.Visibility != "public" {
-			fmt.Fprintf(stdout, "%s (%s)\n", r.FullName, r.Visibility)
-			continue
+	if len(insts) == 0 {
+		fmt.Fprintln(stdout, "No repositories yet — run `piper login` to install the Piper GitHub App on the repos you want to deploy.")
+		return 0
+	}
+	for _, in := range insts {
+		repos, err := rc.GitHubRepos(ctx, cc.AccountCredential, in.ID)
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
 		}
-		fmt.Fprintln(stdout, r.FullName)
+		for _, r := range repos {
+			if r.Visibility != "" && r.Visibility != "public" {
+				fmt.Fprintf(stdout, "%s (%s)\n", r.FullName, r.Visibility)
+				continue
+			}
+			fmt.Fprintln(stdout, r.FullName)
+		}
 	}
 	return 0
 }

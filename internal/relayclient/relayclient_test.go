@@ -155,27 +155,48 @@ func TestEnrollErrorMapping(t *testing.T) {
 
 func TestGitHubRepos(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer cred-xyz" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+		if r.URL.Path != "/v1/github/repos" {
+			t.Errorf("path = %q", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"repos": []map[string]any{
-			{"full_name": "alice/one", "visibility": "public", "pushed_at": "2026-07-20T12:34:56Z"},
-			{"full_name": "alice/two", "visibility": "private", "pushed_at": ""},
-		}})
+		if got := r.URL.Query().Get("installation_id"); got != "66" {
+			t.Errorf("installation_id = %q, want 66", got)
+		}
+		if r.Header.Get("Authorization") != "Bearer cred-xyz" {
+			t.Errorf("auth = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"repos":[{"full_name":"alice/blog","visibility":"public","pushed_at":"2026-07-20T12:34:56Z"}]}`))
 	}))
 	defer srv.Close()
 
-	repos, err := New(srv.URL).GitHubRepos(context.Background(), "cred-xyz")
+	repos, err := New(srv.URL).GitHubRepos(context.Background(), "cred-xyz", "66")
 	if err != nil {
 		t.Fatalf("GitHubRepos: %v", err)
 	}
-	want := []Repo{
-		{FullName: "alice/one", Visibility: "public", PushedAt: "2026-07-20T12:34:56Z"},
-		{FullName: "alice/two", Visibility: "private", PushedAt: ""},
+	if len(repos) != 1 || repos[0].FullName != "alice/blog" {
+		t.Fatalf("repos = %+v", repos)
 	}
-	if len(repos) != len(want) || repos[0] != want[0] || repos[1] != want[1] {
-		t.Fatalf("repos = %+v, want %+v", repos, want)
+}
+
+func TestGitHubStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/github/status" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer cred-xyz" {
+			t.Errorf("auth = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"github_app":true,"installations":[` +
+			`{"installation_id":"66","target_type":"org","target_login":"getpiper"},` +
+			`{"installation_id":"55","target_type":"user","target_login":"alice"}],"install_url":"x"}`))
+	}))
+	defer srv.Close()
+
+	insts, err := New(srv.URL).GitHubStatus(context.Background(), "cred-xyz")
+	if err != nil {
+		t.Fatalf("GitHubStatus: %v", err)
+	}
+	if len(insts) != 2 || insts[0].ID != "66" || insts[0].TargetLogin != "getpiper" || insts[1].ID != "55" {
+		t.Fatalf("installations = %+v", insts)
 	}
 }
 
@@ -187,7 +208,7 @@ func TestGitHubReposErrorMapping(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(tc.code)
 		}))
-		_, err := New(srv.URL).GitHubRepos(context.Background(), "whatever")
+		_, err := New(srv.URL).GitHubRepos(context.Background(), "whatever", "66")
 		srv.Close()
 		if tc.want != nil {
 			if !errors.Is(err, tc.want) {
