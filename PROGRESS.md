@@ -76,7 +76,7 @@ Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the
 - ✅ `piperd` — webhook served over the tunnel in relay mode — [#31](https://github.com/getpiper/piper/pull/31)
 - ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#50](https://github.com/getpiper/piper/pull/50)
 - ✅ Previews on a relay-terminated box — relay assigns a single-label hostname per `(account, app, pr)`, released on PR close — [#302](https://github.com/getpiper/piper/issues/302)
-- Relay-held GitHub App: one-trip login + install, brokered webhooks and tokens, BYO unchanged [#289]
+- ✅ Relay-held GitHub App: one-trip login + install, brokered webhooks and tokens, org-target installs routed to org agents, BYO unchanged — [#289](https://github.com/getpiper/piper/issues/289)
 - ✅ Relay dashboard endpoints — `GET /v1/github/repos` (repo picker) + `GET /v1/github/status` (App install state + install URL) — [#308](https://github.com/getpiper/piper/issues/308), [#315](https://github.com/getpiper/piper/issues/315); picker enumerates all installations, labels each by target, tokens mint by repo owner — [#321](https://github.com/getpiper/piper/issues/321)
 - ✅ `piper github reset` — give up a box's own App so a brokered one can take over; startup warns when one shadows the other — [#299](https://github.com/getpiper/piper/issues/299)
 
