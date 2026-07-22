@@ -217,6 +217,9 @@ func TestGitHubAuthCodeURL(t *testing.T) {
 	if q.Get("redirect_uri") != "" {
 		t.Fatalf("authorize URL carries redirect_uri %q, want none (single registered callback)", q.Get("redirect_uri"))
 	}
+	if q.Get("prompt") != "select_account" {
+		t.Fatalf("authorize URL prompt = %q, want select_account (multi-account 404, #320)", q.Get("prompt"))
+	}
 }
 
 func TestGitHubExchange(t *testing.T) {
