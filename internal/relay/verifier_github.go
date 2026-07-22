@@ -219,9 +219,12 @@ func (g *GitHubVerifier) Poll(_ context.Context, handle string) (Identity, error
 // effect of an actual install, so it dead-ends on the installation's settings
 // page once the App is already installed (#305). Installing the App is a
 // separate step after login, and linking rides the installation webhook.
+// prompt=select_account forces GitHub's account picker: without it, a browser
+// signed into multiple GitHub accounts 404s on /login/oauth/authorize (#320).
 func (g *GitHubVerifier) AuthCodeURL(state string) string {
 	return g.oauthBase + "/login/oauth/authorize?client_id=" +
-		url.QueryEscape(g.clientID) + "&state=" + url.QueryEscape(state)
+		url.QueryEscape(g.clientID) + "&state=" + url.QueryEscape(state) +
+		"&prompt=select_account"
 }
 
 // Exchange resolves an authorization code to the GitHub identity behind it.
