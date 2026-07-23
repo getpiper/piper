@@ -74,6 +74,101 @@ func TestRelayLoginStoresCredential(t *testing.T) {
 	}
 }
 
+// A login succeeds the moment the credential is persisted; the install poll
+// that follows is advisory. When that poll times out, `piper login` must still
+// exit 0 — the credential is on disk and usable — and point the user at how to
+// finish the install (#297). A non-zero exit here reported a failure that was
+// not one and broke scripted use.
+func TestRelayLoginExitsZeroWhenInstallPollTimesOut(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	pollSleep = func(time.Duration) {}
+	defer func() { pollSleep = time.Sleep }()
+	openBrowserFn = func(string) error { return nil }
+	defer func() { openBrowserFn = openBrowser }()
+
+	// Force the advisory install poll to time out immediately.
+	oldTimeout := installPollTimeout
+	installPollTimeout = 0
+	defer func() { installPollTimeout = oldTimeout }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/login/device":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"user_code": "ABCD-EFGH", "verification_uri": "https://relay.test/device",
+				"device_code": "dev-1", "interval": 1, "expires_in": 300,
+			})
+		case "/v1/login/poll":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"account_credential": "cred-xyz", "username": "alice",
+				"install_url": "https://github.com/apps/piper/installations/new",
+			})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"login", "--relay", srv.URL}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, want 0 (a successful login must not fail on a timed-out install poll); stderr = %s", code, errb.String())
+	}
+	// The credential the login produced is persisted.
+	cc, err := config.LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.RelayAPI != srv.URL || cc.AccountCredential != "cred-xyz" {
+		t.Fatalf("cc = %+v", cc)
+	}
+	// The user is told how to finish the install.
+	if !strings.Contains(out.String(), "https://github.com/apps/piper/installations/new") ||
+		!strings.Contains(out.String(), "piper github repos") {
+		t.Fatalf("stdout did not point the user at the outstanding install: %q", out.String())
+	}
+}
+
+// A genuine login failure — the relay never issues a credential — must keep its
+// non-zero exit. The advisory-poll fix (#297) only softens the post-login poll;
+// it must not swallow real failures.
+func TestRelayLoginExitsNonZeroOnLoginFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	pollSleep = func(time.Duration) {}
+	defer func() { pollSleep = time.Sleep }()
+	openBrowserFn = func(string) error { return nil }
+	defer func() { openBrowserFn = openBrowser }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/login/device":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"user_code": "ABCD-EFGH", "verification_uri": "https://relay.test/device",
+				"device_code": "dev-1", "interval": 1, "expires_in": 300,
+			})
+		case "/v1/login/poll":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"login", "--relay", srv.URL}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1 (a real login failure must stay non-zero)", code)
+	}
+	// No credential should have been persisted.
+	if cc, err := config.LoadClient(); err == nil && cc.AccountCredential != "" {
+		t.Fatalf("a failed login persisted a credential: %+v", cc)
+	}
+}
+
 func TestRelayLoginWebStoresCredentialAndWaitsForInstall(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
