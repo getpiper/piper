@@ -121,6 +121,7 @@ Goal: bare `piper` in a TTY opens a full-screen control surface; every existing 
 - ✅ Boxes view: switcher + add/edit/remove config editor over schema v2 — [#198](https://github.com/getpiper/piper/issues/198)
 - ✅ Wizards: login (LAN token, verify → save to current box), GitHub App setup, link repo; unauth hint on apps home — [#200](https://github.com/getpiper/piper/issues/200)
 - ✅ Per-app domains in the app drilldown: inline list + add (CNAME handoff, live issuance status) / remove — [#285](https://github.com/getpiper/piper/issues/285)
+- ✅ Relay GitHub onboarding wizard (login → install → repos) + link-form repo picker/root-dir — [#325](https://github.com/getpiper/piper/issues/325)
 
 ## Always-green gates
 
