@@ -197,6 +197,42 @@ type (
 	// githubStartMsg is the github view's "run it" intent; the root owns the
 	// client, so it launches the manifest flow.
 	githubStartMsg struct{ org string }
+
+	// wizStatusMsg is the github wizard's config+status probe result. noCred
+	// means no account credential is saved (→ login step); base is the relay
+	// base the probe used (saved RelayAPI or the default). Deliberately NOT a
+	// pollResult: a relay error must not render the box status bar unreachable.
+	wizStatusMsg struct {
+		noCred bool
+		base   string
+		cred   string
+		st     relayclient.Status
+		err    error
+	}
+
+	// wizLoginStartedMsg carries the brokered-login handle + the user code the
+	// human enters in the browser.
+	wizLoginStartedMsg struct {
+		handle string
+		code   string
+		err    error
+	}
+
+	// wizLoginDoneMsg is one brokered-login poll outcome. pending means the
+	// user hasn't finished in the browser; on success the credential was
+	// already saved to client config inside the cmd (off the UI thread).
+	wizLoginDoneMsg struct {
+		acc     relayclient.Account
+		pending bool
+		err     error
+	}
+
+	// wizReposMsg is one installation's repo listing for the wizard's pushed
+	// repos sub-view.
+	wizReposMsg struct {
+		repos []relayclient.Repo
+		err   error
+	}
 )
 
 // pollResult is implemented by every message that is the outcome of a view's

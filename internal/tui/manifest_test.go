@@ -47,15 +47,6 @@ func TestGithubFormReadyShowsURL(t *testing.T) {
 	}
 }
 
-func TestGKeyOpensManifest(t *testing.T) {
-	m := NewModel("pi4", "a", false, fakeAPI{}).WithDialer(fakeDialer(fakeAPI{}, "", false, nil))
-	next, cmd := m.Update(keyRunes('g'))
-	m = pump(t, next.(Model), cmd)
-	if _, ok := m.top().(manifestView); !ok {
-		t.Fatalf("g should push the github view, got %T", m.top())
-	}
-}
-
 func TestGithubEscCancelsInFlightFlow(t *testing.T) {
 	canceled := false
 	m := NewModel("pi4", "a", false, fakeAPI{})

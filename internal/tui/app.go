@@ -143,8 +143,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "g":
-				if _, ok := m.top().(manifestView); !ok {
-					return m, func() tea.Msg { return pushMsg{newManifestView()} }
+				if _, ok := m.top().(githubWizardView); !ok {
+					return m, func() tea.Msg { return pushMsg{newGithubWizard(m.relay)} }
 				}
 				return m, nil
 			}
