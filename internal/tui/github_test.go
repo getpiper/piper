@@ -227,3 +227,104 @@ func TestGKeyOpensWizard(t *testing.T) {
 		t.Fatalf("g should push the github wizard, got %T", m.top())
 	}
 }
+
+func TestWizardOOpensInstallURLViaCmdNotUpdate(t *testing.T) {
+	orig := openBrowser
+	opened := ""
+	openBrowser = func(u string) error { opened = u; return nil }
+	defer func() { openBrowser = orig }()
+
+	v := newGithubWizard(relayFor(fakeRelay{}))
+	v.state, v.installURL = wizInstall, "https://gh/install"
+	_, cmd := v.Update(keyRunes('o'))
+	if cmd == nil {
+		t.Fatal("o on the install step should return a cmd to open the browser")
+	}
+	if opened != "" {
+		t.Fatal("o must not open the browser synchronously on the Update path")
+	}
+	cmd()
+	if opened != "https://gh/install" {
+		t.Fatalf("the cmd should open the install URL, got %q", opened)
+	}
+}
+
+func TestWizardReposRetryReArmsAfterError(t *testing.T) {
+	sub := wizardReposView{relay: relayFor(fakeRelay{}), loaded: true, err: errors.New("boom")}
+	sub = sub.retry()
+	if sub.loaded || sub.err != nil {
+		t.Fatalf("retry after an error load must clear loaded/err, got loaded=%v err=%v", sub.loaded, sub.err)
+	}
+	if cmd := sub.refresh(nil); cmd == nil {
+		t.Fatal("refresh must fire again once retry has cleared the error state")
+	}
+}
+
+func TestWizardReposRetryNoopsAfterSuccess(t *testing.T) {
+	sub := wizardReposView{
+		relay: relayFor(fakeRelay{}), loaded: true,
+		repos: []relayclient.Repo{{FullName: "getpiper/piper"}},
+	}
+	sub = sub.retry()
+	if !sub.loaded {
+		t.Fatal("retry must not touch a successful load")
+	}
+	if cmd := sub.refresh(nil); cmd != nil {
+		t.Fatal("a successful load stays loaded-once even after retry")
+	}
+}
+
+func TestWizardReposFooterAdvertisesRetryOnlyOnError(t *testing.T) {
+	errored := wizardReposView{loaded: true, err: errors.New("boom")}
+	if !strings.Contains(errored.footer(), "r retry") {
+		t.Fatalf("footer should advertise retry after an error, got %q", errored.footer())
+	}
+	ok := wizardReposView{loaded: true, repos: []relayclient.Repo{{FullName: "getpiper/piper"}}}
+	if strings.Contains(ok.footer(), "r retry") {
+		t.Fatalf("footer should not advertise retry after a successful load, got %q", ok.footer())
+	}
+}
+
+func TestRKeyRetriesFailedRepoLoadViaRoot(t *testing.T) {
+	relay := relayFor(fakeRelay{reposErr: errors.New("boom")})
+	sub := wizardReposView{relay: relay, inst: relayclient.Installation{ID: "1"}}
+	m := NewModel("pi4", "a", false, fakeAPI{}).WithRelay(relay)
+	next, _ := m.Update(pushMsg{view: sub})
+	m = next.(Model)
+	m = pump(t, m, m.refresh()) // initial load fails
+	if !m.top().(wizardReposView).loaded || m.top().(wizardReposView).err == nil {
+		t.Fatalf("want a failed load before retrying, got %#v", m.top())
+	}
+	next, cmd := m.Update(keyRunes('r'))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("r after a failed load should return a refresh cmd")
+	}
+	if m.top().(wizardReposView).loaded {
+		t.Fatal("r should have cleared loaded so the refresh cmd fires again")
+	}
+	m = pump(t, m, cmd) // re-fires the (still-failing) load — confirms it re-armed
+	if m.top().(wizardReposView).err == nil {
+		t.Fatal("want the retried load's outcome to land back on the view")
+	}
+}
+
+func TestRKeyDoesNotDisturbSuccessfulRepoLoad(t *testing.T) {
+	relay := relayFor(fakeRelay{repos: []relayclient.Repo{{FullName: "getpiper/piper"}}})
+	sub := wizardReposView{relay: relay, inst: relayclient.Installation{ID: "1"}}
+	m := NewModel("pi4", "a", false, fakeAPI{}).WithRelay(relay)
+	next, _ := m.Update(pushMsg{view: sub})
+	m = next.(Model)
+	m = pump(t, m, m.refresh()) // initial load succeeds
+	if !m.top().(wizardReposView).loaded || m.top().(wizardReposView).err != nil {
+		t.Fatalf("want a successful load before pressing r, got %#v", m.top())
+	}
+	next, _ = m.Update(keyRunes('r'))
+	m = next.(Model)
+	if !m.top().(wizardReposView).loaded {
+		t.Fatal("r must not disturb a successful load — no manual retry needed")
+	}
+	if cmd := m.top().(wizardReposView).refresh(nil); cmd != nil {
+		t.Fatal("a successful load must stay loaded-once even after r")
+	}
+}

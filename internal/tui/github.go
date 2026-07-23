@@ -147,7 +147,8 @@ func (v githubWizardView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "o":
 			if v.state == wizInstall && v.installURL != "" {
-				_ = openBrowser(v.installURL)
+				url := v.installURL
+				return v, func() tea.Msg { _ = openBrowser(url); return nil }
 			}
 		case "up", "k":
 			if v.state == wizInstalled && v.sel > 0 {
@@ -280,7 +281,23 @@ func (v wizardReposView) Init() tea.Cmd { return nil }
 
 func (v wizardReposView) title() string { return "repos" }
 
-func (v wizardReposView) footer() string { return "esc back · ? help" }
+func (v wizardReposView) footer() string {
+	if v.loaded && v.err != nil {
+		return "r retry · esc back · ? help"
+	}
+	return "esc back · ? help"
+}
+
+// retry clears a completed error load so the next refresh (the root's r key,
+// which calls refresh directly) re-arms the request. A successful load is
+// left untouched — GitHubRepos loads once, not on a timer, so r has nothing
+// to do there.
+func (v wizardReposView) retry() wizardReposView {
+	if v.loaded && v.err != nil {
+		v.loaded, v.err = false, nil
+	}
+	return v
+}
 
 func (v wizardReposView) refresh(API) tea.Cmd {
 	if v.loaded {

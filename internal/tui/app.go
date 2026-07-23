@@ -126,6 +126,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stack = m.stack[:len(m.stack)-1]
 				return m, m.refresh()
 			case "r":
+				if wv, ok := m.top().(wizardReposView); ok {
+					m.stack[len(m.stack)-1] = wv.retry()
+				}
 				return m, m.refresh()
 			case "?":
 				if _, ok := m.top().(helpView); !ok {
