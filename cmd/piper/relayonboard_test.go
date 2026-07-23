@@ -21,8 +21,8 @@ import (
 // for anyone who doesn't pass --relay.
 func TestDefaultRelayAPIIsLiveHostedRelay(t *testing.T) {
 	const want = "https://api.public.getpiper.dev"
-	if defaultRelayAPI != want {
-		t.Fatalf("defaultRelayAPI = %q, want %q", defaultRelayAPI, want)
+	if relayclient.DefaultAPI != want {
+		t.Fatalf("relayclient.DefaultAPI = %q, want %q", relayclient.DefaultAPI, want)
 	}
 }
 

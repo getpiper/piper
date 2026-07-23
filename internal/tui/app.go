@@ -21,6 +21,7 @@ type Model struct {
 	remote bool
 	client API
 	dial   Dialer
+	relay  RelayDialer
 
 	stack         []view
 	loaded        bool // at least one successful poll
@@ -40,11 +41,17 @@ func NewModel(box, addr string, remote bool, c API) Model {
 // never switch boxes) stay four-argument.
 func (m Model) WithDialer(d Dialer) Model { m.dial = d; return m }
 
+// WithRelay attaches the relay client factory used by the github wizard and
+// the link form's repo picker. Kept separate from NewModel so existing call
+// sites and tests stay four-argument.
+func (m Model) WithRelay(r RelayDialer) Model { m.relay = r; return m }
+
 // Run starts the interactive TUI against c, identified as box/addr in the
 // status bar. remote marks a relay-backed box (HTTPS URLs). dial builds clients
-// for the box switcher. It blocks until quit.
-func Run(box, addr string, remote bool, c API, dial Dialer) error {
-	m := NewModel(box, addr, remote, c).WithDialer(dial)
+// for the box switcher; relay builds relay clients for the github wizard and
+// repo picker. It blocks until quit.
+func Run(box, addr string, remote bool, c API, dial Dialer, relay RelayDialer) error {
+	m := NewModel(box, addr, remote, c).WithDialer(dial).WithRelay(relay)
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -101,7 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "esc":
 			if len(m.stack) > 1 {
-				if _, ok := m.top().(githubView); ok && m.githubCancel != nil {
+				if _, ok := m.top().(manifestView); ok && m.githubCancel != nil {
 					m.githubCancel()
 					m.githubCancel = nil
 				}
@@ -119,6 +126,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stack = m.stack[:len(m.stack)-1]
 				return m, m.refresh()
 			case "r":
+				if wv, ok := m.top().(wizardReposView); ok {
+					m.stack[len(m.stack)-1] = wv.retry()
+				}
 				return m, m.refresh()
 			case "?":
 				if _, ok := m.top().(helpView); !ok {
@@ -136,8 +146,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "g":
-				if _, ok := m.top().(githubView); !ok {
-					return m, func() tea.Msg { return pushMsg{newGithubView()} }
+				if _, ok := m.top().(githubWizardView); !ok {
+					return m, func() tea.Msg { return pushMsg{newGithubWizard(m.relay)} }
 				}
 				return m, nil
 			}
@@ -145,6 +155,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tea.Batch(m.refresh(), tick())
 	case pushMsg:
+		if lf, ok := msg.view.(linkFormView); ok && lf.relay == nil {
+			lf.relay = m.relay // the pushing view doesn't hold the factory; the root does
+			msg.view = lf
+		}
 		m.stack = append(m.stack, msg.view)
 		if m.width > 0 {
 			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -200,10 +214,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		name, c := msg.name, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.DeleteApp(name), popLevels: 2} }
 	case linkAppMsg:
-		name, repo, branch, c := msg.name, msg.repo, msg.branch, m.client
-		// The TUI link form collects no root directory; monorepo subpaths are a
-		// dashboard-wizard flow (#316). Pass "" to build the repo root.
-		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch, ""), popLevels: 1} }
+		name, repo, branch, rootDir, c := msg.name, msg.repo, msg.branch, msg.rootDir, m.client
+		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch, rootDir), popLevels: 1} }
 	case removeDomainMsg:
 		app, dom, c := msg.app, msg.domain, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.RemoveAppDomain(app, dom), popLevels: 1} }
@@ -237,7 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Always schedule wait so the flow's servers are torn down on every
 		// path — even if the user left the github view before the URL arrived
 		// (otherwise wait, whose defers close the servers, is never scheduled).
-		if gv, ok := m.top().(githubView); ok {
+		if gv, ok := m.top().(manifestView); ok {
 			next, _ := gv.Update(msg) // sets formURL for the manual-open fallback
 			m.stack[len(m.stack)-1] = next.(view)
 		}
@@ -247,7 +259,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.githubCancel()
 			m.githubCancel = nil
 		}
-		if gv, ok := m.top().(githubView); ok {
+		if gv, ok := m.top().(manifestView); ok {
 			next, cmd := gv.Update(msg) // nil → pop back to apps; err → banner in the view
 			m.stack[len(m.stack)-1] = next.(view)
 			return m, cmd

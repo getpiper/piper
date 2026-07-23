@@ -4,10 +4,13 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/domain"
+	"github.com/getpiper/piper/internal/relayclient"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -35,6 +38,20 @@ type API interface {
 // (LAN path); tests inject a fake. addr identifies the box in the status bar;
 // remote marks a relay-backed box (HTTPS app URLs).
 type Dialer func(config.Box) (c API, addr string, remote bool, err error)
+
+// RelayAPI is the slice of the relay control API the TUI consumes.
+// *relayclient.Client satisfies it; tests inject fakes.
+type RelayAPI interface {
+	CLILoginStart(ctx context.Context) (handle, userCode string, err error)
+	CLILoginPoll(ctx context.Context, handle string) (relayclient.Account, error)
+	GitHubStatus(ctx context.Context, cred string) (relayclient.Status, error)
+	GitHubRepos(ctx context.Context, cred, installationID string) ([]relayclient.Repo, error)
+}
+
+// RelayDialer builds a relay client for a base URL. cmd/piper supplies the
+// real one; tests inject fakes. A factory, not a client: a fresh user logs in
+// against the default relay, a configured user against their saved RelayAPI.
+type RelayDialer func(base string) RelayAPI
 
 // view is a stack entry: a Bubble Tea model that refreshes its own data off the
 // UI thread and names itself for the breadcrumb. The root owns the stack; a
@@ -121,7 +138,18 @@ type (
 	deleteAppMsg struct{ name string }
 	// linkAppMsg is the link form's intent; the root runs LinkApp off the UI
 	// thread and reports via actionResultMsg (pop back to app detail on success).
-	linkAppMsg struct{ name, repo, branch string }
+	linkAppMsg struct{ name, repo, branch, rootDir string }
+
+	// linkReposMsg is the link form's repo-picker load: every installation's
+	// repos flattened, multi marking >1 installation (matches get target
+	// labels), noCred meaning no relay login (the form hints at g and stays
+	// free-text). Errors degrade to an empty list — never a banner, never a
+	// box-status change: linking by hand must always work.
+	linkReposMsg struct {
+		repos  []pickRepo
+		multi  bool
+		noCred bool
+	}
 
 	// removeDomainMsg is the remove-domain confirm's intent; the root runs
 	// RemoveAppDomain and pops back to app detail via actionResultMsg.
@@ -180,6 +208,42 @@ type (
 	// githubStartMsg is the github view's "run it" intent; the root owns the
 	// client, so it launches the manifest flow.
 	githubStartMsg struct{ org string }
+
+	// wizStatusMsg is the github wizard's config+status probe result. noCred
+	// means no account credential is saved (→ login step); base is the relay
+	// base the probe used (saved RelayAPI or the default). Deliberately NOT a
+	// pollResult: a relay error must not render the box status bar unreachable.
+	wizStatusMsg struct {
+		noCred bool
+		base   string
+		cred   string
+		st     relayclient.Status
+		err    error
+	}
+
+	// wizLoginStartedMsg carries the brokered-login handle + the user code the
+	// human enters in the browser.
+	wizLoginStartedMsg struct {
+		handle string
+		code   string
+		err    error
+	}
+
+	// wizLoginDoneMsg is one brokered-login poll outcome. pending means the
+	// user hasn't finished in the browser; on success the credential was
+	// already saved to client config inside the cmd (off the UI thread).
+	wizLoginDoneMsg struct {
+		acc     relayclient.Account
+		pending bool
+		err     error
+	}
+
+	// wizReposMsg is one installation's repo listing for the wizard's pushed
+	// repos sub-view.
+	wizReposMsg struct {
+		repos []relayclient.Repo
+		err   error
+	}
 )
 
 // pollResult is implemented by every message that is the outcome of a view's

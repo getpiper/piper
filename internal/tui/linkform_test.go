@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/relayclient"
 )
 
 // pushView emits a pushMsg for v and applies it, returning the model with v on
@@ -57,13 +59,13 @@ func TestLinkAppRootRunsClientAndPops(t *testing.T) {
 	m, _ = pushView(t, m, newAppDetailView("blog", false))
 	m, _ = pushView(t, m, newLinkForm("blog"))
 	depth := len(m.stack)
-	next, cmd := m.Update(linkAppMsg{name: "blog", repo: "octo/blog", branch: "main"})
+	next, cmd := m.Update(linkAppMsg{name: "blog", repo: "octo/blog", branch: "main", rootDir: "apps/web"})
 	m = next.(Model)
 	if cmd == nil {
 		t.Fatal("expected LinkApp to run as a cmd")
 	}
 	m = pump(t, m, cmd) // actionResultMsg{nil,1}
-	if rec.linkRepo != "octo/blog" || rec.linkName != "blog" {
+	if rec.linkRepo != "octo/blog" || rec.linkName != "blog" || rec.linkRootDir != "apps/web" {
 		t.Fatalf("LinkApp not called with the right args: %+v", rec)
 	}
 	if len(m.stack) != depth-1 {
@@ -79,5 +81,120 @@ func TestLKeyLowercaseOpensLinkFromDetail(t *testing.T) {
 	m = pump(t, m, cmd)
 	if _, ok := m.top().(linkFormView); !ok {
 		t.Fatalf("l from app detail should push the link form, got %T", m.top())
+	}
+}
+
+func TestLinkFormRootDirSubmitted(t *testing.T) {
+	v := typeLinkRepo(t, newLinkForm("blog"), "octo/blog")
+	next, _ := v.Update(keyTab())                  // → branch
+	next, _ = next.(linkFormView).Update(keyTab()) // → root dir
+	lf := next.(linkFormView)
+	for _, r := range "apps/web" {
+		n, _ := lf.Update(keyRunes(r))
+		lf = n.(linkFormView)
+	}
+	_, cmd := lf.Update(keyEnter())
+	if cmd == nil {
+		t.Fatal("expected a link cmd")
+	}
+	msg := cmd().(linkAppMsg)
+	if msg.rootDir != "apps/web" || msg.repo != "octo/blog" || msg.branch != "main" {
+		t.Fatalf("unexpected linkAppMsg: %+v", msg)
+	}
+}
+
+func fixturePickRepos() linkReposMsg {
+	return linkReposMsg{repos: []pickRepo{
+		{fullName: "octo/blog", target: "octo"},
+		{fullName: "octo/site", target: "octo"},
+		{fullName: "acme/api", target: "acme-org"},
+	}}
+}
+
+func TestLinkFormPickerFiltersAndFills(t *testing.T) {
+	next, _ := newLinkForm("blog").Update(fixturePickRepos())
+	v := typeLinkRepo(t, next.(linkFormView), "octo")
+	out := v.View()
+	if !strings.Contains(out, "octo/blog") || !strings.Contains(out, "octo/site") || strings.Contains(out, "acme/api") {
+		t.Fatalf("filter should keep octo repos only, got:\n%s", out)
+	}
+	n, _ := v.Update(tea.KeyMsg(tea.Key{Type: tea.KeyDown})) // select first match
+	n, _ = n.(linkFormView).Update(keyEnter())               // accept → fills repo, focus branch
+	v = n.(linkFormView)
+	if got := strings.TrimSpace(v.repo.Value()); got != "octo/blog" {
+		t.Fatalf("accept should fill the repo field, got %q", got)
+	}
+	_, cmd := v.Update(keyEnter()) // enter from branch submits
+	msg := cmd().(linkAppMsg)
+	if msg.repo != "octo/blog" {
+		t.Fatalf("submit after pick: %+v", msg)
+	}
+}
+
+func TestLinkFormEnterWithoutSelectionSubmitsFreeText(t *testing.T) {
+	next, _ := newLinkForm("blog").Update(fixturePickRepos())
+	v := typeLinkRepo(t, next.(linkFormView), "someone/else")
+	_, cmd := v.Update(keyEnter())
+	if cmd == nil {
+		t.Fatal("free text must submit without a selection")
+	}
+	if msg := cmd().(linkAppMsg); msg.repo != "someone/else" {
+		t.Fatalf("want the typed repo, got %+v", msg)
+	}
+}
+
+func TestLinkFormTargetLabelOnlyWhenMultipleInstallations(t *testing.T) {
+	multi := fixturePickRepos()
+	multi.multi = true
+	next, _ := newLinkForm("blog").Update(multi)
+	if out := next.(linkFormView).View(); !strings.Contains(out, "acme-org") {
+		t.Fatalf("multi-installation matches must carry their target, got:\n%s", out)
+	}
+	next, _ = newLinkForm("blog").Update(fixturePickRepos())
+	if out := next.(linkFormView).View(); strings.Contains(out, "acme-org") {
+		t.Fatalf("single-installation matches must not repeat the target, got:\n%s", out)
+	}
+}
+
+func TestLinkFormNoCredShowsHint(t *testing.T) {
+	next, _ := newLinkForm("blog").Update(linkReposMsg{noCred: true})
+	if out := next.(linkFormView).View(); !strings.Contains(out, "press g to connect GitHub") {
+		t.Fatalf("want the login hint, got:\n%s", out)
+	}
+}
+
+func TestLinkFormLoadsRelayReposOnceAndFlattens(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := config.SaveClient(config.ClientConfig{RelayAPI: "https://r.example", AccountCredential: "cred-1"}); err != nil {
+		t.Fatal(err)
+	}
+	relay := relayFor(fakeRelay{
+		st: relayclient.Status{GitHubApp: true, Installations: []relayclient.Installation{
+			{ID: "55", TargetLogin: "octo"}, {ID: "66", TargetLogin: "acme-org"},
+		}},
+		repos: []relayclient.Repo{{FullName: "octo/blog"}},
+	})
+	msg := loadLinkRepos(relay).(linkReposMsg)
+	// the fake returns the same repos for both installations: 2 flattened entries
+	if len(msg.repos) != 2 || !msg.multi || msg.repos[1].target != "acme-org" {
+		t.Fatalf("want flattened multi-install repos, got %+v", msg)
+	}
+	v := newLinkForm("blog")
+	v.relay = relay
+	if v.refresh(nil) == nil {
+		t.Fatal("with a relay and no repos yet, refresh must load")
+	}
+	next, _ := v.Update(msg)
+	if next.(linkFormView).refresh(nil) != nil {
+		t.Fatal("repos load once; refresh must go quiet after the load")
+	}
+}
+
+func TestRootInjectsRelayIntoLinkForm(t *testing.T) {
+	m := NewModel("pi4", "a", false, fakeAPI{}).WithRelay(relayFor(fakeRelay{}))
+	next, _ := m.Update(pushMsg{view: newLinkForm("blog")})
+	lf, ok := next.(Model).top().(linkFormView)
+	if !ok || lf.relay == nil {
+		t.Fatal("pushing a link form must inject the root's relay dialer")
 	}
 }

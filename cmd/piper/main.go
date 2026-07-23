@@ -21,6 +21,7 @@ import (
 
 	"github.com/getpiper/piper/internal/client"
 	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/relayclient"
 	"github.com/getpiper/piper/internal/tui"
 	"github.com/getpiper/piper/internal/version"
 )
@@ -100,7 +101,7 @@ var launchTUI = func(remote string, stderr io.Writer) int {
 	if relay {
 		addr = remote // the relay base domain
 	}
-	if err := tui.Run(box, addr, relay, c, dialBox); err != nil {
+	if err := tui.Run(box, addr, relay, c, dialBox, relayDial); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -112,6 +113,9 @@ var launchTUI = func(remote string, stderr io.Writer) int {
 func dialBox(b config.Box) (tui.API, string, bool, error) {
 	return client.New(b.Addr, b.Token).WithTimeout(tuiRequestTimeout), b.Addr, false, nil
 }
+
+// relayDial builds the TUI's relay client; a thin adapter over relayclient.
+func relayDial(base string) tui.RelayAPI { return relayclient.New(base) }
 
 // login verifies token against the target (GET /v1/apps) and, on success,
 // saves it to ~/.piper/piper/config.json.
@@ -200,7 +204,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.SetOutput(stderr)
 		token := fs.String("token", "", "API token from `piperd token create` (LAN login)")
 		addr := fs.String("addr", "", "piperd address (LAN login)")
-		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL")
+		relay := fs.String("relay", relayclient.DefaultAPI, "relay control API base URL")
 		web := fs.Bool("web", false, "one-trip browser login through the relay's GitHub App")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2

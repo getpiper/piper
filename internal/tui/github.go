@@ -2,208 +2,340 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"html"
-	"net"
-	"net/http"
-	"net/url"
-	"os/exec"
-	"runtime"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/relayclient"
 )
 
-// githubView runs the GitHub App manifest flow: enter an org (blank = personal
-// account), press ↵, and it serves a local auto-submitting form that POSTs the
-// manifest to GitHub, catches the ?code= redirect, and exchanges it for App
-// credentials on the box. It mirrors cmd/piper's `github setup`, bridged into a
-// tea.Cmd. The socket plumbing runs in beginManifestFlow (below Update), so
-// Update stays a pure (msg) -> (model, cmd) machine.
-type githubView struct {
-	org     textinput.Model
-	running bool
-	formURL string
-	spin    spinner.Model
-	err     error
+// wizardState is where the github wizard stands in the onboarding story.
+type wizardState int
+
+const (
+	wizLoading      wizardState = iota // probing config + relay status
+	wizLogin                           // no credential: armed, ↵ starts the browser login
+	wizLoginPolling                    // code + URL shown, polling CLILoginPoll
+	wizByo                             // relay brokers no App; manifest flow is the path
+	wizInstall                         // logged in, no installation: URL shown, polling status
+	wizInstalled                       // installations listed; ↵ browses repos
+)
+
+// githubWizardView is the relay-brokered GitHub onboarding wizard behind `g`:
+// login → App install → installations. It decides its state from client config
+// and GET /v1/github/status, and rides the root's 2s tick for all polling —
+// every cmd is a one-shot HTTP call, so esc simply pops the view and polling
+// stops with it (an abandoned login handle expires on the relay).
+type githubWizardView struct {
+	relay      RelayDialer
+	state      wizardState
+	base       string // relay base in use: saved RelayAPI or relayclient.DefaultAPI
+	cred       string // account credential once known
+	handle     string // brokered-login poll handle
+	code       string // user code the human enters in the browser
+	installURL string
+	insts      []relayclient.Installation
+	sel        int
+	err        error
 }
 
-func newGithubView() githubView {
-	org := textinput.New()
-	org.Placeholder = "org (blank for your personal account)"
-	org.Focus()
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	return githubView{org: org, spin: sp}
+func newGithubWizard(relay RelayDialer) githubWizardView {
+	return githubWizardView{relay: relay, state: wizLoading}
 }
 
-func (v githubView) Init() tea.Cmd { return nil }
+func (v githubWizardView) Init() tea.Cmd { return nil }
 
-func (v githubView) title() string { return "github" }
+func (v githubWizardView) title() string { return "github" }
 
-func (v githubView) refresh(API) tea.Cmd { return nil }
+// refresh ignores the box API: the wizard polls the relay. Only the states
+// that are waiting on something return a cmd; settled states poll nothing.
+func (v githubWizardView) refresh(API) tea.Cmd {
+	relay := v.relay
+	switch v.state {
+	case wizLoading:
+		return func() tea.Msg { return probeStatus(relay) }
+	case wizLoginPolling:
+		base, handle := v.base, v.handle
+		return func() tea.Msg { return pollLogin(relay, base, handle) }
+	case wizInstall:
+		base, cred := v.base, v.cred
+		return func() tea.Msg { return probeWith(relay, base, cred) }
+	}
+	return nil
+}
 
-func (v githubView) capturesText() bool { return true }
+func (v githubWizardView) footer() string {
+	switch v.state {
+	case wizLogin:
+		return "↵ sign in · m manifest app · esc cancel · ? help"
+	case wizInstall:
+		return "o open install page · esc cancel · ? help"
+	case wizInstalled:
+		return "↑↓ move · ↵ repos · m manifest app · esc back · ? help"
+	case wizByo:
+		return "m manifest app · esc back · ? help"
+	}
+	return "esc cancel · ? help"
+}
 
-func (v githubView) footer() string { return "↵ start · esc cancel · ? help" }
-
-func (v githubView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v githubWizardView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case errMsg:
-		v.err, v.running = msg.err, false
-		return v, nil
-	case githubDoneMsg:
+	case wizStatusMsg:
 		if msg.err != nil {
-			v.err, v.running = msg.err, false
+			v.err = msg.err // banner; the state keeps polling, so a transient error retries
 			return v, nil
 		}
-		return v, func() tea.Msg { return popMsg{n: 1} }
-	case githubFormReadyMsg:
-		v.formURL = msg.url
+		v.err = nil
+		v.base, v.cred = msg.base, msg.cred
+		switch {
+		case msg.noCred:
+			v.state = wizLogin
+		case !msg.st.GitHubApp:
+			v.state = wizByo
+		case len(msg.st.Installations) == 0:
+			v.state, v.installURL = wizInstall, msg.st.InstallURL
+		default:
+			v.state, v.insts = wizInstalled, msg.st.Installations
+			if v.sel >= len(v.insts) {
+				v.sel = 0
+			}
+		}
 		return v, nil
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		v.spin, cmd = v.spin.Update(msg)
-		return v, cmd
+	case wizLoginStartedMsg:
+		if msg.err != nil {
+			v.err, v.state = msg.err, wizLogin
+			return v, nil
+		}
+		v.handle, v.code, v.err = msg.handle, msg.code, nil
+		v.state = wizLoginPolling
+		return v, nil
+	case wizLoginDoneMsg:
+		if msg.pending {
+			return v, nil
+		}
+		if msg.err != nil {
+			v.err = msg.err // banner; stay polling — the next tick retries
+			return v, nil
+		}
+		v.err = nil
+		v.cred = msg.acc.AccountCredential
+		if msg.acc.InstallURL != "" {
+			// One-trip carry-over: the relay already bounced the browser to the
+			// install page; show the URL and watch status until it lands.
+			v.state, v.installURL = wizInstall, msg.acc.InstallURL
+			return v, nil
+		}
+		v.state = wizLoading // has installs already (or BYO relay): re-probe decides
+		return v, nil
 	case tea.KeyMsg:
-		if msg.String() == "enter" && !v.running {
-			return v.start()
+		switch msg.String() {
+		case "enter":
+			switch v.state {
+			case wizLogin:
+				return v.startLogin()
+			case wizInstalled:
+				if len(v.insts) > 0 {
+					sub := wizardReposView{relay: v.relay, base: v.base, cred: v.cred, inst: v.insts[v.sel]}
+					return v, func() tea.Msg { return pushMsg{view: sub} }
+				}
+			}
+		case "m":
+			if v.state == wizLogin || v.state == wizByo || v.state == wizInstalled {
+				return v, func() tea.Msg { return pushMsg{view: newManifestView()} }
+			}
+		case "o":
+			if v.state == wizInstall && v.installURL != "" {
+				url := v.installURL
+				return v, func() tea.Msg { _ = openBrowser(url); return nil }
+			}
+		case "up", "k":
+			if v.state == wizInstalled && v.sel > 0 {
+				v.sel--
+			}
+		case "down", "j":
+			if v.state == wizInstalled && v.sel < len(v.insts)-1 {
+				v.sel++
+			}
 		}
 	}
-	if v.running {
-		return v, nil // ignore field edits mid-flow
-	}
+	return v, nil
+}
+
+// startLogin asks the relay for a login handle + user code and opens the
+// browser at the verify page. The human side happens there; the wizard then
+// polls the handle on the tick.
+func (v githubWizardView) startLogin() (tea.Model, tea.Cmd) {
+	relay, base := v.relay, v.base
 	v.err = nil
-	var cmd tea.Cmd
-	v.org, cmd = v.org.Update(msg)
-	return v, cmd
+	return v, func() tea.Msg {
+		handle, code, err := relay(base).CLILoginStart(context.Background())
+		if err != nil {
+			return wizLoginStartedMsg{err: err}
+		}
+		_ = openBrowser(verifyURL(base))
+		return wizLoginStartedMsg{handle: handle, code: code}
+	}
 }
 
-// start flips to the running state and signals the root to launch the manifest
-// flow. It is not a method on API-only state: it needs the client for
-// Manifest/ExchangeGitHub, which the view does not hold. The root owns the
-// client, so it turns the githubStartMsg intent into the runManifestFlow cmd
-// (see app.go).
-func (v githubView) start() (tea.Model, tea.Cmd) {
-	v.running, v.err = true, nil
-	v.formURL = ""
-	org := strings.TrimSpace(v.org.Value())
-	return v, tea.Batch(v.spin.Tick, func() tea.Msg { return githubStartMsg{org: org} })
+func verifyURL(base string) string { return strings.TrimRight(base, "/") + "/v1/login/cli" }
+
+// probeStatus loads client config and, when a credential exists, asks the
+// relay for GitHub App status. Runs inside a tea.Cmd, off the UI thread.
+func probeStatus(relay RelayDialer) tea.Msg {
+	cc, err := config.LoadClient()
+	if err != nil {
+		return wizStatusMsg{err: err}
+	}
+	base := cc.RelayAPI
+	if base == "" {
+		base = relayclient.DefaultAPI
+	}
+	if cc.AccountCredential == "" {
+		return wizStatusMsg{noCred: true, base: base}
+	}
+	return probeWith(relay, base, cc.AccountCredential)
 }
 
-func (v githubView) View() string {
+func probeWith(relay RelayDialer, base, cred string) tea.Msg {
+	st, err := relay(base).GitHubStatus(context.Background(), cred)
+	if err != nil {
+		return wizStatusMsg{base: base, cred: cred, err: err}
+	}
+	return wizStatusMsg{base: base, cred: cred, st: st}
+}
+
+// pollLogin polls one brokered-login round and, on success, saves the
+// credential + relay base to client config before reporting — all off the UI
+// thread, mirroring the CLI's relayLoginWeb.
+func pollLogin(relay RelayDialer, base, handle string) tea.Msg {
+	acc, err := relay(base).CLILoginPoll(context.Background(), handle)
+	if errors.Is(err, relayclient.ErrAuthPending) {
+		return wizLoginDoneMsg{pending: true}
+	}
+	if err != nil {
+		return wizLoginDoneMsg{err: err}
+	}
+	cc, err := config.LoadClient()
+	if err != nil {
+		return wizLoginDoneMsg{err: err}
+	}
+	cc.RelayAPI = base
+	cc.AccountCredential = acc.AccountCredential
+	if err := config.SaveClient(cc); err != nil {
+		return wizLoginDoneMsg{err: err}
+	}
+	return wizLoginDoneMsg{acc: acc}
+}
+
+func (v githubWizardView) View() string {
 	var b strings.Builder
-	b.WriteString("  configure a GitHub App\n\n")
-	if v.running {
-		fmt.Fprintf(&b, "  %s waiting for GitHub App approval…\n", v.spin.View())
-		if v.formURL != "" {
-			fmt.Fprintf(&b, "  %s\n", v.formURL)
+	switch v.state {
+	case wizLoading:
+		b.WriteString("  checking GitHub status…\n")
+	case wizLogin:
+		fmt.Fprintf(&b, "  sign in with GitHub via %s\n\n", v.base)
+		b.WriteString("  ↵ opens your browser; you'll enter a short code there.\n")
+	case wizLoginPolling:
+		b.WriteString("  finish signing in — enter this code in your browser:\n\n")
+		fmt.Fprintf(&b, "      %s\n\n      %s\n\n", v.code, verifyURL(v.base))
+		b.WriteString("  waiting…\n")
+	case wizByo:
+		b.WriteString("  this relay doesn't broker a GitHub App.\n\n")
+		b.WriteString("  press m to create a self-held App on this box (manifest flow).\n")
+	case wizInstall:
+		b.WriteString("  install the Piper GitHub App on the repos you want to deploy:\n\n")
+		fmt.Fprintf(&b, "      %s\n\n", v.installURL)
+		b.WriteString("  waiting for the install…\n")
+	case wizInstalled:
+		b.WriteString("  GitHub connected — installations:\n\n")
+		for i, in := range v.insts {
+			marker := "  "
+			if i == v.sel {
+				marker = "▸ "
+			}
+			fmt.Fprintf(&b, "  %s%s (%s)\n", marker, in.TargetLogin, in.TargetType)
 		}
-		b.WriteString("\n  esc cancel")
-		if v.err != nil {
-			fmt.Fprintf(&b, "\n\n ⚠ %v", v.err)
-		}
-		return b.String()
 	}
-	fmt.Fprintf(&b, "  org   %s\n\n", v.org.View())
 	if v.err != nil {
-		fmt.Fprintf(&b, " ⚠ %v\n\n", v.err)
+		fmt.Fprintf(&b, "\n ⚠ %v\n", v.err)
 	}
-	b.WriteString("  ↵ start   esc cancel")
 	return b.String()
 }
 
-// manifestActionURL is the GitHub endpoint the manifest form POSTs to: the
-// personal-account creator, or the org creator when org is non-empty.
-func manifestActionURL(org string) string {
-	if org == "" {
-		return "https://github.com/settings/apps/new"
-	}
-	return fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new", url.PathEscape(org))
+// wizardReposView is the wizard's read-only repo listing for one installation,
+// pushed by ↵ on the installations list; esc pops back to the wizard. Repos
+// load once, not per tick — GitHubRepos proxies to GitHub's API and the
+// listing has no live state worth the rate-limit spend.
+type wizardReposView struct {
+	relay      RelayDialer
+	base, cred string
+	inst       relayclient.Installation
+	repos      []relayclient.Repo
+	loaded     bool
+	err        error
 }
 
-// openBrowser opens rawURL in the OS browser. Duplicated from cmd/piper (that
-// copy is unexported in package main); a package var so tests can stub it.
-var openBrowser = func(rawURL string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", rawURL).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start()
-	default:
-		return exec.Command("xdg-open", rawURL).Start()
+func (v wizardReposView) Init() tea.Cmd { return nil }
+
+func (v wizardReposView) title() string { return "repos" }
+
+func (v wizardReposView) footer() string {
+	if v.loaded && v.err != nil {
+		return "r retry · esc back · ? help"
+	}
+	return "esc back · ? help"
+}
+
+// retry clears a completed error load so the next refresh (the root's r key,
+// which calls refresh directly) re-arms the request. A successful load is
+// left untouched — GitHubRepos loads once, not on a timer, so r has nothing
+// to do there.
+func (v wizardReposView) retry() wizardReposView {
+	if v.loaded && v.err != nil {
+		v.loaded, v.err = false, nil
+	}
+	return v
+}
+
+func (v wizardReposView) refresh(API) tea.Cmd {
+	if v.loaded {
+		return nil
+	}
+	relay, base, cred, id := v.relay, v.base, v.cred, v.inst.ID
+	return func() tea.Msg {
+		repos, err := relay(base).GitHubRepos(context.Background(), cred, id)
+		return wizReposMsg{repos: repos, err: err}
 	}
 }
 
-// beginManifestFlow starts the two-server manifest dance and returns once the
-// servers are up: a githubFormReadyMsg carrying the form URL (for the running
-// view to display as a manual-open fallback on headless boxes) plus the wait
-// cmd that blocks on GitHub's callback, or a githubDoneMsg{err} if setup
-// failed before the servers could start. It mirrors cmd/piper/main.go's
-// githubSetup: a callback server catches GitHub's ?code=, a form server serves
-// an auto-submitting POST of the manifest, and the browser opens at the form.
-// It is exercised by the CLI's githubSetup tests + e2e; unit tests here drive
-// the state machine directly (see github_test.go), not this function.
-func beginManifestFlow(ctx context.Context, c API, org string) tea.Msg {
-	codeCh := make(chan string, 1)
-	cbLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return githubDoneMsg{err: err}
+func (v wizardReposView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m, ok := msg.(wizReposMsg); ok {
+		v.loaded = true
+		v.repos, v.err = m.repos, m.err
 	}
-	redirect := "http://" + cbLn.Addr().String() + "/cb"
+	return v, nil
+}
 
-	manifest, err := c.Manifest(redirect)
-	if err != nil {
-		cbLn.Close()
-		return githubDoneMsg{err: err}
+func (v wizardReposView) View() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s (%s) — repositories:\n\n", v.inst.TargetLogin, v.inst.TargetType)
+	switch {
+	case !v.loaded:
+		b.WriteString("  loading…\n")
+	case len(v.repos) == 0 && v.err == nil:
+		b.WriteString("  no repositories\n")
 	}
-
-	cbSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if code := r.URL.Query().Get("code"); code != "" {
-			fmt.Fprintln(w, "Piper GitHub App created. You can close this tab.")
-			select {
-			case codeCh <- code:
-			default:
-			}
-		}
-	})}
-	go cbSrv.Serve(cbLn)
-
-	page := fmt.Sprintf(`<form id="f" action="%s" method="post">`+
-		`<input type="hidden" name="manifest" value='%s'></form>`+
-		`<script>document.getElementById('f').submit()</script>`,
-		html.EscapeString(manifestActionURL(org)), html.EscapeString(manifest))
-	formLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		cbSrv.Close()
-		return githubDoneMsg{err: err}
-	}
-	formSrv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, page)
-	})}
-	go formSrv.Serve(formLn)
-
-	formURL := "http://" + formLn.Addr().String()
-	_ = openBrowser(formURL)
-
-	wait := func() tea.Msg {
-		defer cbSrv.Close()
-		defer formSrv.Close()
-		defer cbLn.Close()
-		defer formLn.Close()
-		select {
-		case code := <-codeCh:
-			_, err := c.ExchangeGitHub(code)
-			return githubDoneMsg{err: err}
-		case <-time.After(5 * time.Minute):
-			return githubDoneMsg{err: fmt.Errorf("timed out waiting for GitHub App approval")}
-		case <-ctx.Done():
-			return githubDoneMsg{err: ctx.Err()}
+	for _, r := range v.repos {
+		if r.Visibility != "" && r.Visibility != "public" {
+			fmt.Fprintf(&b, "  %s (%s)\n", r.FullName, r.Visibility)
+		} else {
+			fmt.Fprintf(&b, "  %s\n", r.FullName)
 		}
 	}
-	return githubFormReadyMsg{url: formURL, wait: wait}
+	if v.err != nil {
+		fmt.Fprintf(&b, "\n ⚠ %v\n", v.err)
+	}
+	return b.String()
 }
