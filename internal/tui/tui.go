@@ -4,10 +4,13 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/domain"
+	"github.com/getpiper/piper/internal/relayclient"
 	"github.com/getpiper/piper/internal/store"
 )
 
@@ -35,6 +38,20 @@ type API interface {
 // (LAN path); tests inject a fake. addr identifies the box in the status bar;
 // remote marks a relay-backed box (HTTPS app URLs).
 type Dialer func(config.Box) (c API, addr string, remote bool, err error)
+
+// RelayAPI is the slice of the relay control API the TUI consumes.
+// *relayclient.Client satisfies it; tests inject fakes.
+type RelayAPI interface {
+	CLILoginStart(ctx context.Context) (handle, userCode string, err error)
+	CLILoginPoll(ctx context.Context, handle string) (relayclient.Account, error)
+	GitHubStatus(ctx context.Context, cred string) (relayclient.Status, error)
+	GitHubRepos(ctx context.Context, cred, installationID string) ([]relayclient.Repo, error)
+}
+
+// RelayDialer builds a relay client for a base URL. cmd/piper supplies the
+// real one; tests inject fakes. A factory, not a client: a fresh user logs in
+// against the default relay, a configured user against their saved RelayAPI.
+type RelayDialer func(base string) RelayAPI
 
 // view is a stack entry: a Bubble Tea model that refreshes its own data off the
 // UI thread and names itself for the breadcrumb. The root owns the stack; a

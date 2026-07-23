@@ -384,3 +384,10 @@ func TestRootDomainAddedErrorBannersForm(t *testing.T) {
 		t.Fatalf("want bannered form, got %q:\n%s", nm.top().title(), nm.top().View())
 	}
 }
+
+func TestWithRelayAttachesFactory(t *testing.T) {
+	m := NewModel("pi4", "a", false, fakeAPI{}).WithRelay(func(string) RelayAPI { return nil })
+	if m.relay == nil {
+		t.Fatal("WithRelay should attach the relay dialer")
+	}
+}

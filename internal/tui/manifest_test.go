@@ -18,7 +18,7 @@ func TestManifestActionURL(t *testing.T) {
 }
 
 func TestGithubDoneSuccessPops(t *testing.T) {
-	next, cmd := newGithubView().Update(githubDoneMsg{err: nil})
+	next, cmd := newManifestView().Update(githubDoneMsg{err: nil})
 	_ = next
 	if cmd == nil {
 		t.Fatal("success should emit a pop cmd")
@@ -29,29 +29,29 @@ func TestGithubDoneSuccessPops(t *testing.T) {
 }
 
 func TestGithubDoneErrorBanners(t *testing.T) {
-	next, cmd := newGithubView().Update(githubDoneMsg{err: errors.New("exchange failed")})
+	next, cmd := newManifestView().Update(githubDoneMsg{err: errors.New("exchange failed")})
 	if cmd != nil {
 		t.Fatalf("an error should not pop, got a cmd")
 	}
-	if !strings.Contains(next.(githubView).View(), "⚠") {
-		t.Fatalf("expected an error banner, got:\n%s", next.(githubView).View())
+	if !strings.Contains(next.(manifestView).View(), "⚠") {
+		t.Fatalf("expected an error banner, got:\n%s", next.(manifestView).View())
 	}
 }
 
 func TestGithubFormReadyShowsURL(t *testing.T) {
 	// running view (post-start) should display the manual-open form URL.
-	v, _ := newGithubView().start()
-	next, _ := v.(githubView).Update(githubFormReadyMsg{url: "http://127.0.0.1:12345", wait: nil})
-	if !strings.Contains(next.(githubView).View(), "http://127.0.0.1:12345") {
-		t.Fatalf("running view should show the form URL, got:\n%s", next.(githubView).View())
+	v, _ := newManifestView().start()
+	next, _ := v.(manifestView).Update(githubFormReadyMsg{url: "http://127.0.0.1:12345", wait: nil})
+	if !strings.Contains(next.(manifestView).View(), "http://127.0.0.1:12345") {
+		t.Fatalf("running view should show the form URL, got:\n%s", next.(manifestView).View())
 	}
 }
 
-func TestGKeyOpensGithub(t *testing.T) {
+func TestGKeyOpensManifest(t *testing.T) {
 	m := NewModel("pi4", "a", false, fakeAPI{}).WithDialer(fakeDialer(fakeAPI{}, "", false, nil))
 	next, cmd := m.Update(keyRunes('g'))
 	m = pump(t, next.(Model), cmd)
-	if _, ok := m.top().(githubView); !ok {
+	if _, ok := m.top().(manifestView); !ok {
 		t.Fatalf("g should push the github view, got %T", m.top())
 	}
 }
@@ -59,7 +59,7 @@ func TestGKeyOpensGithub(t *testing.T) {
 func TestGithubEscCancelsInFlightFlow(t *testing.T) {
 	canceled := false
 	m := NewModel("pi4", "a", false, fakeAPI{})
-	next, _ := m.Update(pushMsg{view: newGithubView()})
+	next, _ := m.Update(pushMsg{view: newManifestView()})
 	m = next.(Model)
 	m.githubCancel = func() { canceled = true }
 	next, _ = m.Update(keyEsc())
@@ -67,7 +67,7 @@ func TestGithubEscCancelsInFlightFlow(t *testing.T) {
 	if !canceled {
 		t.Fatal("esc leaving the github view should cancel the in-flight flow")
 	}
-	if _, ok := m.top().(githubView); ok {
+	if _, ok := m.top().(manifestView); ok {
 		t.Fatal("esc should pop the github view")
 	}
 	if m.githubCancel != nil {
@@ -111,7 +111,7 @@ func TestGithubDoneAfterNavAwayIsConsumedAndCancels(t *testing.T) {
 func TestGithubDoneOnTopErrorBannersAndCancels(t *testing.T) {
 	canceled := false
 	m := NewModel("pi4", "a", false, fakeAPI{})
-	next, _ := m.Update(pushMsg{view: newGithubView()})
+	next, _ := m.Update(pushMsg{view: newManifestView()})
 	m = next.(Model)
 	m.githubCancel = func() { canceled = true }
 	next, _ = m.Update(githubDoneMsg{err: errors.New("boom")})
@@ -119,7 +119,7 @@ func TestGithubDoneOnTopErrorBannersAndCancels(t *testing.T) {
 	if !canceled {
 		t.Fatal("done should release the context")
 	}
-	gv, ok := m.top().(githubView)
+	gv, ok := m.top().(manifestView)
 	if !ok {
 		t.Fatal("an error done should keep the github view to banner, not pop")
 	}

@@ -17,13 +17,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// githubView runs the GitHub App manifest flow: enter an org (blank = personal
+// manifestView runs the GitHub App manifest flow: enter an org (blank = personal
 // account), press ↵, and it serves a local auto-submitting form that POSTs the
 // manifest to GitHub, catches the ?code= redirect, and exchanges it for App
 // credentials on the box. It mirrors cmd/piper's `github setup`, bridged into a
 // tea.Cmd. The socket plumbing runs in beginManifestFlow (below Update), so
 // Update stays a pure (msg) -> (model, cmd) machine.
-type githubView struct {
+type manifestView struct {
 	org     textinput.Model
 	running bool
 	formURL string
@@ -31,26 +31,26 @@ type githubView struct {
 	err     error
 }
 
-func newGithubView() githubView {
+func newManifestView() manifestView {
 	org := textinput.New()
 	org.Placeholder = "org (blank for your personal account)"
 	org.Focus()
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	return githubView{org: org, spin: sp}
+	return manifestView{org: org, spin: sp}
 }
 
-func (v githubView) Init() tea.Cmd { return nil }
+func (v manifestView) Init() tea.Cmd { return nil }
 
-func (v githubView) title() string { return "github" }
+func (v manifestView) title() string { return "manifest" }
 
-func (v githubView) refresh(API) tea.Cmd { return nil }
+func (v manifestView) refresh(API) tea.Cmd { return nil }
 
-func (v githubView) capturesText() bool { return true }
+func (v manifestView) capturesText() bool { return true }
 
-func (v githubView) footer() string { return "↵ start · esc cancel · ? help" }
+func (v manifestView) footer() string { return "↵ start · esc cancel · ? help" }
 
-func (v githubView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (v manifestView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case errMsg:
 		v.err, v.running = msg.err, false
@@ -87,14 +87,14 @@ func (v githubView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Manifest/ExchangeGitHub, which the view does not hold. The root owns the
 // client, so it turns the githubStartMsg intent into the runManifestFlow cmd
 // (see app.go).
-func (v githubView) start() (tea.Model, tea.Cmd) {
+func (v manifestView) start() (tea.Model, tea.Cmd) {
 	v.running, v.err = true, nil
 	v.formURL = ""
 	org := strings.TrimSpace(v.org.Value())
 	return v, tea.Batch(v.spin.Tick, func() tea.Msg { return githubStartMsg{org: org} })
 }
 
-func (v githubView) View() string {
+func (v manifestView) View() string {
 	var b strings.Builder
 	b.WriteString("  configure a GitHub App\n\n")
 	if v.running {
