@@ -138,7 +138,18 @@ type (
 	deleteAppMsg struct{ name string }
 	// linkAppMsg is the link form's intent; the root runs LinkApp off the UI
 	// thread and reports via actionResultMsg (pop back to app detail on success).
-	linkAppMsg struct{ name, repo, branch string }
+	linkAppMsg struct{ name, repo, branch, rootDir string }
+
+	// linkReposMsg is the link form's repo-picker load: every installation's
+	// repos flattened, multi marking >1 installation (matches get target
+	// labels), noCred meaning no relay login (the form hints at g and stays
+	// free-text). Errors degrade to an empty list — never a banner, never a
+	// box-status change: linking by hand must always work.
+	linkReposMsg struct {
+		repos  []pickRepo
+		multi  bool
+		noCred bool
+	}
 
 	// removeDomainMsg is the remove-domain confirm's intent; the root runs
 	// RemoveAppDomain and pops back to app detail via actionResultMsg.

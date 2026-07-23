@@ -152,6 +152,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tea.Batch(m.refresh(), tick())
 	case pushMsg:
+		if lf, ok := msg.view.(linkFormView); ok && lf.relay == nil {
+			lf.relay = m.relay // the pushing view doesn't hold the factory; the root does
+			msg.view = lf
+		}
 		m.stack = append(m.stack, msg.view)
 		if m.width > 0 {
 			seeded, _ := m.top().Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
@@ -207,10 +211,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		name, c := msg.name, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.DeleteApp(name), popLevels: 2} }
 	case linkAppMsg:
-		name, repo, branch, c := msg.name, msg.repo, msg.branch, m.client
-		// The TUI link form collects no root directory; monorepo subpaths are a
-		// dashboard-wizard flow (#316). Pass "" to build the repo root.
-		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch, ""), popLevels: 1} }
+		name, repo, branch, rootDir, c := msg.name, msg.repo, msg.branch, msg.rootDir, m.client
+		return m, func() tea.Msg { return actionResultMsg{err: c.LinkApp(name, repo, branch, rootDir), popLevels: 1} }
 	case removeDomainMsg:
 		app, dom, c := msg.app, msg.domain, m.client
 		return m, func() tea.Msg { return actionResultMsg{err: c.RemoveAppDomain(app, dom), popLevels: 1} }
