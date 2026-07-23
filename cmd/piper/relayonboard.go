@@ -14,10 +14,6 @@ import (
 	"github.com/getpiper/piper/internal/relayclient"
 )
 
-// defaultRelayAPI is the hosted public relay's control API. Override with
-// `piper login --relay <url>` for a self-hosted relay.
-const defaultRelayAPI = "https://api.public.getpiper.dev"
-
 // pollSleep is the device-flow poll delay; a seam so tests don't really sleep.
 var pollSleep = time.Sleep
 
@@ -148,13 +144,13 @@ func waitForInstall(rc *relayclient.Client, cred, installURL string) error {
 	fmt.Printf("Install the Piper GitHub App on the repos you want to deploy:\n  %s\n\nWaiting…", installURL)
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
-		insts, err := rc.GitHubStatus(context.Background(), cred)
+		st, err := rc.GitHubStatus(context.Background(), cred)
 		if err != nil {
 			return err
 		}
-		if len(insts) > 0 {
+		if len(st.Installations) > 0 {
 			n := 0
-			for _, in := range insts {
+			for _, in := range st.Installations {
 				// Best-effort repo count for the message; a transient error here
 				// must not fail a login whose install already succeeded.
 				if repos, err := rc.GitHubRepos(context.Background(), cred, in.ID); err == nil {
@@ -185,16 +181,16 @@ func githubRepos(stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	rc := relayclient.New(cc.RelayAPI)
-	insts, err := rc.GitHubStatus(ctx, cc.AccountCredential)
+	st, err := rc.GitHubStatus(ctx, cc.AccountCredential)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	if len(insts) == 0 {
+	if len(st.Installations) == 0 {
 		fmt.Fprintln(stdout, "No repositories yet — run `piper login` to install the Piper GitHub App on the repos you want to deploy.")
 		return 0
 	}
-	for _, in := range insts {
+	for _, in := range st.Installations {
 		repos, err := rc.GitHubRepos(ctx, cc.AccountCredential, in.ID)
 		if err != nil {
 			fmt.Fprintln(stderr, "error:", err)

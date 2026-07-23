@@ -21,6 +21,7 @@ import (
 
 	"github.com/getpiper/piper/internal/client"
 	"github.com/getpiper/piper/internal/config"
+	"github.com/getpiper/piper/internal/relayclient"
 	"github.com/getpiper/piper/internal/tui"
 	"github.com/getpiper/piper/internal/version"
 )
@@ -200,7 +201,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.SetOutput(stderr)
 		token := fs.String("token", "", "API token from `piperd token create` (LAN login)")
 		addr := fs.String("addr", "", "piperd address (LAN login)")
-		relay := fs.String("relay", defaultRelayAPI, "relay control API base URL")
+		relay := fs.String("relay", relayclient.DefaultAPI, "relay control API base URL")
 		web := fs.Bool("web", false, "one-trip browser login through the relay's GitHub App")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2

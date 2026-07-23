@@ -191,12 +191,30 @@ func TestGitHubStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	insts, err := New(srv.URL).GitHubStatus(context.Background(), "cred-xyz")
+	st, err := New(srv.URL).GitHubStatus(context.Background(), "cred-xyz")
 	if err != nil {
 		t.Fatalf("GitHubStatus: %v", err)
 	}
+	if !st.GitHubApp || st.InstallURL != "x" {
+		t.Fatalf("status flags = %+v", st)
+	}
+	insts := st.Installations
 	if len(insts) != 2 || insts[0].ID != "66" || insts[0].TargetLogin != "getpiper" || insts[1].ID != "55" {
 		t.Fatalf("installations = %+v", insts)
+	}
+}
+
+func TestGitHubStatusNoApp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"github_app":false,"installations":[],"install_url":""}`))
+	}))
+	defer srv.Close()
+	st, err := New(srv.URL).GitHubStatus(context.Background(), "cred-xyz")
+	if err != nil {
+		t.Fatalf("GitHubStatus: %v", err)
+	}
+	if st.GitHubApp || st.InstallURL != "" || len(st.Installations) != 0 {
+		t.Fatalf("want empty no-app status, got %+v", st)
 	}
 }
 

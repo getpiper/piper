@@ -64,6 +64,10 @@ type Client struct {
 	http *http.Client
 }
 
+// DefaultAPI is the hosted public relay's control API base URL. Override with
+// `piper login --relay <url>` for a self-hosted relay.
+const DefaultAPI = "https://api.public.getpiper.dev"
+
 // New returns a Client for the relay control API at base (e.g.
 // https://api.public.getpiper.dev).
 func New(base string) *Client {
@@ -210,30 +214,37 @@ type Installation struct {
 	TargetLogin string `json:"target_login"`
 }
 
-// GitHubStatus lists every GitHub App installation linked to the account. It
-// never 404s on a missing installation — an empty slice is the answer — so a
-// poll loop can wait for the first installation to appear.
-func (c *Client) GitHubStatus(ctx context.Context, accountCredential string) ([]Installation, error) {
+// Status is the relay's GitHub App report for an account: whether the relay
+// brokers an App at all, where to install it, and the account's installations.
+type Status struct {
+	GitHubApp     bool           `json:"github_app"`
+	InstallURL    string         `json:"install_url"`
+	Installations []Installation `json:"installations"`
+}
+
+// GitHubStatus reports the account's GitHub App state: whether the relay
+// brokers an App, its install page, and every installation linked to the
+// account. It never 404s on a missing installation — an empty Installations
+// is the answer — so a poll loop can wait for the first install to appear.
+func (c *Client) GitHubStatus(ctx context.Context, accountCredential string) (Status, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/github/status", nil)
 	if err != nil {
-		return nil, err
+		return Status{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accountCredential)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return Status{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("relay github status: %s", resp.Status)
+		return Status{}, fmt.Errorf("relay github status: %s", resp.Status)
 	}
-	var body struct {
-		Installations []Installation `json:"installations"`
+	var st Status
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return Status{}, err
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Installations, nil
+	return st, nil
 }
 
 // GitHubRepos lists the repositories the given installation can reach. The
