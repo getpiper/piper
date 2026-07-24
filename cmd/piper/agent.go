@@ -23,6 +23,12 @@ var embeddedSystemUnit string
 //go:embed piperd.env.example
 var embeddedSystemEnv string
 
+//go:embed piperd.user.service
+var embeddedUserUnit string
+
+//go:embed piperd.env.user.example
+var embeddedUserEnv string
+
 const launchdLabel = "com.getpiper.piperd"
 
 // agentGOOS is runtime.GOOS; a var so tests can exercise the non-darwin gate.
@@ -96,6 +102,16 @@ var userUnitPath = func() (string, error) {
 	return filepath.Join(home, ".config", "systemd", "user", userUnitName+".service"), nil
 }
 
+// userEnvPath returns the rootless agent's env-file path; a var so tests can
+// point it at a temp file.
+var userEnvPath = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".piper", "piperd.env"), nil
+}
+
 // Overridable system install targets + identity, so daemonize unit-tests
 // against temp dirs and stubbed identity.
 var (
@@ -104,6 +120,15 @@ var (
 	systemUnitDir = "/etc/systemd/system"
 	systemEnvDir  = "/etc/piper"
 )
+
+func systemUnitFile() string { return filepath.Join(systemUnitDir, userUnitName+".service") }
+
+// systemTier reports whether this box has been daemonized: the system unit's
+// presence decides which service up/down/status control.
+func systemTier() bool {
+	_, err := os.Stat(systemUnitFile())
+	return err == nil
+}
 
 // userHomeDir resolves a username to its home directory; a var so tests can stub it.
 var userHomeDir = func(username string) (string, error) {
@@ -146,34 +171,103 @@ func agentDarwin(args []string, stdout, stderr io.Writer) int {
 }
 
 func agentLinux(args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: piper agent <up|down|status|daemonize>")
+	usage := func() int {
+		fmt.Fprintln(stderr, "usage: piper agent <up|down|status|daemonize [--undo]>")
 		return 2
+	}
+	if len(args) == 0 {
+		return usage()
 	}
 	switch args[0] {
 	case "up":
+		if len(args) != 1 {
+			return usage()
+		}
 		return agentUpLinux(stdout, stderr)
 	case "down":
+		if len(args) != 1 {
+			return usage()
+		}
 		return agentDownLinux(stdout, stderr)
 	case "status":
+		if len(args) != 1 {
+			return usage()
+		}
 		return agentStatusLinux(stdout, stderr)
 	case "daemonize":
-		return agentDaemonize(stdout, stderr)
+		switch {
+		case len(args) == 1:
+			return agentDaemonize(false, stdout, stderr)
+		case len(args) == 2 && args[1] == "--undo":
+			return agentDaemonize(true, stdout, stderr)
+		default:
+			return usage()
+		}
 	default:
-		fmt.Fprintln(stderr, "usage: piper agent <up|down|status|daemonize>")
-		return 2
+		return usage()
 	}
 }
 
-func agentUpLinux(stdout, stderr io.Writer) int {
+// materializeRootless writes the embedded rootless user unit (refreshing a
+// stale copy left by an older piper) and seeds ~/.piper/piperd.env
+// skip-if-exists, so `up` works on a box that has only the binaries.
+func materializeRootless(stderr io.Writer) int {
 	unit, err := userUnitPath()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	if _, err := os.Stat(unit); err != nil {
-		fmt.Fprintf(stderr, "error: user service not installed at %s\nsee docs/manual-setup.md (Run the agent on Linux, rootless)\n", unit)
+	if cur, err := os.ReadFile(unit); err != nil || string(cur) != embeddedUserUnit {
+		if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		if err := os.WriteFile(unit, []byte(embeddedUserUnit), 0o644); err != nil {
+			fmt.Fprintf(stderr, "error: writing user unit: %v\n", err)
+			return 1
+		}
+		if out, err := systemctlRun("--user", "daemon-reload"); err != nil {
+			fmt.Fprintf(stderr, "error: systemctl --user daemon-reload: %v\n%s", err, out)
+			return 1
+		}
+	}
+	envPath, err := userEnvPath()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
 		return 1
+	}
+	if _, err := os.Stat(envPath); err != nil {
+		if err := os.MkdirAll(filepath.Dir(envPath), 0o700); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		if err := os.WriteFile(envPath, []byte(embeddedUserEnv), 0o600); err != nil {
+			fmt.Fprintf(stderr, "error: writing env: %v\n", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+func agentUpLinux(stdout, stderr io.Writer) int {
+	if systemTier() {
+		if agentEUID() != 0 {
+			fmt.Fprintln(stderr, "piperd is daemonized — controlling the system service needs root, re-running under sudo…")
+			return selfExecSudo([]string{"agent", "up"}, stdout, stderr)
+		}
+		if out, err := systemctlRun("start", userUnitName); err != nil {
+			fmt.Fprintf(stderr, "error: systemctl start failed: %v\n%s", err, out)
+			return 1
+		}
+		if state, ok := waitActive(); !ok {
+			fmt.Fprintf(stderr, "error: piperd started but is not active (state: %s) — it may be crash-looping.\nCheck: systemctl status piperd\n", state)
+			return 1
+		}
+		fmt.Fprintln(stdout, "piperd started (system service)")
+		return 0
+	}
+	if code := materializeRootless(stderr); code != 0 {
+		return code
 	}
 	if out, err := systemctlRun("--user", "start", userUnitName); err != nil {
 		fmt.Fprintf(stderr, "error: systemctl --user start failed: %v\n%s", err, out)
@@ -187,10 +281,23 @@ func agentUpLinux(stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "piperd started")
+	fmt.Fprintln(stdout, "note: won't survive a reboot — run `piper agent daemonize` to make it permanent")
 	return 0
 }
 
 func agentDownLinux(stdout, stderr io.Writer) int {
+	if systemTier() {
+		if agentEUID() != 0 {
+			fmt.Fprintln(stderr, "piperd is daemonized — controlling the system service needs root, re-running under sudo…")
+			return selfExecSudo([]string{"agent", "down"}, stdout, stderr)
+		}
+		if out, err := systemctlRun("stop", userUnitName); err != nil {
+			fmt.Fprintf(stderr, "error: systemctl stop failed: %v\n%s", err, out)
+			return 1
+		}
+		fmt.Fprintln(stdout, "piperd stopped (system service)")
+		return 0
+	}
 	if out, err := systemctlRun("--user", "stop", userUnitName); err != nil {
 		fmt.Fprintf(stderr, "error: systemctl --user stop failed: %v\n%s", err, out)
 		return 1
@@ -199,13 +306,16 @@ func agentDownLinux(stdout, stderr io.Writer) int {
 	return 0
 }
 
-// agentEnviron reads the running rootless agent's start-time environment from
+// agentEnviron reads the running agent's start-time environment from
 // /proc/<MainPID>/environ (NUL-separated KEY=VALUE), so `status` can report the
 // address the agent is actually bound to — honoring any env-file overrides
-// (e.g. PIPER_API_ADDR=0.0.0.0:8088 for LAN access). Returns nil when the agent
-// isn't running or /proc can't be read. A var so tests stub it.
-var agentEnviron = func() map[string]string {
-	out, err := systemctlRun("--user", "show", userUnitName, "--property=MainPID", "--value")
+// (e.g. PIPER_API_ADDR=0.0.0.0:8088 for LAN access). scope is the systemctl
+// scope prefix ({"--user"} for the rootless agent, nil for the system one).
+// Returns nil when the agent isn't running or /proc can't be read (e.g. the
+// system piperd's environ as non-root). A var so tests stub it.
+var agentEnviron = func(scope ...string) map[string]string {
+	args := append(append([]string{}, scope...), "show", userUnitName, "--property=MainPID", "--value")
+	out, err := systemctlRun(args...)
 	if err != nil {
 		return nil
 	}
@@ -236,13 +346,28 @@ func envOr(env map[string]string, key, def string) string {
 }
 
 func agentStatusLinux(stdout, stderr io.Writer) int {
+	if systemTier() {
+		out, _ := systemctlRun("is-active", userUnitName)
+		if strings.TrimSpace(out) != "active" {
+			fmt.Fprintln(stdout, "piperd: stopped (system service)")
+			return 0
+		}
+		fmt.Fprintln(stdout, "piperd: running (system service)")
+		// The system piperd's /proc environ is root-only, so env is usually nil
+		// here and the system unit's known defaults apply.
+		env := agentEnviron()
+		fmt.Fprintf(stdout, "  control API  http://%s\n", envOr(env, "PIPER_API_ADDR", "127.0.0.1:8088"))
+		fmt.Fprintf(stdout, "  http/https   %s / %s\n", envOr(env, "PIPER_HTTP_ADDR", ":80"), envOr(env, "PIPER_HTTPS_ADDR", ":443"))
+		fmt.Fprintf(stdout, "  data dir     %s\n", envOr(env, "PIPER_DATA_DIR", "/var/lib/piper"))
+		return 0
+	}
 	unit, err := userUnitPath()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
 	if _, err := os.Stat(unit); err != nil {
-		fmt.Fprintln(stdout, "piperd: not installed")
+		fmt.Fprintln(stdout, "piperd: not set up (run `piper agent up`)")
 		return 0
 	}
 	out, _ := systemctlRun("--user", "is-active", userUnitName)
@@ -251,7 +376,7 @@ func agentStatusLinux(stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintln(stdout, "piperd: running")
-	env := agentEnviron()
+	env := agentEnviron("--user")
 	fmt.Fprintf(stdout, "  control API  http://%s\n", envOr(env, "PIPER_API_ADDR", "127.0.0.1:8088"))
 	// http/https are set by the user unit (:8080/:8443); only shown when we
 	// could read them, since piperd's built-in :80/:443 defaults would misreport
@@ -349,46 +474,69 @@ var selfExecSudo = func(args []string, stdout, stderr io.Writer) int {
 }
 
 // agentDaemonize promotes the rootless per-user agent into the systemd system
-// daemon (durable, :80/:443, boot-surviving). Linux only. It does NOT migrate
-// ~/.piper state to /var/lib/piper — a fresh durable install.
-func agentDaemonize(stdout, stderr io.Writer) int {
+// daemon (durable, :80/:443, boot-surviving); with undo it demotes back. Linux
+// only. Promotion does NOT migrate ~/.piper state to /var/lib/piper — a fresh
+// durable install.
+func agentDaemonize(undo bool, stdout, stderr io.Writer) int {
 	if agentEUID() != 0 {
-		// Promotion needs root; re-run ourselves under sudo by absolute path so
-		// the user runs a bare `piper agent daemonize` — no sudo, no path (#211).
-		fmt.Fprintln(stderr, "promotion needs root — re-running under sudo…")
-		return selfExecSudo([]string{"agent", "daemonize"}, stdout, stderr)
+		// Needs root; re-run ourselves under sudo by absolute path so the user
+		// runs a bare `piper agent daemonize` — no sudo, no path (#211).
+		verb := "promotion"
+		if undo {
+			verb = "demotion"
+		}
+		fmt.Fprintf(stderr, "%s needs root — re-running under sudo…\n", verb)
+		args := []string{"agent", "daemonize"}
+		if undo {
+			args = append(args, "--undo")
+		}
+		return selfExecSudo(args, stdout, stderr)
+	}
+	if undo {
+		return agentDaemonizeUndo(stdout, stderr)
 	}
 	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser == "" {
-		fmt.Fprintln(stderr, "error: SUDO_USER unset — run via `sudo piper agent daemonize`")
-		return 1
+
+	// 1. Tear down the invoking user's rootless service (best-effort; a real
+	// root login has no rootless service to tear down).
+	if sudoUser != "" {
+		if out, err := systemctlRun("--user", "--machine="+sudoUser+"@.host", "disable", "--now", userUnitName); err != nil {
+			fmt.Fprintf(stderr, "warning: could not stop the rootless service for %s (run `piper agent down` as %s if it lingers): %v\n%s", sudoUser, sudoUser, err, out)
+		}
 	}
 
-	// 1. Tear down the invoking user's rootless service (best-effort).
-	if out, err := systemctlRun("--user", "--machine="+sudoUser+"@.host", "disable", "--now", userUnitName); err != nil {
-		fmt.Fprintf(stderr, "warning: could not stop the rootless service for %s (run `piper agent down` as %s if it lingers): %v\n%s", sudoUser, sudoUser, err, out)
-	}
-
-	// 2. Copy piperd from the user's ~/.local/bin into the system bindir.
-	home, err := userHomeDir(sudoUser)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: cannot resolve home for %s: %v\n", sudoUser, err)
-		return 1
+	// 2. Ensure piperd + the CLI live in the system bindir: copied from the
+	// invoking user's ~/.local/bin when running via sudo (so the box afterward
+	// matches a root install — piper on sudo's secure_path resolves by name,
+	// #211); a real-root box already has them there from the installer.
+	var home string
+	if sudoUser != "" {
+		var err error
+		home, err = userHomeDir(sudoUser)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: cannot resolve home for %s: %v\n", sudoUser, err)
+			return 1
+		}
 	}
 	if err := os.MkdirAll(systemBinDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := copyFile(filepath.Join(home, ".local", "bin", "piperd"), filepath.Join(systemBinDir, "piperd"), 0o755); err != nil {
-		fmt.Fprintf(stderr, "error: installing piperd to %s: %v\n", systemBinDir, err)
-		return 1
-	}
-	// Also install the CLI, so afterward the box matches a `curl | sudo sh`
-	// system install: piper lives on sudo's secure_path, so later root commands
-	// (`sudo piper …`, `sudo piperd token …`) resolve by name (#211).
-	if err := copyFile(filepath.Join(home, ".local", "bin", "piper"), filepath.Join(systemBinDir, "piper"), 0o755); err != nil {
-		fmt.Fprintf(stderr, "error: installing piper to %s: %v\n", systemBinDir, err)
-		return 1
+	for _, name := range []string{"piperd", "piper"} {
+		dst := filepath.Join(systemBinDir, name)
+		if home != "" {
+			if src := filepath.Join(home, ".local", "bin", name); fileExists(src) {
+				if err := copyFile(src, dst, 0o755); err != nil {
+					fmt.Fprintf(stderr, "error: installing %s to %s: %v\n", name, systemBinDir, err)
+					return 1
+				}
+				continue
+			}
+		}
+		if !fileExists(dst) {
+			fmt.Fprintf(stderr, "error: %s not found in %s or ~/.local/bin — run the installer first (see README)\n", name, systemBinDir)
+			return 1
+		}
 	}
 
 	// 3. Write the system unit.
@@ -433,6 +581,38 @@ func agentDaemonize(stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "piperd daemonized — system service on :80/:443, boot-surviving")
 	return 0
+}
+
+// agentDaemonizeUndo demotes the system daemon back to rootless-capable: stop +
+// disable, remove the system unit. /etc/piper/piperd.env and the binaries stay,
+// so re-daemonizing later picks the config back up. State in /var/lib/piper is
+// not migrated to ~/.piper — the same fresh-state stance as promotion. Runs as
+// root (agentDaemonize escalates before dispatching here).
+func agentDaemonizeUndo(stdout, stderr io.Writer) int {
+	if !systemTier() {
+		fmt.Fprintln(stdout, "piperd is not daemonized — nothing to undo")
+		return 0
+	}
+	if out, err := systemctlRun("disable", "--now", userUnitName); err != nil {
+		fmt.Fprintf(stderr, "error: systemctl disable --now piperd: %v\n%s", err, out)
+		return 1
+	}
+	if err := os.Remove(systemUnitFile()); err != nil {
+		fmt.Fprintf(stderr, "error: removing %s: %v\n", systemUnitFile(), err)
+		return 1
+	}
+	if out, err := systemctlRun("daemon-reload"); err != nil {
+		fmt.Fprintf(stderr, "error: systemctl daemon-reload: %v\n%s", err, out)
+		return 1
+	}
+	fmt.Fprintln(stdout, "piperd un-daemonized — system service removed (kept /etc/piper/piperd.env and the binaries)")
+	fmt.Fprintln(stdout, "note: state in /var/lib/piper is not migrated — apps deployed by the system agent won't appear rootless. `piper agent up` starts a fresh rootless agent.")
+	return 0
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
