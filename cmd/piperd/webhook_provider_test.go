@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/getpiper/piper/internal/api"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/store"
 )
@@ -74,6 +77,24 @@ func TestDecideWebhookProvider(t *testing.T) {
 				t.Fatalf("decideWebhookProvider(%v, %+v, %v) = %v, want %v", tt.ghErr, tt.cfg, tt.hasGHToken, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestNewRepoFetcherWithoutGitHubReturnsErrNoGitHubApp pins the seam the
+// deploy-from-repo endpoint relies on for its 409: with no credential source
+// at call time, the fetcher must fail with api.ErrNoGitHubApp, not a generic
+// error the handler would report as a fetch failure.
+func TestNewRepoFetcherWithoutGitHubReturnsErrNoGitHubApp(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "piperd.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	fetch := newRepoFetcher(st, config.Config{}, nil)
+	err = fetch(context.Background(), "alice/blog", "main", t.TempDir())
+	if !errors.Is(err, api.ErrNoGitHubApp) {
+		t.Fatalf("fetch with no GitHub App = %v, want api.ErrNoGitHubApp", err)
 	}
 }
 

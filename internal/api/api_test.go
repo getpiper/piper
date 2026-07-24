@@ -87,7 +87,7 @@ func newTestStore(t *testing.T) *store.Store {
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	s := newTestStore(t)
-	return New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	return New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 }
 
 func TestCreateAndListApp(t *testing.T) {
@@ -182,7 +182,7 @@ func TestDeployIsAsyncAndDrivesRowToRunning(t *testing.T) {
 		t.Fatalf("CreateApp: %v", err)
 	}
 	deployer := &fakeDeployer{store: s}
-	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil, nil)
 
 	var tarball bytes.Buffer
 	tw := tar.NewWriter(&tarball)
@@ -220,7 +220,7 @@ func TestDeployPanicInFinishIsRecoveredAndFailsRow(t *testing.T) {
 		t.Fatalf("CreateApp: %v", err)
 	}
 	deployer := &fakeDeployer{store: s, panicOnFinish: true}
-	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil, nil)
 
 	var tarball bytes.Buffer
 	tw := tar.NewWriter(&tarball)
@@ -245,13 +245,119 @@ func TestDeployPanicInFinishIsRecoveredAndFailsRow(t *testing.T) {
 
 func TestDeployUnknownAppIs404(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/deploy", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/x-tar")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestDeployFromRepoFetchesLinkedRepoAndDeploys(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	if err := s.UpdateAppRepo("web", "alice/blog", "main", ""); err != nil {
+		t.Fatalf("UpdateAppRepo: %v", err)
+	}
+	deployer := &fakeDeployer{store: s}
+	var gotRepo, gotRef string
+	fetch := func(_ context.Context, repo, ref, destDir string) error {
+		gotRepo, gotRef = repo, ref
+		return os.WriteFile(filepath.Join(destDir, "Dockerfile"), []byte("FROM repo\n"), 0o644)
+	}
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil, fetch)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/apps/web/deploy-from-repo", nil))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	var dep store.Deployment
+	if err := json.Unmarshal(rr.Body.Bytes(), &dep); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dep.ID == "" || dep.Status != "building" {
+		t.Fatalf("202 body = %+v, want building row with id", dep)
+	}
+
+	waitForStatus(t, s, "web", "running")
+	if gotRepo != "alice/blog" || gotRef != "main" {
+		t.Fatalf("fetched %s@%s, want alice/blog@main", gotRepo, gotRef)
+	}
+	if deployer.gotFile != "FROM repo\n" {
+		t.Fatalf("Finish saw Dockerfile %q", deployer.gotFile)
+	}
+}
+
+func TestDeployFromRepoUnlinkedAppIs409(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	fetch := func(_ context.Context, _, _, _ string) error { return nil }
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, fetch)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/apps/web/deploy-from-repo", nil))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDeployFromRepoUnknownAppIs404(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/deploy-from-repo", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestDeployFromRepoWithoutGitHubIs409(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	if err := s.UpdateAppRepo("web", "alice/blog", "main", ""); err != nil {
+		t.Fatalf("UpdateAppRepo: %v", err)
+	}
+	for name, fetch := range map[string]FetchRepoFunc{
+		"nil fetcher":    nil,
+		"fetcher errors": func(_ context.Context, _, _, _ string) error { return ErrNoGitHubApp },
+	} {
+		h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, fetch)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/apps/web/deploy-from-repo", nil))
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("%s: status = %d, want 409; body=%s", name, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestDeployFromRepoFetchErrorIs502AndCreatesNoDeployment(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateApp("web", 8080); err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	if err := s.UpdateAppRepo("web", "alice/blog", "main", ""); err != nil {
+		t.Fatalf("UpdateAppRepo: %v", err)
+	}
+	fetch := func(_ context.Context, _, _, _ string) error { return errors.New("tarball: 500") }
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, fetch)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/apps/web/deploy-from-repo", nil))
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := s.LatestDeployment("web"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("LatestDeployment after failed fetch: %v, want ErrNotFound", err)
 	}
 }
 
@@ -275,7 +381,7 @@ func TestAppsAPIIncludesHostname(t *testing.T) {
 	if err := s.SetAppHostname("blog", "hash-blog-alice.public.getpiper.co"); err != nil {
 		t.Fatalf("SetAppHostname: %v", err)
 	}
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 
 	get := httptest.NewRecorder()
 	h.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/apps/blog", nil))
@@ -300,7 +406,7 @@ func TestAppsAPIIncludesHostname(t *testing.T) {
 
 func TestReservedNameRejected(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	body := strings.NewReader(`{"name":"hooks","port":8080}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps", body))
@@ -313,7 +419,7 @@ func TestReservedNameRejected(t *testing.T) {
 // pr-N-<app>.…), so create rejects anything that isn't a DNS label. #120.
 func TestInvalidAppNameRejected(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	for _, name := range []string{"Blog", "my_app", "a/b", "-lead", "trail-", "app.dot", "app name", strings.Repeat("x", 64)} {
 		rec := httptest.NewRecorder()
 		body := strings.NewReader(`{"name":"` + name + `","port":8080}`)
@@ -334,7 +440,7 @@ func TestInvalidAppNameRejected(t *testing.T) {
 func TestLinkApp(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	body := strings.NewReader(`{"repo":"alice/blog","branch":"main"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
@@ -350,7 +456,7 @@ func TestLinkApp(t *testing.T) {
 func TestLinkAppPersistsRootDir(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	body := strings.NewReader(`{"repo":"alice/blog","branch":"main","root_dir":"apps/web"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
@@ -366,7 +472,7 @@ func TestLinkAppPersistsRootDir(t *testing.T) {
 func TestLinkAppRejectsEscapingRootDir(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	for _, bad := range []string{`"../etc"`, `"apps/../../etc"`, `"/abs/path"`} {
 		body := strings.NewReader(`{"repo":"alice/blog","branch":"main","root_dir":` + bad + `}`)
 		rec := httptest.NewRecorder()
@@ -392,7 +498,7 @@ func TestLinkRegistersBindingWithRelay(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)
 	fb := &fakeBinder{}
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, fb, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, fb, nil, nil)
 	body := strings.NewReader(`{"repo":"alice/blog","branch":"main"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
@@ -407,7 +513,7 @@ func TestLinkRegistersBindingWithRelay(t *testing.T) {
 func TestLinkSucceedsWithoutABinder(t *testing.T) {
 	s := newTestStore(t)
 	s.CreateApp("blog", 8080)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	body := strings.NewReader(`{"repo":"alice/blog","branch":"main"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/link", body))
@@ -422,7 +528,7 @@ func TestLinkSucceedsWithoutABinder(t *testing.T) {
 
 func TestManifestEndpoint(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "alice.dev", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "alice.dev", "", nil, nil, nil, nil, nil)
 	body := strings.NewReader(`{"redirect_url":"http://localhost:5000/cb"}`)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/github/manifest", body))
@@ -447,7 +553,7 @@ func TestExchangeSavesCredsAndInvokesCallback(t *testing.T) {
 
 	s := newTestStore(t)
 	called := false
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", gh.URL, func() { called = true }, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", gh.URL, func() { called = true }, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	body := strings.NewReader(`{"code":"thecode"}`)
@@ -481,7 +587,7 @@ func TestExchangeSavesCredsAndInvokesCallback(t *testing.T) {
 // reports its id and slug so the dashboard can deep-link the install page.
 func TestGitHubStatus(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/github", nil))
@@ -531,7 +637,7 @@ func TestResetClearsStoredApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil,
-		func() string { return "brokered" })
+		func() string { return "brokered" }, nil)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/github/app", nil))
@@ -556,7 +662,7 @@ func TestResetClearsStoredApp(t *testing.T) {
 // running it on a box that never went BYO gets the same answer as one that did.
 func TestResetWithNoStoredAppIsNotAnError(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/github/app", nil))
@@ -595,7 +701,7 @@ func TestUntarRejectsPathTraversal(t *testing.T) {
 
 func TestListAppsIncludesDeployStatus(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	if _, err := s.CreateApp("api", 3000); err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +732,7 @@ func TestListAppsIncludesDeployStatus(t *testing.T) {
 
 func TestGetAppIncludesDeployStatus(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +756,7 @@ func TestGetAppIncludesDeployStatus(t *testing.T) {
 
 func TestListDeploymentsEndpoint(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -683,7 +789,7 @@ func TestListDeploymentsEndpoint(t *testing.T) {
 
 func TestDeploymentLogsEndpoint(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -796,7 +902,7 @@ func TestDomainEndpoints(t *testing.T) {
 		DNSRecords: []domain.DNSRecord{{Type: "CNAME", Name: "*.shop.dev", Value: "relay.example.net"}},
 	}}
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil, nil)
 
 	// PUT kicks Set with the body fields.
 	put := httptest.NewRequest(http.MethodPut, "/v1/domain",
@@ -847,7 +953,7 @@ func TestDomainEndpointErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestStore(t)
 			h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil,
-				&fakeDomainManager{setErr: tc.err}, nil, nil)
+				&fakeDomainManager{setErr: tc.err}, nil, nil, nil)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/domain",
 				strings.NewReader(`{"domain":"x.dev","dns_provider":"cloudflare","dns_token":"t"}`)))
@@ -860,7 +966,7 @@ func TestDomainEndpointErrors(t *testing.T) {
 
 func TestDomainEndpointsWithoutRelay(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(m, "/v1/domain", strings.NewReader(`{}`)))
@@ -881,7 +987,7 @@ func TestAppDomainsEndpoints(t *testing.T) {
 		DNSOK:        true,
 	}}}
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -936,7 +1042,7 @@ func TestAppDomainsEndpoints(t *testing.T) {
 // GET on an app with no domains serves JSON [] — never null.
 func TestAppDomainsListEmptyReturnsArray(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, &fakeDomainManager{}, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, &fakeDomainManager{}, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -962,7 +1068,7 @@ func TestAppDomainsPostErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestStore(t)
 			h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil,
-				&fakeDomainManager{addErr: tc.err}, nil, nil)
+				&fakeDomainManager{addErr: tc.err}, nil, nil, nil)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/domains",
 				strings.NewReader(`{"domain":"myshop.com"}`)))
@@ -975,7 +1081,7 @@ func TestAppDomainsPostErrors(t *testing.T) {
 	// Malformed / empty body never reaches the manager.
 	s := newTestStore(t)
 	fdm := &fakeDomainManager{}
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil, nil)
 	for _, body := range []string{`{`, `{}`, `{"domain":""}`} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/domains",
@@ -992,7 +1098,7 @@ func TestAppDomainsPostErrors(t *testing.T) {
 func TestAppDomainsUnknownAppAndDomain(t *testing.T) {
 	s := newTestStore(t)
 	fdm := &fakeDomainManager{}
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, fdm, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -1035,7 +1141,7 @@ func TestAppDomainsUnknownAppAndDomain(t *testing.T) {
 // No relay configured (nil manager): the collection answers 409, like /v1/domain.
 func TestAppDomainsWithoutRelay(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1165,7 @@ func TestDeleteAppTearsDownAppDomains(t *testing.T) {
 	s := newTestStore(t)
 	deployer := &fakeDeployer{store: s}
 	fdm := &fakeDomainManager{}
-	h := New(s, deployer, "piper.localhost", "", nil, fdm, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, fdm, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -1093,7 +1199,7 @@ func TestDeleteAppAbortsOnDomainTeardownFailure(t *testing.T) {
 	s := newTestStore(t)
 	deployer := &fakeDeployer{store: s}
 	fdm := &fakeDomainManager{removeAppErr: errors.New("clear relay domain mapping: tunnel down")}
-	h := New(s, deployer, "piper.localhost", "", nil, fdm, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, fdm, nil, nil, nil)
 	if _, err := s.CreateApp("blog", 8080); err != nil {
 		t.Fatal(err)
 	}
@@ -1117,7 +1223,7 @@ func TestDeleteAppAbortsOnDomainTeardownFailure(t *testing.T) {
 func TestStopEndpoint(t *testing.T) {
 	s := newTestStore(t)
 	deployer := &fakeDeployer{store: s}
-	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/stop", nil))
 	if rec.Code != http.StatusNoContent {
@@ -1130,7 +1236,7 @@ func TestStopEndpoint(t *testing.T) {
 
 func TestStopEndpointUnknownApp(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s, stopErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, stopErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/stop", nil))
 	if rec.Code != http.StatusNotFound {
@@ -1141,7 +1247,7 @@ func TestStopEndpointUnknownApp(t *testing.T) {
 func TestStartEndpoint(t *testing.T) {
 	s := newTestStore(t)
 	deployer := &fakeDeployer{store: s}
-	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/start", nil))
 	if rec.Code != http.StatusNoContent {
@@ -1154,7 +1260,7 @@ func TestStartEndpoint(t *testing.T) {
 
 func TestStartEndpointUnknownApp(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s, startErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, startErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/ghost/start", nil))
 	if rec.Code != http.StatusNotFound {
@@ -1166,7 +1272,7 @@ func TestStartEndpointUnknownApp(t *testing.T) {
 // distinguish "unknown app" from a real backend failure.
 func TestStartEndpointServerError(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s, startErr: errors.New("start failed")}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, startErr: errors.New("start failed")}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/start", nil))
 	if rec.Code != http.StatusInternalServerError {
@@ -1177,7 +1283,7 @@ func TestStartEndpointServerError(t *testing.T) {
 func TestDeleteAppEndpoint(t *testing.T) {
 	s := newTestStore(t)
 	deployer := &fakeDeployer{store: s}
-	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, deployer, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog", nil))
 	if rec.Code != http.StatusNoContent {
@@ -1190,7 +1296,7 @@ func TestDeleteAppEndpoint(t *testing.T) {
 
 func TestDeleteAppEndpointUnknownApp(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s, deleteErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, deleteErr: store.ErrNotFound}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/ghost", nil))
 	if rec.Code != http.StatusNotFound {
@@ -1202,7 +1308,7 @@ func TestDeleteAppEndpointUnknownApp(t *testing.T) {
 // distinguish "unknown app" from a real backend failure.
 func TestStopEndpointServerError(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s, stopErr: errors.New("stop failed")}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, stopErr: errors.New("stop failed")}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/stop", nil))
 	if rec.Code != http.StatusInternalServerError {
@@ -1213,7 +1319,7 @@ func TestStopEndpointServerError(t *testing.T) {
 // The delete handler's 500 path: a non-ErrNotFound deployer error is not a 404.
 func TestDeleteAppEndpointServerError(t *testing.T) {
 	s := newTestStore(t)
-	h := New(s, &fakeDeployer{store: s, deleteErr: errors.New("delete failed")}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, deleteErr: errors.New("delete failed")}, "piper.localhost", "", nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/apps/blog", nil))
 	if rec.Code != http.StatusInternalServerError {
@@ -1227,7 +1333,7 @@ func TestDeleteAppEndpointServerError(t *testing.T) {
 func TestServerErrorDoesNotLeakInternalDetail(t *testing.T) {
 	s := newTestStore(t)
 	leak := errors.New("unroute: caddy admin http://127.0.0.1:2019 failed stopping container abc123def /var/lib/piper/state")
-	h := New(s, &fakeDeployer{store: s, stopErr: leak}, "piper.localhost", "", nil, nil, nil, nil)
+	h := New(s, &fakeDeployer{store: s, stopErr: leak}, "piper.localhost", "", nil, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/apps/blog/stop", nil))

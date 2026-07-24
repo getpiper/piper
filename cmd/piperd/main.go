@@ -417,6 +417,10 @@ func main() {
 		tc = &agent.TunnelClient{}
 		binder = tc
 	}
+	var ghTokenFn func(repo string) (string, error)
+	if tc != nil {
+		ghTokenFn = tc.GitHubToken
+	}
 	apiHandler := api.New(st, dep, cfg.BaseDomain, "", func() {
 		if wh != nil {
 			wh.start()
@@ -425,7 +429,7 @@ func main() {
 		// What `piper github reset` leaves behind: the same decision, re-run as
 		// if the row it just deleted had never been there.
 		return decideWebhookProvider(store.ErrNotFound, cfg, wh != nil && wh.ghToken != nil).name()
-	})
+	}, newRepoFetcher(st, cfg, ghTokenFn))
 
 	// The authenticated entry point. Always on, so LAN-only and relay-connected
 	// boxes run the identical listener topology; the relay tunnel below is its
@@ -715,6 +719,39 @@ func shadowWarning(prov webhookProvider, cfg config.Config) string {
 	}
 	return "webhook: the relay offers a brokered GitHub App, shadowed by this box's own; " +
 		"run `piper github reset` to use the relay's"
+}
+
+// newRepoFetcher builds the FetchRepoFunc behind POST /v1/apps/{name}/deploy-
+// from-repo: a manual deploy of a linked app fetches the repo the same way a
+// webhook push would. The provider is re-derived per call (it is cheap to
+// build) so a `piper github setup` run after boot takes effect without a
+// restart. ghToken is nil unless a brokering relay is connected.
+func newRepoFetcher(st *store.Store, cfg config.Config, ghToken func(repo string) (string, error)) api.FetchRepoFunc {
+	return func(ctx context.Context, repo, ref, destDir string) error {
+		gh, err := st.GetGitHubApp()
+		var prov source.Provider
+		switch decideWebhookProvider(err, cfg, ghToken != nil) {
+		case webhookProviderBYO:
+			p, err := github.New(github.Config{
+				AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+			})
+			if err != nil {
+				return fmt.Errorf("github provider: %w", err)
+			}
+			prov = p
+		case webhookProviderBrokered:
+			prov = github.NewWithTokens(
+				github.Config{WebhookSecret: cfg.WebhookSecret},
+				github.RelayTokens{Ask: ghToken},
+			)
+		default:
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return fmt.Errorf("github app lookup: %w", err)
+			}
+			return api.ErrNoGitHubApp
+		}
+		return prov.Fetch(ctx, source.Event{Repo: repo, SHA: ref}, destDir)
+	}
 }
 
 func (w *webhookStarter) start() { w.once.Do(w.run) }
