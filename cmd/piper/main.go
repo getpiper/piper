@@ -22,6 +22,7 @@ import (
 	"github.com/getpiper/piper/internal/client"
 	"github.com/getpiper/piper/internal/config"
 	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/getpiper/piper/internal/store"
 	"github.com/getpiper/piper/internal/tui"
 	"github.com/getpiper/piper/internal/version"
 )
@@ -269,11 +270,42 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: piper deploy <name> [--path DIR] [--timeout DUR]")
 			return 2
 		}
+		pathSet := false
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "path" {
+				pathSet = true
+			}
+		})
 		c, ok := dialClient(*remote, stderr)
 		if !ok {
 			return 1
 		}
-		dep, err := c.Deploy(name, *path)
+		// Without an explicit --path, a github-linked app deploys from its
+		// repo; the launch directory need not hold the source at all.
+		fromRepo := ""
+		if !pathSet {
+			app, err := c.App(name)
+			var se *client.StatusError
+			if errors.As(err, &se) && se.Code == http.StatusNotFound {
+				fmt.Fprintf(stderr, "error: app %q does not exist — run 'piper create %s' first\n", name, name)
+				return 1
+			}
+			if err != nil {
+				fmt.Fprintln(stderr, "error:", err)
+				return 1
+			}
+			if app.Repo != "" {
+				fromRepo = app.Repo + "@" + app.Branch
+			}
+		}
+		var dep store.Deployment
+		var err error
+		if fromRepo != "" {
+			fmt.Fprintf(stderr, "deploying %s from %s\n", name, fromRepo)
+			dep, err = c.DeployFromRepo(name)
+		} else {
+			dep, err = c.Deploy(name, *path)
+		}
 		if err != nil {
 			var se *client.StatusError
 			if errors.As(err, &se) && se.Code == http.StatusNotFound {
