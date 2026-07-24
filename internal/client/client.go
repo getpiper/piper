@@ -146,6 +146,28 @@ func (c *Client) Deploy(name, srcDir string) (store.Deployment, error) {
 	return dep, nil
 }
 
+// DeployFromRepo asks the agent to fetch the app's linked repository at its
+// tracked branch and deploy it — no local source involved.
+func (c *Client) DeployFromRepo(name string) (store.Deployment, error) {
+	// The agent downloads the repo before answering; like Deploy's upload, that
+	// must not be cut short by the overall request timeout (the TUI's poll guard).
+	noTimeout := *c.http
+	noTimeout.Timeout = 0
+	resp, err := c.doWith(&noTimeout, http.MethodPost, "/v1/apps/"+name+"/deploy-from-repo", "", nil)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return store.Deployment{}, responseError("deploy", resp)
+	}
+	var dep store.Deployment
+	if err := json.NewDecoder(resp.Body).Decode(&dep); err != nil {
+		return store.Deployment{}, err
+	}
+	return dep, nil
+}
+
 func (c *Client) Deployments(name string) ([]store.Deployment, error) {
 	resp, err := c.do(http.MethodGet, "/v1/apps/"+name+"/deployments", "", nil)
 	if err != nil {
