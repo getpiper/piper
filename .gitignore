@@ -23,3 +23,13 @@ deploy/compose/piperd.env
 # superpowers brainstorming sessions
 .superpowers/
 .worktrees/
+
+# claude code: ignore local state, keep shared project config committable.
+# Must be `.claude/*`, not `.claude/` — a trailing-slash rule excludes the
+# directory itself, and git never descends into it, so the `!` lines below
+# would silently do nothing.
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/skills/
+!.claude/workflows/
