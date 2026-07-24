@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -43,6 +44,23 @@ func TestWizardNoCredShowsLogin(t *testing.T) {
 	out := next.(githubWizardView).View()
 	if !strings.Contains(out, "sign in with GitHub") || !strings.Contains(out, "https://r.example") {
 		t.Fatalf("want the armed login step, got:\n%s", out)
+	}
+}
+
+func TestWizardStaleCredentialFallsBackToLogin(t *testing.T) {
+	v := newGithubWizard(relayFor(fakeRelay{}))
+	next, _ := v.Update(wizStatusMsg{base: "https://r.example", cred: "stale",
+		err: fmt.Errorf("relay github status: %w", relayclient.ErrBadCredential)})
+	nv := next.(githubWizardView)
+	if nv.state != wizLogin {
+		t.Fatalf("a rejected credential must drop to the login step, got state %d", nv.state)
+	}
+	out := nv.View()
+	if !strings.Contains(out, "sign in with GitHub") || !strings.Contains(out, "https://r.example") {
+		t.Fatalf("want the armed login step, got:\n%s", out)
+	}
+	if cmd := nv.refresh(nil); cmd != nil {
+		t.Fatal("the login step must not keep polling the rejected credential")
 	}
 }
 

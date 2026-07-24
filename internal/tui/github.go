@@ -84,6 +84,13 @@ func (v githubWizardView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case wizStatusMsg:
 		if msg.err != nil {
+			if errors.Is(msg.err, relayclient.ErrBadCredential) {
+				// The relay no longer knows this credential (e.g. re-provisioned
+				// relay DB): retrying can never succeed, so fall back to sign-in.
+				// A fresh login overwrites the stale credential on success.
+				v.err, v.base, v.state = msg.err, msg.base, wizLogin
+				return v, nil
+			}
 			v.err = msg.err // banner; the state keeps polling, so a transient error retries
 			return v, nil
 		}
