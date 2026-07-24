@@ -7,33 +7,42 @@ a LAN-only box never needs the relay sections.
 
 ## Install
 
-One line gets a Linux box to a running `piperd` service:
+One line puts the binaries on the box:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 ```
 
-It detects your OS/arch, downloads the matching release binaries, verifies their
-`checksums.txt`, installs `piperd` + `piper` to `/usr/local/bin`, drops the
-systemd unit and an `/etc/piper/piperd.env` skeleton (never overwriting an edited
-one), and runs `systemctl enable --now piperd`. Re-run any time to upgrade.
-Add `--rc` to install the latest release candidate instead of the latest stable
-release.
+The installer **only places binaries**: it detects your OS/arch (Linux and
+macOS), downloads the matching release binaries, verifies their
+`checksums.txt`, and installs `piper` + `piperd` to `~/.local/bin` (or
+`/usr/local/bin` when run as root; `PIPER_PREFIX` overrides). It never runs
+`systemctl`, never touches `/etc`, and never prompts for `sudo`. Re-run any
+time to upgrade. Add `--rc` to install the latest release candidate instead of
+the latest stable release, or `--cli-only` for just `piper` — for driving
+`piperd` from another machine, e.g. your laptop and a Pi on the same LAN.
+
+Running the agent is then a `piper` command, with two modes:
+**`up` runs it until reboot; `daemonize` makes it permanent.**
 
 ### Rootless on Linux (dev boxes)
 
-Run the installer **without** `sudo` and you get a rootless dev agent — piperd
-runs as **you** on high ports (`:8080`/`:8443`) under `~/.piper`, managed by
-`systemctl --user`. No root, and on a headless box it does not survive a reboot
-(no login to start the user manager — re-run `piper agent up`).
+`piper agent up` gives you a rootless dev agent — piperd runs as **you** on
+high ports (`:8080`/`:8443`) under `~/.piper`, as a systemd **user** unit that
+`up` materializes itself, seeding `~/.piper/piperd.env` from files embedded in
+the CLI — nothing to download, nothing to wire by hand.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 piper agent up            # start it (no sudo)
-piper agent status        # running / stopped / not installed; when running,
+piper agent status        # running / stopped / not set up; when running,
                           # prints the control-API address, app ports, and data dir
 piper agent down          # stop it
 ```
+
+Rootless is intentionally ephemeral: it does **not** survive a reboot, and
+`up` prints a note saying so — re-run it after boot, or `daemonize` (below)
+when you want a real service. State lives under `~/.piper/piperd`, and the
+embedded Caddy's admin API sits on `:2020`.
 
 Apps are served at `http://<name>.piper.localhost:8080`. Your user must be able to
 reach a Docker socket — be in the `docker` group, or set `DOCKER_HOST`.
@@ -61,25 +70,34 @@ piperd`.
 piper agent daemonize
 ```
 
-No `sudo` — promotion needs root, so `piper` re-runs itself under `sudo` and
-prompts for your password. This installs the systemd **system** service (as
-`curl | sudo sh` would), stops the rootless one, and also puts `piper` in
-`/usr/local/bin` so later root commands (`sudo piperd token …`) resolve by name.
-It's a fresh durable install — your rootless `~/.piper` apps are not migrated;
-redeploy them.
+This is the one durable, privileged operation: it installs and enables the
+systemd **system** service (`enable --now`), and it needs root — no `sudo`
+prefix required, `piper` re-runs itself under `sudo` and prompts for your
+password (running it as real root works too). It works with or without a prior
+`up`, and keeps an existing `/etc/piper/piperd.env`. It's a fresh durable
+install — state is **not** migrated from `~/.piper` to `/var/lib/piper`;
+re-enroll and redeploy. From then on `piper agent up`/`down`/`status` control
+the system service (self-`sudo` when needed).
 
-Install just the CLI (Linux or macOS) — for driving `piperd` from another
-machine, e.g. your laptop and a Pi on the same LAN:
+To demote again:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --cli-only
+piper agent daemonize --undo
 ```
 
-As root this installs `piper` to `/usr/local/bin`; unprivileged, to
-`~/.local/bin`.
+This stops and disables the system service and removes its unit, keeping
+`/etc/piper/piperd.env` and the binaries (again, no state migration back); a
+later `piper agent up` runs rootless again.
 
-The full service install is Linux + systemd; on macOS use `--cli-only` (a
-launchd unit is tracked in [#56](https://github.com/getpiper/piper/issues/56)).
+### macOS (dev boxes)
+
+macOS mechanics are unchanged: `piper agent up`/`down`/`status` drive a
+launchd agent whose plist you install once by hand — see
+[`manual-setup.md`](manual-setup.md#run-the-agent-on-macos-dev-box). One note:
+a plist in `~/Library/LaunchAgents` auto-loads at every login, so the macOS
+agent is semi-persistent by launchd's nature; there is no `daemonize` on
+macOS.
+
 Shell completions and a Homebrew tap are planned follow-ups.
 
 Prefer to build from source, run piperd in Docker via Compose, run the relay as
@@ -154,7 +172,7 @@ Where `piper connect` installs the enrollment depends on the install:
 
 - **Manual / dev** (piperd reads `~/.piper/piperd`): `connect` writes
   `relay.json` there directly, then just `sudo systemctl restart piperd`.
-- **Shipped systemd unit** (piperd runs as a `DynamicUser`, state under
+- **Daemonized systemd service** (piperd runs as a `DynamicUser`, state under
   `/var/lib/piper`): that directory isn't writable by your login user, so
   `connect` instead prints a ready `sudo sh -c … /etc/piper/piperd.env` command
   that stores the enrollment in piperd's root-owned EnvironmentFile (systemd

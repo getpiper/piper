@@ -57,10 +57,21 @@ func TestPiperdEnvExample(t *testing.T) {
 }
 
 func TestPiperdDocumentation(t *testing.T) {
+	getting := repositoryFile(t, "docs", "getting-started.md")
+	for _, text := range []string{
+		"piper agent up",
+		"piper agent daemonize",
+		"piper agent daemonize --undo",
+	} {
+		if !strings.Contains(getting, text) {
+			t.Errorf("docs/getting-started.md missing %q", text)
+		}
+	}
+
 	manual := repositoryFile(t, "docs", "manual-setup.md")
 	for _, text := range []string{
-		"packaging/systemd/piperd.service",
-		"systemctl enable --now piperd",
+		"packaging/launchd/com.getpiper.piperd.plist",
+		"piper agent daemonize",
 	} {
 		if !strings.Contains(manual, text) {
 			t.Errorf("docs/manual-setup.md missing %q", text)
@@ -69,7 +80,7 @@ func TestPiperdDocumentation(t *testing.T) {
 
 	runbook := repositoryFile(t, "docs", "runbooks", "git-deploy-e2e.md")
 	for _, text := range []string{
-		"systemctl enable --now piperd",
+		"piper agent daemonize",
 		"PIPER_DATA_DIR=/var/lib/piper",
 		"journalctl -u piperd",
 	} {
