@@ -29,19 +29,49 @@ var embeddedUserUnit string
 //go:embed piperd.env.user.example
 var embeddedUserEnv string
 
+//go:embed piperd.env.macos.example
+var embeddedMacEnv string
+
 const launchdLabel = "com.getpiper.piperd"
 
 // agentGOOS is runtime.GOOS; a var so tests can exercise the non-darwin gate.
 var agentGOOS = runtime.GOOS
 
-// launchdPlistPath returns the installed LaunchAgent path; a var so tests can
-// point it at a temp file.
+// launchdPlistPath returns where `piper agent up` materializes the LaunchAgent.
+// It is deliberately NOT ~/Library/LaunchAgents: launchd scans that directory at
+// every login and would auto-start piperd, but macOS is a dev target with no
+// `daemonize` tier — `up` runs it, a reboot ends it. A var so tests can point it
+// at a temp file.
 var launchdPlistPath = func() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
+	return filepath.Join(home, ".piper", launchdLabel+".plist"), nil
+}
+
+// legacyLaunchAgentPath is the login-scanned plist that piper shipped before the
+// agent generated its own. `up` evicts it (see agentUp); a var so tests can
+// point it at a temp file.
+var legacyLaunchAgentPath = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
 	return filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist"), nil
+}
+
+// piperdPath resolves the piperd the LaunchAgent should exec: the one sitting
+// next to this piper binary (the installer places both in one prefix), else
+// whatever is on PATH. Resolving it here is what keeps the plist correct for any
+// prefix, instead of pinning one install location. A var so tests can stub it.
+var piperdPath = func() (string, error) {
+	if exe, err := os.Executable(); err == nil {
+		if cand := filepath.Join(filepath.Dir(exe), "piperd"); fileExists(cand) {
+			return cand, nil
+		}
+	}
+	return exec.LookPath("piperd")
 }
 
 // launchctlRun runs `launchctl <args...>` and returns combined output; a var so
@@ -164,6 +194,11 @@ func agentDarwin(args []string, stdout, stderr io.Writer) int {
 		return agentDown(stdout, stderr)
 	case "status":
 		return agentStatus(stdout, stderr)
+	case "daemonize":
+		// macOS is a dev target: piperd runs rootless on high ports for as long
+		// as you're logged in. Durability is the Linux system-service tier.
+		fmt.Fprintln(stderr, "error: `piper agent daemonize` is Linux-only — on macOS piperd is a dev agent that `piper agent up` runs until you stop it or reboot")
+		return 2
 	default:
 		fmt.Fprintln(stderr, "usage: piper agent <up|down|status>")
 		return 2
@@ -231,6 +266,12 @@ func materializeRootless(stderr io.Writer) int {
 			return 1
 		}
 	}
+	return seedUserEnv(embeddedUserEnv, stderr)
+}
+
+// seedUserEnv writes content to the rootless agent's env file if it isn't there
+// yet — skip-if-exists, so operator edits are never clobbered.
+func seedUserEnv(content string, stderr io.Writer) int {
 	envPath, err := userEnvPath()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -241,7 +282,7 @@ func materializeRootless(stderr io.Writer) int {
 			fmt.Fprintln(stderr, "error:", err)
 			return 1
 		}
-		if err := os.WriteFile(envPath, []byte(embeddedUserEnv), 0o600); err != nil {
+		if err := os.WriteFile(envPath, []byte(content), 0o600); err != nil {
 			fmt.Fprintf(stderr, "error: writing env: %v\n", err)
 			return 1
 		}
@@ -388,14 +429,105 @@ func agentStatusLinux(stdout, stderr io.Writer) int {
 	return 0
 }
 
-func agentUp(stdout, stderr io.Writer) int {
+// launchdPlistTemplate is the LaunchAgent `up` materializes. The job is a
+// /bin/sh wrapper so it can pin the rootless environment (high ports, and a
+// Caddy admin off the default :2019, matching the Linux rootless unit), source
+// the optional env file, and append to the agent's logs before exec'ing piperd.
+// The verbs are %s label, %s resolved piperd path. RunAtLoad starts the job as
+// soon as `up` bootstraps it and KeepAlive restarts it if it crashes — both
+// scoped to this login session, since the plist is not login-scanned.
+const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>%s</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>mkdir -p "$HOME/.piper"
+export XDG_DATA_HOME="$HOME/.piper/piperd" XDG_CONFIG_HOME="$HOME/.piper/piperd"
+export PIPER_HTTP_ADDR=":8080" PIPER_HTTPS_ADDR=":8443" PIPER_CADDY_ADMIN="http://127.0.0.1:2020"
+set -a
+[ -f "$HOME/.piper/piperd.env" ] &amp;&amp; . "$HOME/.piper/piperd.env"
+set +a
+exec &gt;&gt; "$HOME/.piper/piper.log" 2&gt;&gt; "$HOME/.piper/piper.err.log"
+exec "%s"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+`
+
+// xmlText escapes s for an XML text node.
+var xmlText = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace
+
+func renderLaunchdPlist(piperd string) string {
+	return fmt.Sprintf(launchdPlistTemplate, launchdLabel, xmlText(piperd))
+}
+
+// materializeLaunchd writes the LaunchAgent for the piperd this CLI resolved,
+// rewriting a stale one (an older piper's, or one naming a binary that has since
+// moved), and seeds the env file without clobbering edits.
+func materializeLaunchd(stderr io.Writer) int {
+	piperd, err := piperdPath()
+	if err != nil {
+		fmt.Fprintln(stderr, "error: piperd not found next to the piper binary or on PATH — run the installer first (see README)")
+		return 1
+	}
 	plist, err := launchdPlistPath()
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	if _, err := os.Stat(plist); err != nil {
-		fmt.Fprintf(stderr, "error: launchd agent not installed at %s\nsee docs/manual-setup.md (Run the agent on macOS)\n", plist)
+	want := renderLaunchdPlist(piperd)
+	if cur, err := os.ReadFile(plist); err != nil || string(cur) != want {
+		if err := os.MkdirAll(filepath.Dir(plist), 0o700); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		if err := os.WriteFile(plist, []byte(want), 0o644); err != nil {
+			fmt.Fprintf(stderr, "error: writing launchd agent: %v\n", err)
+			return 1
+		}
+	}
+	return seedUserEnv(embeddedMacEnv, stderr)
+}
+
+// evictLoginScannedPlist removes the LaunchAgent piper used to ship into
+// ~/Library/LaunchAgents. launchd loads that directory at every login, so left
+// in place it keeps starting a stale piperd behind this one's back — and it
+// carries the same label, so bootstrap would fail while it is loaded.
+func evictLoginScannedPlist(stderr io.Writer) int {
+	legacy, err := legacyLaunchAgentPath()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	if !fileExists(legacy) {
+		return 0
+	}
+	launchctlRun("bootout", guiTarget()+"/"+launchdLabel) // best-effort: it may not be loaded
+	if err := os.Remove(legacy); err != nil {
+		fmt.Fprintf(stderr, "warning: could not remove the old login-scanned agent at %s (it will keep starting piperd at login): %v\n", legacy, err)
+	}
+	return 0
+}
+
+func agentUp(stdout, stderr io.Writer) int {
+	if code := evictLoginScannedPlist(stderr); code != 0 {
+		return code
+	}
+	if code := materializeLaunchd(stderr); code != 0 {
+		return code
+	}
+	plist, err := launchdPlistPath()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
 	out, err := launchctlRun("bootstrap", guiTarget(), plist)
@@ -408,6 +540,7 @@ func agentUp(stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "piperd started")
+	fmt.Fprintln(stdout, "note: won't survive a reboot — run `piper agent up` again after one")
 	return 0
 }
 
@@ -426,15 +559,6 @@ func agentDown(stdout, stderr io.Writer) int {
 }
 
 func agentStatus(stdout, stderr io.Writer) int {
-	plist, err := launchdPlistPath()
-	if err != nil {
-		fmt.Fprintln(stderr, "error:", err)
-		return 1
-	}
-	if _, err := os.Stat(plist); err != nil {
-		fmt.Fprintln(stdout, "piperd: not installed")
-		return 0
-	}
 	out, err := launchctlRun("print", guiTarget()+"/"+launchdLabel)
 	if err != nil {
 		fmt.Fprintln(stdout, "piperd: stopped")
