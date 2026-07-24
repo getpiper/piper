@@ -237,6 +237,9 @@ func (c *Client) GitHubStatus(ctx context.Context, accountCredential string) (St
 		return Status{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return Status{}, ErrBadCredential
+	}
 	if resp.StatusCode != http.StatusOK {
 		return Status{}, fmt.Errorf("relay github status: %s", resp.Status)
 	}

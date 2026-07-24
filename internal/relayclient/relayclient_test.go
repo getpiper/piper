@@ -204,6 +204,17 @@ func TestGitHubStatus(t *testing.T) {
 	}
 }
 
+func TestGitHubStatusMapsUnauthorizedToBadCredential(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL).GitHubStatus(context.Background(), "stale-cred")
+	if !errors.Is(err, ErrBadCredential) {
+		t.Fatalf("want ErrBadCredential for a 401, got %v", err)
+	}
+}
+
 func TestGitHubStatusNoApp(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"github_app":false,"installations":[],"install_url":""}`))
