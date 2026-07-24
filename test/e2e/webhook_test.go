@@ -171,9 +171,7 @@ func TestWebhookPushAndPreview(t *testing.T) {
 	pushPayload := `{"ref":"refs/heads/main","after":"` + pushSHA + `","repository":{"full_name":"` + repo + `"},"installation":{"id":99}}`
 	deliver(t, hc, "https://hooks."+base+"/", "push", secret, pushPayload, 60*time.Second)
 	fetchVia(t, hc, "https://blog."+base+"/", pushBody, 3*time.Minute)
-	if statusPosts.Load() == 0 {
-		t.Fatal("no deployment status was ever reported to the stub GitHub")
-	}
+	waitForStatus(t, &statusPosts, 30*time.Second)
 
 	// PR opened → preview at pr-7-blog.<base> (flattened single label under the
 	// wildcard); the production app keeps serving the push body.
@@ -270,6 +268,23 @@ func deliver(t *testing.T, hc *http.Client, url, event, secret, payload string, 
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("webhook %s to %s never accepted: last %s", event, url, last)
+}
+
+// waitForStatus polls until at least one deployment status has reached the stub
+// GitHub. The handler publishes the app's route and only then reports success
+// (webhook.go: Deploy, then Report), so a fetch through the relay can land in
+// the window before the /statuses POST — the count has to be polled, not read
+// once.
+func waitForStatus(t *testing.T, posts *atomic.Int32, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if posts.Load() > 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("no deployment status was ever reported to the stub GitHub")
 }
 
 // fetchVia polls url through the relay until it serves exactly want.
