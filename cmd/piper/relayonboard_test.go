@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -78,7 +80,9 @@ func TestRelayLoginStoresCredential(t *testing.T) {
 // that follows is advisory. When that poll times out, `piper login` must still
 // exit 0 — the credential is on disk and usable — and point the user at how to
 // finish the install (#297). A non-zero exit here reported a failure that was
-// not one and broke scripted use.
+// not one and broke scripted use. The poll timeout is short but NON-zero, so
+// the poll really runs: it queries the relay, enters the wait between polls,
+// and the deadline cuts that wait short — nothing about the path is skipped.
 func TestRelayLoginExitsZeroWhenInstallPollTimesOut(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PIPER_ADDR", "")
@@ -89,11 +93,13 @@ func TestRelayLoginExitsZeroWhenInstallPollTimesOut(t *testing.T) {
 	openBrowserFn = func(string) error { return nil }
 	defer func() { openBrowserFn = openBrowser }()
 
-	// Force the advisory install poll to time out immediately.
+	// The advisory install poll really runs and really waits; its deadline
+	// (well under the 3s poll interval) expires mid-wait.
 	oldTimeout := installPollTimeout
-	installPollTimeout = 0
+	installPollTimeout = 100 * time.Millisecond
 	defer func() { installPollTimeout = oldTimeout }()
 
+	var statusPolls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/login/device":
@@ -106,15 +112,27 @@ func TestRelayLoginExitsZeroWhenInstallPollTimesOut(t *testing.T) {
 				"account_credential": "cred-xyz", "username": "alice",
 				"install_url": "https://github.com/apps/piper/installations/new",
 			})
+		case "/v1/github/status":
+			statusPolls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{}})
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 	}))
 	defer srv.Close()
 
+	start := time.Now()
 	var out, errb bytes.Buffer
 	if code := run([]string{"login", "--relay", srv.URL}, &out, &errb); code != 0 {
 		t.Fatalf("code = %d, want 0 (a successful login must not fail on a timed-out install poll); stderr = %s", code, errb.String())
+	}
+	// The deadline cut the wait short: the poll did not sit out the full
+	// installPollInterval, let alone the real 10-minute timeout.
+	if elapsed := time.Since(start); elapsed >= installPollInterval {
+		t.Fatalf("install poll took %v, want it cut short well under the %v poll interval", elapsed, installPollInterval)
+	}
+	if statusPolls == 0 {
+		t.Fatal("the install poll never queried the relay; the test is not exercising the poll")
 	}
 	// The credential the login produced is persisted.
 	cc, err := config.LoadClient()
@@ -125,6 +143,73 @@ func TestRelayLoginExitsZeroWhenInstallPollTimesOut(t *testing.T) {
 		t.Fatalf("cc = %+v", cc)
 	}
 	// The user is told how to finish the install.
+	if !strings.Contains(out.String(), "https://github.com/apps/piper/installations/new") ||
+		!strings.Contains(out.String(), "piper github repos") {
+		t.Fatalf("stdout did not point the user at the outstanding install: %q", out.String())
+	}
+}
+
+// Ctrl-C during the advisory install poll must end the poll promptly — the
+// interrupt-aware context the login flow created is threaded all the way into
+// waitForInstall — and, the poll being advisory, the login must still exit 0
+// with the credential persisted (#297, consequence 2).
+func TestRelayLoginExitsZeroWhenInstallPollInterrupted(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PIPER_ADDR", "")
+	t.Setenv("PIPER_TOKEN", "")
+
+	pollSleep = func(time.Duration) {}
+	defer func() { pollSleep = time.Sleep }()
+	openBrowserFn = func(string) error { return nil }
+	defer func() { openBrowserFn = openBrowser }()
+
+	// The relay never records an installation; once the install poll starts,
+	// deliver SIGINT to this process — the login flow's signal.NotifyContext
+	// must turn it into a prompt context cancellation.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/login/device":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"user_code": "ABCD-EFGH", "verification_uri": "https://relay.test/device",
+				"device_code": "dev-1", "interval": 1, "expires_in": 300,
+			})
+		case "/v1/login/poll":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"account_credential": "cred-xyz", "username": "alice",
+				"install_url": "https://github.com/apps/piper/installations/new",
+			})
+		case "/v1/github/status":
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				p, err := os.FindProcess(os.Getpid())
+				if err == nil {
+					_ = p.Signal(os.Interrupt)
+				}
+			}()
+			_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	var out, errb bytes.Buffer
+	if code := run([]string{"login", "--relay", srv.URL}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, want 0 (an interrupted advisory install poll must not fail the login); stderr = %s", code, errb.String())
+	}
+	// Without context propagation the interrupt would surface only after the
+	// current 3s poll interval — or the 10-minute timeout — elapsed.
+	if elapsed := time.Since(start); elapsed >= installPollInterval {
+		t.Fatalf("interrupted install poll took %v, want a prompt return well under the %v poll interval", elapsed, installPollInterval)
+	}
+	cc, err := config.LoadClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.RelayAPI != srv.URL || cc.AccountCredential != "cred-xyz" {
+		t.Fatalf("cc = %+v", cc)
+	}
 	if !strings.Contains(out.String(), "https://github.com/apps/piper/installations/new") ||
 		!strings.Contains(out.String(), "piper github repos") {
 		t.Fatalf("stdout did not point the user at the outstanding install: %q", out.String())
@@ -236,8 +321,10 @@ func TestRelayLoginWebStoresCredentialAndWaitsForInstall(t *testing.T) {
 // installations list twice, then one installation, pinning that waitForInstall
 // keeps retrying while there is no installation and returns nil once one lands.
 func TestWaitForInstallPollsUntilInstalled(t *testing.T) {
-	pollSleep = func(time.Duration) {}
-	defer func() { pollSleep = time.Sleep }()
+	// Shrink the wait between polls; the poll itself really runs.
+	oldInterval := installPollInterval
+	installPollInterval = time.Millisecond
+	defer func() { installPollInterval = oldInterval }()
 
 	var polls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -266,11 +353,41 @@ func TestWaitForInstallPollsUntilInstalled(t *testing.T) {
 	defer srv.Close()
 
 	rc := relayclient.New(srv.URL)
-	if err := waitForInstall(rc, "cred-xyz", "https://github.com/apps/piper/installations/new"); err != nil {
+	if err := waitForInstall(context.Background(), rc, "cred-xyz", "https://github.com/apps/piper/installations/new"); err != nil {
 		t.Fatalf("waitForInstall: %v", err)
 	}
 	if polls != 3 {
 		t.Fatalf("polls = %d, want 3", polls)
+	}
+}
+
+// A cancelled context must end waitForInstall promptly — mid-wait, not after
+// the current poll interval or the 10-minute timeout — so Ctrl-C during the
+// advisory install poll returns at once (#297, consequence 2). The real 3s
+// installPollInterval stays in force: cancellation, not a shrunken wait, is
+// what makes the return prompt.
+func TestWaitForInstallRespectsCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/github/status" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"installations": []map[string]any{}})
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	err := waitForInstall(ctx, relayclient.New(srv.URL), "cred-xyz", "https://github.com/apps/piper/installations/new")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForInstall err = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(start); elapsed >= installPollInterval {
+		t.Fatalf("waitForInstall took %v after cancellation, want a prompt return well under the %v poll interval", elapsed, installPollInterval)
 	}
 }
 
