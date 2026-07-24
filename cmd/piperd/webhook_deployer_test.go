@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // stubRoutes records the hosts routing work touches, which is how these tests

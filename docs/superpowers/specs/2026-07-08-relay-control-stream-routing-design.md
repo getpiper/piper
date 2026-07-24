@@ -1,6 +1,6 @@
 # Relay control-stream routing + caller→agent authz — design
 
-Implements [#73](https://github.com/getpiper/piper/issues/73) (Part of #49),
+Implements [#73](https://github.com/piperbox/piper/issues/73) (Part of #49),
 against the trust model settled in
 [`2026-07-07-relay-control-trust-model-design.md`](2026-07-07-relay-control-trust-model-design.md):
 three anchors (enrollment token, relay account credential, Token B), hung off a
@@ -13,7 +13,7 @@ its Token B, and how authz is enforced.
 The trust-model spec says *"the relay asks piperd — over the tunnel — to mint a
 Token B."* Taken literally (a relay-initiated pull), that has a bootstrap
 problem: `piperd`'s `/v1/tokens` endpoint is itself Token-B-gated
-([#77](https://github.com/getpiper/piper/pull/77), no transport bypass), so
+([#77](https://github.com/piperbox/piper/pull/77), no transport bypass), so
 minting the *first* Token B would need a special piperd mint-endpoint
 authenticated by something other than Token B — reopening exactly the
 "does the tunnel count as identity?" question #77 closed.

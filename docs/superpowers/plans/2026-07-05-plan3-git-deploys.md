@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`. No new cgo dependencies. (GitHub App JWT is minted with stdlib `crypto/rsa` — do **not** add a JWT library.)
-- **Module path** is `github.com/getpiper/piper`.
+- **Module path** is `github.com/piperbox/piper`.
 - **Deployment status strings** (SQLite `deployments.status`) are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`. (Distinct from GitHub Deployment *states* — do not conflate.)
 - **Defaults:** control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, base domain `piper.localhost`, app container port `8080`. New: webhook listener `127.0.0.1:8089` (`PIPER_WEBHOOK_ADDR`).
 - **Layering — nothing imports "up":** `source` knows only GitHub + git; `source/github` does **not** import `store`; `webhook` orchestrates `source`+`store`+`deploy`; `deploy` stays ignorant of the source.
@@ -416,7 +416,7 @@ package source_test
 import (
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func TestKindString(t *testing.T) {
@@ -800,7 +800,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func sign(secret, body string) string {
@@ -888,7 +888,7 @@ import (
 
 	"net/http"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func (p *Provider) verify(headers http.Header, body []byte) error {
@@ -980,7 +980,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // makeTarball builds a gzipped tar with a single top-level dir "alice-blog-abc/"
@@ -1069,7 +1069,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func (p *Provider) Fetch(ctx context.Context, ev source.Event, destDir string) error {
@@ -1199,7 +1199,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func TestReportPendingCreatesDeployment(t *testing.T) {
@@ -1289,7 +1289,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func (p *Provider) Report(ctx context.Context, ev source.Event, status source.Status, url string) error {
@@ -1493,7 +1493,7 @@ import (
 func BuildManifest(appName, webhookURL, redirectURL string) ([]byte, error) {
 	m := map[string]any{
 		"name":         appName,
-		"url":          "https://github.com/getpiper/piper",
+		"url":          "https://github.com/piperbox/piper",
 		"redirect_url": redirectURL,
 		"public":       false,
 		"hook_attributes": map[string]any{
@@ -1590,9 +1590,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
-	"github.com/getpiper/piper/internal/store"
-	"github.com/getpiper/piper/internal/webhook"
+	"github.com/piperbox/piper/internal/source"
+	"github.com/piperbox/piper/internal/store"
+	"github.com/piperbox/piper/internal/webhook"
 )
 
 type fakeProvider struct {
@@ -1758,8 +1758,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/getpiper/piper/internal/source"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/source"
+	"github.com/piperbox/piper/internal/store"
 )
 
 const maxBody = 5 << 20 // 5 MiB
@@ -2086,7 +2086,7 @@ Add these three handlers before `return mux`:
 	})
 ```
 
-Add `"github.com/getpiper/piper/internal/source/github"` to the api imports.
+Add `"github.com/piperbox/piper/internal/source/github"` to the api imports.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -2133,9 +2133,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
-	"github.com/getpiper/piper/internal/source/github"
-	"github.com/getpiper/piper/internal/webhook"
+	"github.com/piperbox/piper/internal/source"
+	"github.com/piperbox/piper/internal/source/github"
+	"github.com/piperbox/piper/internal/webhook"
 )
 
 func TestWebhookIntegrationRealProvider(t *testing.T) {
@@ -2216,8 +2216,8 @@ Expected: FAIL initially only if compilation of the shim is off; fix the shim so
 In `cmd/piperd/main.go`, add imports:
 
 ```go
-	"github.com/getpiper/piper/internal/source/github"
-	"github.com/getpiper/piper/internal/webhook"
+	"github.com/piperbox/piper/internal/source/github"
+	"github.com/piperbox/piper/internal/webhook"
 ```
 
 Immediately after the relay TLS + tunnel block (after `go agent.RunTunnelClient(...)`), still inside `if cfg.RelayAddr != "" {`, add:
@@ -2512,15 +2512,15 @@ git commit -m "$(printf 'feat(cli): github setup and app link commands\n\nPart o
 Replace the Plan 3 block with:
 
 ```markdown
-## Plan 3 — Git-driven deploys — epic [#11](https://github.com/getpiper/piper/issues/11) ([plan](docs/superpowers/plans/2026-07-05-plan3-git-deploys.md))
+## Plan 3 — Git-driven deploys — epic [#11](https://github.com/piperbox/piper/issues/11) ([plan](docs/superpowers/plans/2026-07-05-plan3-git-deploys.md))
 
 Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the Plan-2 tunnel to `hooks.<base>`; status reported to GitHub.
 
-- ✅ `source` — provider seam (Event/Kind/Status + Provider interface) — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `source/github` — App JWT + installation token, webhook parse (HMAC), tarball fetch, Deployments API, manifest onboarding — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#11](https://github.com/getpiper/piper/issues/11)
-- ✅ `piperd` — webhook served over the tunnel in relay mode — [#11](https://github.com/getpiper/piper/issues/11)
+- ✅ `source` — provider seam (Event/Kind/Status + Provider interface) — [#11](https://github.com/piperbox/piper/issues/11)
+- ✅ `source/github` — App JWT + installation token, webhook parse (HMAC), tarball fetch, Deployments API, manifest onboarding — [#11](https://github.com/piperbox/piper/issues/11)
+- ✅ `webhook` — signed webhook → app lookup → deploy, per-app serialization — [#11](https://github.com/piperbox/piper/issues/11)
+- ✅ `api`/`cli` — `github setup`, `app link`, onboarding endpoints — [#11](https://github.com/piperbox/piper/issues/11)
+- ✅ `piperd` — webhook served over the tunnel in relay mode — [#11](https://github.com/piperbox/piper/issues/11)
 - ⬜ PR-preview URLs + teardown (`pr-N.<app>.<base>`) — deferred behind the seam
 ```
 

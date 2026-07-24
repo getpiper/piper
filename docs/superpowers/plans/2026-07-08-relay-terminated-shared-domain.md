@@ -13,7 +13,7 @@ This is **Plan 3 of 3** for the slice specced in [`docs/superpowers/specs/2026-0
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`; SQLite is `modernc.org/sqlite` only. `make cross` (linux/arm64) must stay green. **No new dependencies.**
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **TDD.** Every task is failing-test-first. Run `make test` before each commit; it must pass.
 - **Layering.** `internal/tunnel` imports only stdlib + yamux. `internal/relay` imports `internal/tunnel` + stdlib + the existing OAuth/OIDC libs (never `store`/`deploy`/`api`/`runtime`/`caddy`). `internal/agent` imports only `internal/tunnel` + stdlib. `internal/deploy` defines its registrar interface locally and imports only `store`/`runtime` (+ stdlib); `cmd/piperd` wires `agent` into `deploy`. **Nothing imports "up".**
 - **Secrets hashed at rest** (`sha256` hex, `hashToken`) — unchanged; this plan adds no new secrets.
@@ -562,7 +562,7 @@ func TestRouterByHost(t *testing.T) {
 }
 ```
 
-Ensure the file imports `"github.com/getpiper/piper/internal/tunnel"` (add it if the existing test file does not already).
+Ensure the file imports `"github.com/piperbox/piper/internal/tunnel"` (add it if the existing test file does not already).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -791,7 +791,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // LoadWildcardConfig loads certFile/keyFile into a *tls.Config the relay uses to
@@ -1009,7 +1009,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // startTestRelay opens a store with one enrolled account-bound agent, starts
@@ -1291,7 +1291,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // fakeRelay accepts one agent tunnel and exposes its session for the test to
@@ -1431,7 +1431,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // ErrNotConnected is returned by Register/Deregister when no relay session is live.
@@ -1944,7 +1944,7 @@ Replace the relay-mode block (`if cfg.RelayAddr != "" { … }`) so terminated mo
 	}))
 ```
 
-Add `"github.com/getpiper/piper/internal/tunnel"` to the imports. Remove the now-unused prior `dep := deploy.New(...)` line further down (the block above defines `dep` earlier); ensure there is exactly one `dep` definition.
+Add `"github.com/piperbox/piper/internal/tunnel"` to the imports. Remove the now-unused prior `dep := deploy.New(...)` line further down (the block above defines `dep` earlier); ensure there is exactly one `dep` definition.
 
 - [ ] **Step 3: Build + vet the whole module**
 
@@ -2191,7 +2191,7 @@ only splices SNI) — set `PIPER_BASE_DOMAIN` + cert/DNS config instead of using
 Mark the Plan-2/onboarding lines complete and add the shared-domain line under the Plan 2 relay epic:
 
 ```markdown
-- ✅ Relay-terminated shared domain — relay assigns `<app-hash>-<username>.<apex>`, terminates wildcard TLS, forwards HTTP over a typed tunnel stream; `login → connect → deploy → curl` e2e green — [#49](https://github.com/getpiper/piper/issues/49)
+- ✅ Relay-terminated shared domain — relay assigns `<app-hash>-<username>.<apex>`, terminates wildcard TLS, forwards HTTP over a typed tunnel stream; `login → connect → deploy → curl` e2e green — [#49](https://github.com/piperbox/piper/issues/49)
 ```
 
 Adjust the epic-level caveat noting the free-tier box is now served end-to-end. Keep entries to one line each.

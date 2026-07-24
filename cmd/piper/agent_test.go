@@ -439,8 +439,8 @@ func onDarwin(t *testing.T) {
 func darwinPaths(t *testing.T) (plist, legacy, env, piperd string, restore func()) {
 	t.Helper()
 	dir := t.TempDir()
-	plist = filepath.Join(dir, ".piper", "com.getpiper.piperd.plist")
-	legacy = filepath.Join(dir, "Library", "LaunchAgents", "com.getpiper.piperd.plist")
+	plist = filepath.Join(dir, ".piper", "com.piperbox.piperd.plist")
+	legacy = filepath.Join(dir, "Library", "LaunchAgents", "com.piperbox.piperd.plist")
 	env = filepath.Join(dir, ".piper", "piperd.env")
 	piperd = filepath.Join(dir, "bin", "piperd")
 	oldPlist, oldLegacy, oldEnv, oldBin := launchdPlistPath, legacyLaunchAgentPath, userEnvPath, piperdPath
@@ -464,7 +464,7 @@ func TestLaunchdPlistIsNotLoginScanned(t *testing.T) {
 	if strings.Contains(got, filepath.Join("Library", "LaunchAgents")) {
 		t.Errorf("plist path %q is login-scanned; piperd would survive a reboot", got)
 	}
-	if !strings.Contains(got, filepath.Join(".piper", "com.getpiper.piperd.plist")) {
+	if !strings.Contains(got, filepath.Join(".piper", "com.piperbox.piperd.plist")) {
 		t.Errorf("plist path = %q, want it under ~/.piper", got)
 	}
 }
@@ -512,7 +512,7 @@ func TestAgentUpDarwinMaterializesPlist(t *testing.T) {
 	}
 	got := string(b)
 	for _, want := range []string{
-		"<string>com.getpiper.piperd</string>",
+		"<string>com.piperbox.piperd</string>",
 		"<key>KeepAlive</key>",
 		`PIPER_HTTP_ADDR=":8080"`,
 		`PIPER_HTTPS_ADDR=":8443"`,

@@ -1,6 +1,6 @@
 # Relay organizations — design
 
-Design for [#104](https://github.com/getpiper/piper/issues/104): org model,
+Design for [#104](https://github.com/piperbox/piper/issues/104): org model,
 membership, and org-scoped agent authz on the relay. Phase-3 dependency of the
 dashboard roadmap (#76). Builds directly on the trust model
 (`2026-07-07-relay-control-trust-model-design.md`) and GitHub identities (#99):

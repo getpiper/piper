@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // pipeSession builds an in-memory relay↔agent tunnel pair whose relay-side

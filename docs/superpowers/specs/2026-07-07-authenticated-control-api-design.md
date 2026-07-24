@@ -1,7 +1,7 @@
 # Authenticated control API — design
 
-Closes [#72](https://github.com/getpiper/piper/issues/72) — the **gate** for the
-remote control-plane epic ([#49](https://github.com/getpiper/piper/issues/49)).
+Closes [#72](https://github.com/piperbox/piper/issues/72) — the **gate** for the
+remote control-plane epic ([#49](https://github.com/piperbox/piper/issues/49)).
 Nothing else in that epic ships until this lands.
 
 ## Goal
@@ -18,7 +18,7 @@ Today the control API binds `127.0.0.1:8088`. The kernel guarantees only a proce
 on the same host can connect to a loopback address, so "a connection exists" is a
 reliable proxy for "the caller is on this box." That is the entire security model.
 
-The relay work ([#73](https://github.com/getpiper/piper/issues/73)) reuses the
+The relay work ([#73](https://github.com/piperbox/piper/issues/73)) reuses the
 existing **outbound** tunnel to reach the box. Look at how the tunnel moves bytes
 today (`internal/agent/tunnelclient.go`, `serveStreams` → `dialLocal`): piperd
 holds a yamux session dialed *out* to the relay; when the relay has traffic, piperd
@@ -54,8 +54,8 @@ with no local bypass.
 - **Scope column now, enforcement later.** Add a `scope` column defaulted to
   `admin` to dodge a future migration, but do **not** build read-only enforcement
   in this issue — there is no read-only consumer until the dashboard
-  ([#76](https://github.com/getpiper/piper/issues/76)) / metrics
-  ([#75](https://github.com/getpiper/piper/issues/75)).
+  ([#76](https://github.com/piperbox/piper/issues/76)) / metrics
+  ([#75](https://github.com/piperbox/piper/issues/75)).
 - **Same box bypasses the relay by construction.** Transport is decided purely by
   the target address in the CLI config: a local context is
   `http://127.0.0.1:8088`, a direct loopback hop with the relay never involved. The

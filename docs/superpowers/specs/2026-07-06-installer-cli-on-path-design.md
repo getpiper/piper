@@ -1,9 +1,9 @@
 # One-line installer + CLI-on-PATH — design
 
-Closes [#46](https://github.com/getpiper/piper/issues/46) (one-line installer) and
-[#47](https://github.com/getpiper/piper/issues/47) (standalone `piper` CLI on PATH),
+Closes [#46](https://github.com/piperbox/piper/issues/46) (one-line installer) and
+[#47](https://github.com/piperbox/piper/issues/47) (standalone `piper` CLI on PATH),
 both under the "install & run piperd as a service" epic
-([#43](https://github.com/getpiper/piper/issues/43)).
+([#43](https://github.com/piperbox/piper/issues/43)).
 
 ## Goal
 
@@ -13,13 +13,13 @@ share OS/arch detection, artifact download, and checksum verification.
 
 ```
 # full agent install (Linux, root): binaries + systemd unit + env skeleton
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh
 
 # CLI only (Linux or macOS): just the `piper` client on PATH
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --cli-only
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh -s -- --cli-only
 
 # bleeding edge, including pre-releases (release candidates)
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --rc
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh -s -- --rc
 ```
 
 ## Context (what already exists)
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
 ## Script: `install.sh` (repo root)
 
 A single POSIX `sh` script at the repository root, so the canonical URL is short
-(`raw.githubusercontent.com/getpiper/piper/main/install.sh`). Also attach it to
+(`raw.githubusercontent.com/piperbox/piper/main/install.sh`). Also attach it to
 releases via goreleaser `extra_files` so a release page links a stable copy.
 
 ### Modes

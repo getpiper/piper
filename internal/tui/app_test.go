@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/domain"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/domain"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // apiCalls records the mutating calls a test drives, so assertions can check

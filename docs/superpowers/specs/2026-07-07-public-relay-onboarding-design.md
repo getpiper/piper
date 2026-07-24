@@ -26,7 +26,7 @@ into independent sub-projects, each with its own spec:
 1. **Self-service onboarding + shared domain** — *this spec.*
 2. Vercel-style custom domains (relay-terminated BYO-domain) — follow-up spec.
 3. Tiers / billing / paywall / real quotas — follow-up spec.
-4. Dashboard ([#76](https://github.com/getpiper/piper/issues/76)) — consumes this
+4. Dashboard ([#76](https://github.com/piperbox/piper/issues/76)) — consumes this
    account + control surface.
 
 **In scope here:** Google-OAuth relay accounts, a device-flow self-service box
@@ -274,8 +274,8 @@ operator disables account|hostname
   device-flow claim).
 - The trust spec's "app traffic is never decrypted" invariant is **narrowed**: it
   holds for BYO-domain, and is a **documented carve-out** for the relay-terminated
-  free tier. Update [#49](https://github.com/getpiper/piper/issues/49) /
-  [#73](https://github.com/getpiper/piper/issues/73) notes to reference this
+  free tier. Update [#49](https://github.com/piperbox/piper/issues/49) /
+  [#73](https://github.com/piperbox/piper/issues/73) notes to reference this
   carve-out so the passthrough-only criterion is understood as scoped to
   BYO-domain + control-plane, with the free tier deliberately terminated.
 - File follow-up issues for the deferred slices (custom domains, tiers/billing,

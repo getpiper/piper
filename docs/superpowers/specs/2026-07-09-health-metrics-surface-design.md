@@ -1,6 +1,6 @@
 # Health/metrics surface over the tunnel — design
 
-Implements [#75](https://github.com/getpiper/piper/issues/75) (Part of #49).
+Implements [#75](https://github.com/piperbox/piper/issues/75) (Part of #49).
 Consumes the authenticated control API (#72) and the relay control-stream
 routing (#73): a remote caller — the CLI today, the dashboard (#76) later —
 can answer *"is my box up, and what's deployed?"*.

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // fakeRelay accepts one agent tunnel and exposes its session for the test to

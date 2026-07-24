@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getpiper/piper/internal/relay"
-	"github.com/getpiper/piper/internal/version"
+	"github.com/piperbox/piper/internal/relay"
+	"github.com/piperbox/piper/internal/version"
 )
 
 func TestRunAdminDisable(t *testing.T) {

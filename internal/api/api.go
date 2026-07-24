@@ -15,9 +15,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/getpiper/piper/internal/domain"
-	"github.com/getpiper/piper/internal/source/github"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/domain"
+	"github.com/piperbox/piper/internal/source/github"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type Deployerer interface {

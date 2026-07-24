@@ -1,6 +1,6 @@
 # App lifecycle: stop and delete
 
-**Issue:** [#103](https://github.com/getpiper/piper/issues/103) · **Date:** 2026-07-11 · **Status:** approved
+**Issue:** [#103](https://github.com/piperbox/piper/issues/103) · **Date:** 2026-07-11 · **Status:** approved
 
 Phase 2 dependency of the dashboard roadmap (getpiper/dashboard — part of #76).
 

@@ -187,7 +187,7 @@ In `cmd/piper/relayonboard.go`:
 	for _, in := range st.Installations {
 ```
 
-In `cmd/piper/main.go` line 203, change `defaultRelayAPI` → `relayclient.DefaultAPI` and add `"github.com/getpiper/piper/internal/relayclient"` to the imports.
+In `cmd/piper/main.go` line 203, change `defaultRelayAPI` → `relayclient.DefaultAPI` and add `"github.com/piperbox/piper/internal/relayclient"` to the imports.
 
 Verify no stragglers: `grep -rn defaultRelayAPI cmd/ internal/` → no hits.
 
@@ -252,7 +252,7 @@ Expected: compile FAIL — `undefined: RelayAPI` / `m.relay undefined`.
 
 - [ ] **Step 3: Add the seam**
 
-In `internal/tui/tui.go`, add to the imports `"context"` and `"github.com/getpiper/piper/internal/relayclient"`, and below the `Dialer` type add:
+In `internal/tui/tui.go`, add to the imports `"context"` and `"github.com/piperbox/piper/internal/relayclient"`, and below the `Dialer` type add:
 
 ```go
 // RelayAPI is the slice of the relay control API the TUI consumes.
@@ -406,8 +406,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // fakeRelay is a scriptable RelayAPI for wizard and picker tests.
@@ -650,8 +650,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // wizardState is where the github wizard stands in the onboarding story.
@@ -1159,7 +1159,7 @@ func TestRootInjectsRelayIntoLinkForm(t *testing.T) {
 }
 ```
 
-Add `"github.com/getpiper/piper/internal/config"` and `"github.com/getpiper/piper/internal/relayclient"` to `linkform_test.go`'s imports.
+Add `"github.com/piperbox/piper/internal/config"` and `"github.com/piperbox/piper/internal/relayclient"` to `linkform_test.go`'s imports.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -1219,7 +1219,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // pickRepo is one repo-picker entry: the owner/name to link and the

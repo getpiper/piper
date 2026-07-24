@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - `CGO_ENABLED=0` must keep passing (`make cross`); stdlib `syscall` only, no cgo.
-- Module path `github.com/getpiper/piper`; helpers live in `cmd/piperd`, `store` stays ignorant of paths/privileges (layering rule).
+- Module path `github.com/piperbox/piper`; helpers live in `cmd/piperd`, `store` stays ignorant of paths/privileges (layering rule).
 - Concurrent access with the running daemon is fine by design: `store.Open` already sets `busy_timeout(5000)` for exactly this case. Do NOT add service stop/start logic.
 - Run `make verify` (gofmt → vet → test → cross) before claiming any task done.
 - Commit style: conventional commits, body line `Part of #134`, trailer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
@@ -162,7 +162,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `cmd/piperd/token_test.go` (add `"github.com/getpiper/piper/internal/config"` to its imports):
+Append to `cmd/piperd/token_test.go` (add `"github.com/piperbox/piper/internal/config"` to its imports):
 
 ```go
 // systemManaged points config at temp dirs simulating a systemd install:

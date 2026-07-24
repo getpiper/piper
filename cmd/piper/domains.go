@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/getpiper/piper/internal/client"
-	"github.com/getpiper/piper/internal/domain"
+	"github.com/piperbox/piper/internal/client"
+	"github.com/piperbox/piper/internal/domain"
 )
 
 const domainsUsage = "usage: piper domains <add <domain> --app <name> | list [--app <name>] | remove <domain> [--app <name>]>"

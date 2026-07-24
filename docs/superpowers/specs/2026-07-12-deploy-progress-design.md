@@ -1,6 +1,6 @@
 # Deploy progress: async deploys followed by polling — design
 
-Implements [#140](https://github.com/getpiper/piper/issues/140). `piper deploy`
+Implements [#140](https://github.com/piperbox/piper/issues/140). `piper deploy`
 is synchronous — it POSTs the tarball and blocks until piperd finishes
 build → run → health-check → route, printing nothing in between. On a first
 deploy the base-image pull can run for minutes; during Pi onboarding that read

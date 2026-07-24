@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // ErrNotConnected is returned by Register/Deregister when no relay session is live.

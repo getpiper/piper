@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // --- item 6: bearerToken scheme is case-insensitive, rest stays strict ---

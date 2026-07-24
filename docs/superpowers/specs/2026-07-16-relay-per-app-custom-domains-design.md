@@ -1,8 +1,8 @@
 # Relay custom domains 1:N: pending-until-active lifecycle
 
-**Issue:** [#227](https://github.com/getpiper/piper/issues/227) · **Date:** 2026-07-16 · **Status:** approved
+**Issue:** [#227](https://github.com/piperbox/piper/issues/227) · **Date:** 2026-07-16 · **Status:** approved
 
-Part of the per-app BYO domains epic ([#224](https://github.com/getpiper/piper/issues/224)). Relay-side prerequisite of the per-domain lifecycle manager (#229).
+Part of the per-app BYO domains epic ([#224](https://github.com/piperbox/piper/issues/224)). Relay-side prerequisite of the per-domain lifecycle manager (#229).
 
 ## Problem
 

@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - No cgo: every build must work with `CGO_ENABLED=0` (repo-wide hard constraint).
-- Module path is `github.com/getpiper/piper`; Go toolchain is `1.26` (`go.mod`).
+- Module path is `github.com/piperbox/piper`; Go toolchain is `1.26` (`go.mod`).
 - `PIPER_DATA_DIR` default in code is `./data`; the systemd unit and this container path both override it to `/var/lib/piper` — keep that value consistent.
 - `make test` and `make cross` must stay green (repo-wide CI gate).
 - Follow the existing `packaging/systemd/*_test.go` pattern: a Go test in the same directory as the shipped artifact, reading it as plain text and asserting required substrings.
@@ -446,13 +446,13 @@ git commit -m "ci: build piperd image for linux/amd64+arm64 on Dockerfile/compos
 In `PROGRESS.md`, under `## Install & run piperd as a service`, change:
 
 ```markdown
-- ⬜ Container image + compose (host `docker.sock`; publish blocked on release pipeline) — [#45](https://github.com/getpiper/piper/issues/45)
+- ⬜ Container image + compose (host `docker.sock`; publish blocked on release pipeline) — [#45](https://github.com/piperbox/piper/issues/45)
 ```
 
 to:
 
 ```markdown
-- ✅ Container image + compose (host `docker.sock`; registry publish tracked separately) — [#45](https://github.com/getpiper/piper/issues/45)
+- ✅ Container image + compose (host `docker.sock`; registry publish tracked separately) — [#45](https://github.com/piperbox/piper/issues/45)
 ```
 
 - [ ] **Step 2: Update the "Last updated" line**
@@ -460,7 +460,7 @@ to:
 Change the `_Last updated: ..._` line at the top of `PROGRESS.md` to reflect this change, e.g.:
 
 ```markdown
-_Last updated: 2026-07-07 — piperd ships a container image + Compose file (epic #43); registry publish remains a follow-up. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/getpiper/piper/issues)._
+_Last updated: 2026-07-07 — piperd ships a container image + Compose file (epic #43); registry publish remains a follow-up. Plan 3 complete: push-to-deploy plus PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert). Live tracker: [issues](https://github.com/piperbox/piper/issues)._
 ```
 
 - [ ] **Step 3: Run the full verification sequence**

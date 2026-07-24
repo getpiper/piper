@@ -1,6 +1,6 @@
 # PR-preview URLs + teardown — design
 
-_Date: 2026-07-05 · Issue: [#32](https://github.com/getpiper/piper/issues/32) · Part of Plan 3 ([#11](https://github.com/getpiper/piper/issues/11))_
+_Date: 2026-07-05 · Issue: [#32](https://github.com/piperbox/piper/issues/32) · Part of Plan 3 ([#11](https://github.com/piperbox/piper/issues/11))_
 
 ## Goal
 

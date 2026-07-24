@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func fixtureApps() []api.App {

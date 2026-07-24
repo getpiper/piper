@@ -1,6 +1,6 @@
 # Deployment history + build/deploy logs on the control API — design
 
-Implements [#101](https://github.com/getpiper/piper/issues/101) (Phase 2
+Implements [#101](https://github.com/piperbox/piper/issues/101) (Phase 2
 dependency of the dashboard roadmap, getpiper/dashboard #76).
 
 Today `DockerRuntime.Build` drains the Docker build stream to `io.Discard`,

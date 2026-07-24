@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`. No new dependencies (bubbletea/bubbles/lipgloss/config already present).
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **Layering:** pure `internal/tui` change plus one `cmd/piper` wiring change. `tui` may import `internal/config` (a *down* dependency, for the `Box` type) — it must **not** import `internal/client`. Nothing imports up. No `piperd`/`piper-relay` change, no API-surface change.
 - **Deployment status strings** unchanged; not touched here.
 - **Relay boxes** (a `Box` with a non-empty `RelayAPI`) are **listed** but **not switchable** in this phase: they render `—` for status and decline `↵`. The box form edits only name/addr/token and preserves `RelayAPI`/`AccountCredential` untouched.
@@ -58,7 +58,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // seedConfig points HOME at a temp dir and writes cf there, so config
@@ -201,9 +201,9 @@ Add `internal/config` to the import block in `internal/tui/tui.go`:
 ```go
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/store"
 )
 ```
 
@@ -244,7 +244,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 ```
 
@@ -325,7 +325,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // boxesView is the depth-1 box switcher/editor: a table of the configured boxes
@@ -458,7 +458,7 @@ Expected: PASS (all).
 - [ ] **Step 9: Run the full package + the cmd build**
 
 Run: `go test ./internal/tui/ && go build ./cmd/piper/`
-Expected: `ok  github.com/getpiper/piper/internal/tui`; build succeeds.
+Expected: `ok  github.com/piperbox/piper/internal/tui`; build succeeds.
 
 - [ ] **Step 10: Commit**
 
@@ -497,7 +497,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 ```
 
@@ -661,7 +661,7 @@ Expected: PASS (all three).
 - [ ] **Step 6: Run the full package**
 
 Run: `go test ./internal/tui/`
-Expected: `ok  github.com/getpiper/piper/internal/tui`
+Expected: `ok  github.com/piperbox/piper/internal/tui`
 
 - [ ] **Step 7: Commit**
 
@@ -707,7 +707,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // submitForm fills the fields and returns the cmd produced by Enter.
@@ -919,7 +919,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // boxFormView adds or edits a box: name, addr, and a masked token. On submit it
@@ -1087,7 +1087,7 @@ Expected: PASS (all).
 - [ ] **Step 8: Run the full package**
 
 Run: `go test ./internal/tui/`
-Expected: `ok  github.com/getpiper/piper/internal/tui`
+Expected: `ok  github.com/piperbox/piper/internal/tui`
 
 - [ ] **Step 9: Commit**
 
@@ -1308,7 +1308,7 @@ Expected: PASS (all).
 - [ ] **Step 8: Run the full package**
 
 Run: `go test ./internal/tui/`
-Expected: `ok  github.com/getpiper/piper/internal/tui`
+Expected: `ok  github.com/piperbox/piper/internal/tui`
 
 - [ ] **Step 9: Commit**
 
@@ -1384,7 +1384,7 @@ Expected: shows the existing TUI phase lines to append near.
 Add a terse one-line entry beside the other TUI phase entries (matching the file's `[#N]`/`— #N` style):
 
 ```
-- ✅ Boxes view: switcher + add/edit/remove config editor over schema v2 — [#198](https://github.com/getpiper/piper/issues/198)
+- ✅ Boxes view: switcher + add/edit/remove config editor over schema v2 — [#198](https://github.com/piperbox/piper/issues/198)
 ```
 
 Keep it one line — detail lives in the issue.

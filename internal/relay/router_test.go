@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 func TestRouterSuffixMatch(t *testing.T) {

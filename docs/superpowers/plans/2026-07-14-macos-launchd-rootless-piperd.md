@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds must pass with `CGO_ENABLED=0`; `make cross` (linux/arm64) must stay green. No build-tag-split files needed here — gate on `runtime.GOOS` at runtime.
-- **Module path:** `github.com/getpiper/piper`.
+- **Module path:** `github.com/piperbox/piper`.
 - **Deployment status strings** unchanged: `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Defaults unchanged on Linux:** control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, base domain `piper.localhost`, app container port `8080`, and Caddy HTTP/HTTPS listen `:80`/`:443`.
 - **Test-first (TDD).** Every change starts with a failing test (or, for static asset/doc files, a contract test that fails until the file exists).
@@ -136,12 +136,12 @@ git commit -m "$(printf 'feat(agent): configurable PIPER_HTTP_ADDR/PIPER_HTTPS_A
 ### Task 2: launchd plist + macOS env example + contract tests
 
 **Files:**
-- Create: `packaging/launchd/com.getpiper.piperd.plist`
+- Create: `packaging/launchd/com.piperbox.piperd.plist`
 - Create: `packaging/launchd/piperd.env.macos.example`
 - Create: `packaging/launchd/piperd_test.go`
 
 **Interfaces:**
-- Produces: a LaunchAgent plist at label `com.getpiper.piperd` that runs `/usr/local/bin/piperd` rootless on `:8080`/`:8443` under `~/.piper`, sourcing `~/.piper/piperd.env`. Consumed by the `piper agent` CLI (Task 4), which bootstraps this exact label/path.
+- Produces: a LaunchAgent plist at label `com.piperbox.piperd` that runs `/usr/local/bin/piperd` rootless on `:8080`/`:8443` under `~/.piper`, sourcing `~/.piper/piperd.env`. Consumed by the `piper agent` CLI (Task 4), which bootstraps this exact label/path.
 
 - [ ] **Step 1: Write the failing contract tests**
 
@@ -157,13 +157,13 @@ import (
 )
 
 func TestPiperdPlistContract(t *testing.T) {
-	b, err := os.ReadFile("com.getpiper.piperd.plist")
+	b, err := os.ReadFile("com.piperbox.piperd.plist")
 	if err != nil {
 		t.Fatal(err)
 	}
 	plist := string(b)
 	required := []string{
-		"<string>com.getpiper.piperd</string>",
+		"<string>com.piperbox.piperd</string>",
 		"<key>RunAtLoad</key>",
 		"<key>KeepAlive</key>",
 		"<string>/bin/sh</string>",
@@ -198,11 +198,11 @@ func TestPiperdEnvMacosExample(t *testing.T) {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./packaging/launchd/ -v`
-Expected: FAIL — `open com.getpiper.piperd.plist: no such file or directory`.
+Expected: FAIL — `open com.piperbox.piperd.plist: no such file or directory`.
 
 - [ ] **Step 3: Create the plist**
 
-Create `packaging/launchd/com.getpiper.piperd.plist` (note the XML-escaped `&&`, `>>`, `2>>` inside the wrapper string):
+Create `packaging/launchd/com.piperbox.piperd.plist` (note the XML-escaped `&&`, `>>`, `2>>` inside the wrapper string):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -210,7 +210,7 @@ Create `packaging/launchd/com.getpiper.piperd.plist` (note the XML-escaped `&&`,
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.getpiper.piperd</string>
+  <string>com.piperbox.piperd</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>
@@ -272,8 +272,8 @@ Expected: PASS (both).
 
 - [ ] **Step 6: Sanity-check the plist parses as valid XML/plist**
 
-Run: `plutil -lint packaging/launchd/com.getpiper.piperd.plist`
-Expected: `packaging/launchd/com.getpiper.piperd.plist: OK`.
+Run: `plutil -lint packaging/launchd/com.piperbox.piperd.plist`
+Expected: `packaging/launchd/com.piperbox.piperd.plist: OK`.
 (On non-macOS where `plutil` is absent, skip this step — the Go test already guards structure.)
 
 - [ ] **Step 7: Commit**
@@ -311,7 +311,7 @@ func repositoryFile(t *testing.T, parts ...string) string {
 func TestPiperdLaunchdDocumentation(t *testing.T) {
 	manual := repositoryFile(t, "docs", "manual-setup.md")
 	for _, s := range []string{
-		"packaging/launchd/com.getpiper.piperd.plist",
+		"packaging/launchd/com.piperbox.piperd.plist",
 		"piper agent up",
 	} {
 		if !strings.Contains(manual, s) {
@@ -335,7 +335,7 @@ func TestPiperdLaunchdDocumentation(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./packaging/launchd/ -run Documentation -v`
-Expected: FAIL — `docs/manual-setup.md missing "packaging/launchd/com.getpiper.piperd.plist"`.
+Expected: FAIL — `docs/manual-setup.md missing "packaging/launchd/com.piperbox.piperd.plist"`.
 
 - [ ] **Step 3: Add the macOS section to `docs/manual-setup.md`**
 
@@ -350,8 +350,8 @@ hand. No `sudo`. Install the binary and the shipped LaunchAgent:
 
 ```bash
 sudo install -m 0755 bin/piperd /usr/local/bin/piperd
-install -m 0644 packaging/launchd/com.getpiper.piperd.plist \
-  ~/Library/LaunchAgents/com.getpiper.piperd.plist
+install -m 0644 packaging/launchd/com.piperbox.piperd.plist \
+  ~/Library/LaunchAgents/com.piperbox.piperd.plist
 cp packaging/launchd/piperd.env.macos.example ~/.piper/piperd.env   # optional overrides
 piper agent up
 ```
@@ -404,7 +404,7 @@ git commit -m "$(printf 'docs(repo): macOS launchd agent setup + runbook note\n\
 - Modify: `cmd/piper/main.go` (dispatch `case "agent"`, `--remote` reject list, usage string)
 
 **Interfaces:**
-- Consumes: the LaunchAgent label/path from Task 2 (`com.getpiper.piperd`, `~/Library/LaunchAgents/com.getpiper.piperd.plist`).
+- Consumes: the LaunchAgent label/path from Task 2 (`com.piperbox.piperd`, `~/Library/LaunchAgents/com.piperbox.piperd.plist`).
 - Produces: `agent(args []string, stdout, stderr io.Writer) int` dispatched from `run`.
 - Test seams (package-level vars, overridable in tests): `agentGOOS string`, `launchdPlistPath func() (string, error)`, `launchctlRun func(args ...string) (string, error)`.
 
@@ -441,7 +441,7 @@ func TestAgentUpBootstraps(t *testing.T) {
 	defer func() { agentGOOS = runtime.GOOS }()
 
 	dir := t.TempDir()
-	plist := filepath.Join(dir, "com.getpiper.piperd.plist")
+	plist := filepath.Join(dir, "com.piperbox.piperd.plist")
 	if err := os.WriteFile(plist, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ import (
 	"strings"
 )
 
-const launchdLabel = "com.getpiper.piperd"
+const launchdLabel = "com.piperbox.piperd"
 
 // agentGOOS is runtime.GOOS; a var so tests can exercise the non-darwin gate.
 var agentGOOS = runtime.GOOS
@@ -686,7 +686,7 @@ This is not automatable in CI — perform it once on a Mac and record the result
 ```bash
 make build
 sudo install -m 0755 bin/piperd /usr/local/bin/piperd
-install -m 0644 packaging/launchd/com.getpiper.piperd.plist ~/Library/LaunchAgents/
+install -m 0644 packaging/launchd/com.piperbox.piperd.plist ~/Library/LaunchAgents/
 piper agent up            # -> "piperd started", no sudo prompt
 piper agent status        # -> "piperd: running"
 # deploy a sample app, then confirm it serves:

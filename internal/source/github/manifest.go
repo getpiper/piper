@@ -15,7 +15,7 @@ import (
 func BuildManifest(appName, webhookURL, redirectURL string) ([]byte, error) {
 	m := map[string]any{
 		"name":         slugName(appName),
-		"url":          "https://github.com/getpiper/piper",
+		"url":          "https://github.com/piperbox/piper",
 		"redirect_url": redirectURL,
 		"public":       false,
 		"hook_attributes": map[string]any{

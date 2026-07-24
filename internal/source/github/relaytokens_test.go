@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func TestRelayTokensAsksForTheEventRepo(t *testing.T) {

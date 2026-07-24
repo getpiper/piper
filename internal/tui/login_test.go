@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // typeText feeds each rune of s to the top view through the model, like a user

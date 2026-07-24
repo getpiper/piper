@@ -226,8 +226,8 @@ operator disables account|hostname
 - Completes the parent onboarding slice: with this plan a self-enrolled free-tier
   box is served end-to-end on `*.public.getpiper.co`, closing the "not yet served
   end-to-end" caveat noted in the Plan-2 CLI plan and epic
-  [#49](https://github.com/getpiper/piper/issues/49) /
-  [#10](https://github.com/getpiper/piper/issues/10).
+  [#49](https://github.com/piperbox/piper/issues/49) /
+  [#10](https://github.com/piperbox/piper/issues/10).
 - Confirms the parent design's **narrowed invariant**: app traffic stays E2E for
   BYO-domain (passthrough) and control-plane; the free-tier shared-domain path is
   the deliberate, documented **relay-terminated** carve-out.

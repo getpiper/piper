@@ -1,7 +1,7 @@
 # Design: Plan 2 — Relay + Outbound Tunnel + On-Box TLS
 
 > **Status:** Design approved in brainstorming (2026-07-04). Not yet implemented.
-> Builds on Plan 1 (agent core, LAN-only). Tracked by epic [#10](https://github.com/getpiper/piper/issues/10).
+> Builds on Plan 1 (agent core, LAN-only). Tracked by epic [#10](https://github.com/piperbox/piper/issues/10).
 > Parent design: [`2026-07-04-piper-design.md`](2026-07-04-piper-design.md).
 
 ## One-liner

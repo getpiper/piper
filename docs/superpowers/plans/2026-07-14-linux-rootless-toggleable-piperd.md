@@ -12,7 +12,7 @@
 
 - **Depends on PR #209.** This work reuses `PIPER_HTTP_ADDR` / `PIPER_HTTPS_ADDR` (added in #209). **Base this plan on `main` after #209 merges**; if it has not merged at execution time, base on branch `ozykhan/macos-launchd-rootless`. The file `cmd/piper/agent.go` (extended by Tasks 2-3) exists only once #209 is in the base.
 - **No cgo.** All builds pass with `CGO_ENABLED=0`; `make cross` (linux/arm64) stays green. No build-tag/GOOS-split files — gate on `runtime.GOOS` at runtime via the existing `agentGOOS` var.
-- **Module path:** `github.com/getpiper/piper`.
+- **Module path:** `github.com/piperbox/piper`.
 - **Root install unchanged.** `curl | sudo sh` (root) must still install the system daemon exactly as today; the existing `packaging/systemd/piperd.service`, `/var/lib/piper`, and system-path install tests stay green. The only `install.sh` change is replacing the non-root `die` with the rootless path.
 - **Rootless is ephemeral.** No `loginctl enable-linger`. Boot survival is what `daemonize` buys.
 - **No data migration** on `daemonize` (`~/.piper/piperd` → `/var/lib/piper`): promotion is a fresh durable install.
@@ -1005,7 +1005,7 @@ runs as **you** on high ports (`:8080`/`:8443`) under `~/.piper`, managed by
 `systemctl --user`. No root, and it's gone after a reboot (re-run `piper agent up`).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh
 piper agent up            # start it (no sudo)
 piper agent status        # running / stopped / not installed
 piper agent down          # stop it
@@ -1100,7 +1100,7 @@ Not automatable in CI — perform once and record the result in the PR:
 
 ```bash
 # Rootless (no sudo):
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh   # or run local install.sh
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh   # or run local install.sh
 piper agent up            # -> "piperd started", no sudo prompt
 piper agent status        # -> "piperd: running"
 # deploy a sample app, then confirm it serves:

@@ -428,7 +428,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Test: `internal/client/client_test.go`
 
 **Interfaces:**
-- Consumes: `api.App` from Task 2 (`import "github.com/getpiper/piper/internal/api"` — downward per layering: client is the CLI's view of api); relay liveness JSON from Task 3.
+- Consumes: `api.App` from Task 2 (`import "github.com/piperbox/piper/internal/api"` — downward per layering: client is the CLI's view of api); relay liveness JSON from Task 3.
 - Produces: `func (c *Client) ListApps() ([]api.App, error)`; `type Liveness struct { Agent string; Connected bool }` (json tags `agent`, `connected`); `func (c *Client) Liveness() (Liveness, error)` — a GET at the client's base path, which for a remote client is exactly `<RelayAPI>/agents/<base>`. Task 5 consumes both.
 
 - [ ] **Step 1: Write the failing tests**
@@ -481,7 +481,7 @@ func TestLiveness(t *testing.T) {
 }
 ```
 
-Add `"github.com/getpiper/piper/internal/api"` to the test file's imports.
+Add `"github.com/piperbox/piper/internal/api"` to the test file's imports.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -495,7 +495,7 @@ In `internal/client/client.go`:
 Add the import:
 
 ```go
-	"github.com/getpiper/piper/internal/api"
+	"github.com/piperbox/piper/internal/api"
 ```
 
 Change `ListApps` to decode the enriched wire type:
@@ -589,9 +589,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func TestRunStatusLocal(t *testing.T) {
@@ -853,7 +853,7 @@ piper deploy blog --path .
 In the remote control-plane list (after the `#74` line), add:
 
 ```markdown
-  - ✅ health/metrics surface — relay liveness (`GET /agents/<base>`) + per-app deploy status + `piper status` — [#75](https://github.com/getpiper/piper/issues/75)
+  - ✅ health/metrics surface — relay liveness (`GET /agents/<base>`) + per-app deploy status + `piper status` — [#75](https://github.com/piperbox/piper/issues/75)
 ```
 
 And in the "Epic #49 remains open" line, move `#75` from the not-built list to the done list (leaving the hosted dashboard [#76] as the only open child).
@@ -878,6 +878,6 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ## Done means
 
-- All acceptance criteria of [#75](https://github.com/getpiper/piper/issues/75) demonstrably met: liveness from the tunnel session (Task 3), authenticated per-app deploy status (Task 2), same authn/authz (inherited, pinned by tests), tests for both surfaces (Tasks 1–6).
+- All acceptance criteria of [#75](https://github.com/piperbox/piper/issues/75) demonstrably met: liveness from the tunnel session (Task 3), authenticated per-app deploy status (Task 2), same authn/authz (inherited, pinned by tests), tests for both surfaces (Tasks 1–6).
 - `make verify` green.
 - PR into `main` (`gh pr create --base main`), body carries `Closes #75` and `Part of #49`; squash-merge.

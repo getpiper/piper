@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // httpGet80 sends one raw HTTP/1.1 request to the relay's plain-HTTP address

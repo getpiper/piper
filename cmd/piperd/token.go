@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // ownerOf returns the uid/gid owning path.

@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func sign(secret, body string) string {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/ghjwt"
+	"github.com/piperbox/piper/internal/ghjwt"
 )
 
 const defaultAPIBase = "https://api.github.com"

@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/domain"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/domain"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // appDetailView is the depth-1 view: an app header plus its deployment history.

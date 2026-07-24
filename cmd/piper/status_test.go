@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func TestRunStatusLocal(t *testing.T) {

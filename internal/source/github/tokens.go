@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/getpiper/piper/internal/ghjwt"
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/ghjwt"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // TokenSource yields a GitHub token authorized for ev's repository. BYO mints

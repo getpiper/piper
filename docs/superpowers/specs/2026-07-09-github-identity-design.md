@@ -196,4 +196,4 @@ change (e.g. the login hint text).
       and obtain the same account credential.
 - [ ] Google flow removed (no dual-provider support needed pre-release).
 
-[#99]: https://github.com/getpiper/piper/issues/99
+[#99]: https://github.com/piperbox/piper/issues/99

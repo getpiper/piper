@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A `piper` caller can drive a box's control API through the relay — authenticated by relay account, authorized by agent ownership, forwarded over the existing outbound tunnel with the box's Token B injected — implementing [#73](https://github.com/getpiper/piper/issues/73) per [`docs/superpowers/specs/2026-07-08-relay-control-stream-routing-design.md`](../specs/2026-07-08-relay-control-stream-routing-design.md).
+**Goal:** A `piper` caller can drive a box's control API through the relay — authenticated by relay account, authorized by agent ownership, forwarded over the existing outbound tunnel with the box's Token B injected — implementing [#73](https://github.com/piperbox/piper/issues/73) per [`docs/superpowers/specs/2026-07-08-relay-control-stream-routing-design.md`](../specs/2026-07-08-relay-control-stream-routing-design.md).
 
 **Architecture:** The relay gains a TLS-terminated control plane at `api.<apex>`, SNI-dispatched on the existing `:443` listener using the existing wildcard cert. Control requests (`/agents/<base-domain>/v1/...`) are account-authenticated, ownership-authorized, and reverse-proxied over a new `KindControlAPI` tunnel stream into piperd's `127.0.0.1:8088`, swapping the caller's account credential for the box's Token B. piperd provisions that Token B itself: on first connect after enrollment it mints a control token locally and *pushes* it to the relay over the existing agent→relay control channel (agent-push, not relay-pull — see the spec's deviation note).
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo** — everything must build with `CGO_ENABLED=0` (`make cross` proves arm64).
-- Module path `github.com/getpiper/piper`; work lands on branch `faruk/relay-control-routing`, PR into `main`.
+- Module path `github.com/piperbox/piper`; work lands on branch `faruk/relay-control-routing`, PR into `main`.
 - Run `make verify` (gofmt → vet → test → cross) before claiming done; `make fmt` fixes formatting.
 - One commit per task, conventional-commit style, ending with:
   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
@@ -445,7 +445,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // pipeSession builds an in-memory relay↔agent tunnel pair whose relay-side
@@ -636,7 +636,7 @@ import (
 	"net/http/httputil"
 	"strings"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // NewControlProxy serves /agents/<base-domain>/v1/*: it authenticates the
@@ -1040,7 +1040,7 @@ Run again → PASS.
 
 - [ ] **Step 3: Write the failing provisioning tests**
 
-Append to `cmd/piperd/main_test.go` (add imports `"errors"`, `"time"`, and `"github.com/getpiper/piper/internal/store"` as needed; follow the file's existing fake style):
+Append to `cmd/piperd/main_test.go` (add imports `"errors"`, `"time"`, and `"github.com/piperbox/piper/internal/store"` as needed; follow the file's existing fake style):
 
 ```go
 type fakeProvisionStore struct {
@@ -1344,7 +1344,7 @@ Expected: PASS — control response listing `blog`, 401 for bogus cred, 404 for 
 Under the `#90` block's child list (after the `#89` line, before the `⬜ surface the relay-assigned public host` line), add:
 
 ```markdown
-  - ✅ Relay control-stream routing — account-authz'd control plane at `api.<apex>` (SNI-dispatched, wildcard cert), forwarded over `KindControlAPI` tunnel streams with agent-push Token B provisioning — [#73](https://github.com/getpiper/piper/issues/73)
+  - ✅ Relay control-stream routing — account-authz'd control plane at `api.<apex>` (SNI-dispatched, wildcard cert), forwarded over `KindControlAPI` tunnel streams with agent-push Token B provisioning — [#73](https://github.com/piperbox/piper/issues/73)
 ```
 
 - [ ] **Step 4: Full verify**

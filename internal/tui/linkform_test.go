@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // pushView emits a pushMsg for v and applies it, returning the model with v on

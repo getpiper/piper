@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // TestMain shrinks the per-session disabled-watchdog interval for the whole

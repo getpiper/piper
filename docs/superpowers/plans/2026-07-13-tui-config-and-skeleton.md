@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - `CGO_ENABLED=0` everywhere; `make cross` (linux/arm64) must stay green.
-- Module path `github.com/getpiper/piper`; nothing imports "up" the layering (`tui` imports `client`+`config`+`api` types only; `cmd/piper` imports `tui`).
+- Module path `github.com/piperbox/piper`; nothing imports "up" the layering (`tui` imports `client`+`config`+`api` types only; `cmd/piper` imports `tui`).
 - Deployment status strings are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`; `""` means never deployed.
 - Defaults: control API `127.0.0.1:8088`, base domain `piper.localhost`.
 - TDD: every task writes the failing test first. Run `make verify` before every push.
@@ -584,7 +584,7 @@ Expected: FAIL — package doesn't exist yet / undefined functions.
 // Bare `piper` in a terminal lands here; every subcommand stays untouched.
 package tui
 
-import "github.com/getpiper/piper/internal/api"
+import "github.com/piperbox/piper/internal/api"
 
 // API is the slice of the piperd control API the TUI consumes.
 // *client.Client satisfies it; tests inject fakes.
@@ -671,8 +671,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func fixtureApps() []api.App {
@@ -740,7 +740,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
+	"github.com/piperbox/piper/internal/api"
 )
 
 // appsView is the depth-0 home view: a read-only table of apps. Selection
@@ -826,8 +826,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type fakeAPI struct {
@@ -1095,7 +1095,7 @@ func TestBareInvocationTTYLaunchesTUI(t *testing.T) {
 Run: `go test ./cmd/piper/ -run BareInvocation -v`
 Expected: FAIL — `undefined: isTerminal`, `undefined: launchTUI`.
 
-- [ ] **Step 3: Implement.** In `cmd/piper/main.go`, add imports `"golang.org/x/term"` and `"github.com/getpiper/piper/internal/tui"`. Below `appURL`, add:
+- [ ] **Step 3: Implement.** In `cmd/piper/main.go`, add imports `"golang.org/x/term"` and `"github.com/piperbox/piper/internal/tui"`. Below `appURL`, add:
 
 ```go
 // isTerminal reports whether stdout is an interactive terminal; a func var so

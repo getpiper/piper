@@ -7,11 +7,11 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/domain"
-	"github.com/getpiper/piper/internal/relayclient"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/domain"
+	"github.com/piperbox/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // API is the slice of the piperd control API the TUI consumes.

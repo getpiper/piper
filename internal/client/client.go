@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/domain"
-	"github.com/getpiper/piper/internal/store"
 	"github.com/moby/patternmatcher"
 	"github.com/moby/patternmatcher/ignorefile"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/domain"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type Client struct {

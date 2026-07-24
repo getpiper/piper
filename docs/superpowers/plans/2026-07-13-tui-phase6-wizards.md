@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`. No new third-party dependencies beyond the already-present bubbletea/bubbles/lipgloss/config tree (the `spinner` bubble ships in the same `github.com/charmbracelet/bubbles` module already vendored via `textinput`).
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **Layering:** `internal/tui` change plus one surgical `internal/client` addition (`StatusError.Unauthorized()`). `tui` may import `internal/config` (down-dep, for the `Box` type) but **must not** import `internal/client` — the 401 check goes through a local anonymous interface. No `piperd`/`piper-relay` change, no API *wire* change (the three client methods already exist). Nothing imports up.
 - **Login is LAN-token only — interim.** Relay login (device-flow → account credential) is a later phase. Write the login view with a target-type seam and a code comment flagging the interim split; do **not** build the relay branch here.
 - **Deployment status strings** (`"building"`, `"running"`, `"failed"`, `"stopped"`) unchanged; not touched here.
@@ -202,7 +202,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // typeText feeds each rune of s to the top view through the model, like a user
@@ -313,7 +313,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 // loginTarget selects the login flow. Only targetLAN exists today: the wizard
@@ -1210,7 +1210,7 @@ Expected: PASS.
 In `PROGRESS.md`, append under the TUI epic list (after the `#198` boxes line, before the blank line that ends the list):
 
 ```
-- ✅ Wizards: login (LAN token, verify → save to current box), GitHub App setup, link repo; unauth hint on apps home — [#200](https://github.com/getpiper/piper/issues/200)
+- ✅ Wizards: login (LAN token, verify → save to current box), GitHub App setup, link repo; unauth hint on apps home — [#200](https://github.com/piperbox/piper/issues/200)
 ```
 
 - [ ] **Step 6: Run the full verify gate**

@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - `CGO_ENABLED=0` must keep building (no new deps, so automatic — but `make verify` proves it).
-- Module path `github.com/getpiper/piper`.
+- Module path `github.com/piperbox/piper`.
 - Local defaults unchanged: control API `http://127.0.0.1:8088`, config at `~/.piper/piper/config.json` (0600).
 - Commits: conventional-commit style, one per task, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 - Branch: `faruk/cli-remote-target` (already created off `main`). PR body: `Closes #74`.
@@ -152,7 +152,7 @@ When a remote target is set, `dialClient` must point the existing `client.Client
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `cmd/piper/remote_test.go` (add imports `encoding/json`, `net/http`, `net/http/httptest`, `github.com/getpiper/piper/internal/config`, `github.com/getpiper/piper/internal/store` to the existing block):
+Append to `cmd/piper/remote_test.go` (add imports `encoding/json`, `net/http`, `net/http/httptest`, `github.com/piperbox/piper/internal/config`, `github.com/piperbox/piper/internal/store` to the existing block):
 
 ```go
 func TestRunRemoteListRoutesThroughRelay(t *testing.T) {
@@ -314,7 +314,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ### Task 3: Remote `deploy` output — no fabricated URL
 
-`deploy` hardcodes `http://<name>.piper.localhost` in its success line. Against a remote box the real hostname is relay-assigned and unknown to the CLI (see spec / follow-up [#93](https://github.com/getpiper/piper/issues/93)), so print `deployed <name> (<status>)` with no URL. Local output is unchanged.
+`deploy` hardcodes `http://<name>.piper.localhost` in its success line. Against a remote box the real hostname is relay-assigned and unknown to the CLI (see spec / follow-up [#93](https://github.com/piperbox/piper/issues/93)), so print `deployed <name> (<status>)` with no URL. Local output is unchanged.
 
 **Files:**
 - Modify: `cmd/piper/main.go` (`deploy` case, the `fmt.Fprintf(stdout, "deployed %s: http://%s.piper.localhost (%s)\n", ...)` line at ~line 146)
@@ -443,7 +443,7 @@ Two edits, matching the existing entry format:
 1. Add a ✅ line next to the other #49-track entries (near the `piper login` / `piper connect` line at ~line 42):
 
 ```markdown
-  - ✅ remote CLI target — `piper --remote <base-domain>` / `PIPER_REMOTE` drives a box through the relay control plane — [#74](https://github.com/getpiper/piper/issues/74)
+  - ✅ remote CLI target — `piper --remote <base-domain>` / `PIPER_REMOTE` drives a box through the relay control plane — [#74](https://github.com/piperbox/piper/issues/74)
 ```
 
 2. In the "Epic #49 remains open" line (~line 48), move `[#74]` from the not-built list to the done list at the end of the sentence (alongside #72, #90, #73).

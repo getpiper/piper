@@ -1,6 +1,6 @@
 # Piper TUI — Phase 4 (actions) design
 
-**Status:** approved · **Date:** 2026-07-13 · **Epic:** [#183](https://github.com/getpiper/piper/issues/183)
+**Status:** approved · **Date:** 2026-07-13 · **Epic:** [#183](https://github.com/piperbox/piper/issues/183)
 
 Phase 4 makes the TUI **read-write** for the first time. Phases 1–3 delivered a read-only surface (multi-box config, live apps dashboard, drill-down to app detail + deployment logs). Phase 4 adds the four mutating actions a developer reaches for from the dashboard: **create an app, deploy, stop, delete** — each with a proportional guard.
 
@@ -102,7 +102,7 @@ The deploy **kickoff** call runs on the TUI's 5s-capped client (the phase-2 anti
 ## Constraints (unchanged from phases 2–3)
 
 - `CGO_ENABLED=0` everywhere; `make cross` (linux/arm64) stays green.
-- Module `github.com/getpiper/piper`; `internal/tui` imports `internal/api` + `internal/store` + charmbracelet libs only — never `internal/client`. `cmd/piper` imports `internal/tui`.
+- Module `github.com/piperbox/piper`; `internal/tui` imports `internal/api` + `internal/store` + charmbracelet libs only — never `internal/client`. `cmd/piper` imports `internal/tui`.
 - New dep `github.com/charmbracelet/bubbles/textinput`, pinned to the **v1** major already in use (bubbles is present since phase 3).
 - Deployment status strings exactly `"building"`, `"running"`, `"failed"`, `"stopped"`; `""` → `—`.
 - TDD: failing test first per task; `make verify` before push. One PR into `main`, squash-merged.

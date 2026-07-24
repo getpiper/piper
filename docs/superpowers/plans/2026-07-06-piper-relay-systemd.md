@@ -302,7 +302,7 @@ Check both firewalls; run `systemctl status piper-relay`, inspect `journalctl -u
 After the existing `piper-relay` enrollment/SNI/tunnel-server line in `PROGRESS.md`, add:
 
 ```markdown
-- ✅ `piper-relay` managed systemd service + operator docs — [#38](https://github.com/getpiper/piper/issues/38)
+- ✅ `piper-relay` managed systemd service + operator docs — [#38](https://github.com/piperbox/piper/issues/38)
 ```
 
 - [ ] **Step 7: Run the documentation contract and inspect the rendered Markdown source**

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a relay hold one GitHub App on behalf of its users, so a newcomer on a public relay reaches `git push` → deploy with a single GitHub consent screen and no manual App creation, while BYO per-box Apps keep working unchanged. (`piper login` stays device-flow: two short browser stops; the one-trip CLI login is follow-up [#291](https://github.com/getpiper/piper/issues/291).)
+**Goal:** Let a relay hold one GitHub App on behalf of its users, so a newcomer on a public relay reaches `git push` → deploy with a single GitHub consent screen and no manual App creation, while BYO per-box Apps keep working unchanged. (`piper login` stays device-flow: two short browser stops; the one-trip CLI login is follow-up [#291](https://github.com/piperbox/piper/issues/291).)
 
 **Architecture:** Two provider modes behind the existing `source.Provider` seam. BYO is today's path. In brokered mode the relay verifies GitHub's webhook, resolves `installation → account → repo binding → agent`, re-signs the payload with a per-agent secret, and delivers it over a `tunnel.KindHTTP` stream to the box's Caddy `:80`, which routes `hooks.<base>` to the existing webhook listener. The agent, holding no GitHub credentials, asks the relay for repo-scoped installation tokens over the existing `KindControl` op protocol.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **No cgo.** Every build must pass with `CGO_ENABLED=0`. No cgo SQLite drivers.
-- **Module path** is `github.com/getpiper/piper`.
+- **Module path** is `github.com/piperbox/piper`.
 - **Layering:** `store` knows persistence, `runtime` knows Docker, `caddy` knows Caddy, `deploy` orchestrates, `api` is transport, `client` is the CLI's view. Nothing imports "up". `internal/relay` must not import `internal/source/github`; shared crypto goes in a neutral package.
 - **No migrations, no compat shims** (pre-1.x policy in `CLAUDE.md`). `schema.sql` is always the complete current shape; edit `CREATE TABLE` in place.
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
@@ -82,7 +82,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // stubTokens records the event it was asked about and returns a canned token.
@@ -145,7 +145,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // TokenSource yields a GitHub token authorized for ev's repository. BYO mints
@@ -286,7 +286,7 @@ with:
 	tok, err := a.Token(context.Background(), source.Event{InstallationID: 42})
 ```
 
-and each `p.appJWT(now)` with `a.appJWT(now)`. Add `"github.com/getpiper/piper/internal/source"` to that file's imports.
+and each `p.appJWT(now)` with `a.appJWT(now)`. Add `"github.com/piperbox/piper/internal/source"` to that file's imports.
 
 - [ ] **Step 7: Run the package tests**
 
@@ -1076,7 +1076,7 @@ In `internal/source/github/tokens.go`, delete the `appJWT` method and change `ap
 	jwt, err := ghjwt.Sign(strconv.FormatInt(a.appID, 10), a.key, time.Now())
 ```
 
-In `internal/source/github/github.go`, replace the body of `parsePrivateKey` with `return ghjwt.ParseKey(pemStr)`, and delete `b64url` if nothing else uses it. Add `"github.com/getpiper/piper/internal/ghjwt"` to both files' imports; drop now-unused crypto imports.
+In `internal/source/github/github.go`, replace the body of `parsePrivateKey` with `return ghjwt.ParseKey(pemStr)`, and delete `b64url` if nothing else uses it. Add `"github.com/piperbox/piper/internal/ghjwt"` to both files' imports; drop now-unused crypto imports.
 
 Delete the `appJWT` test from `internal/source/github/github_test.go` — `internal/ghjwt` covers it now.
 
@@ -1101,7 +1101,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/ghjwt"
+	"github.com/piperbox/piper/internal/ghjwt"
 )
 
 const defaultGitHubAPIBase = "https://api.github.com"
@@ -2092,7 +2092,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 func TestDeliverySignsWithAgentSecretAndDropsGitHubs(t *testing.T) {
@@ -2271,7 +2271,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // ErrAgentOffline is returned when a bound agent has no live tunnel session.
@@ -2980,7 +2980,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func TestRelayTokensAsksForTheEventRepo(t *testing.T) {
@@ -3025,7 +3025,7 @@ package github
 import (
 	"context"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // RelayTokens is the brokered TokenSource: the box holds no GitHub App key, so
@@ -3112,7 +3112,7 @@ Update `newWebhookStarter` to take just the token func — `cfg` already carries
 		}
 ```
 
-Add `"github.com/getpiper/piper/internal/source"` to the file's imports.
+Add `"github.com/piperbox/piper/internal/source"` to the file's imports.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -3728,11 +3728,11 @@ EOF
 
 ## Before opening the PR
 
-- [x] Tracking issue opened: **[#289](https://github.com/getpiper/piper/issues/289)** — every task's commit trail already references it.
+- [x] Tracking issue opened: **[#289](https://github.com/piperbox/piper/issues/289)** — every task's commit trail already references it.
 - [ ] `make verify` passes on the branch tip.
 - [ ] Register the GitHub App itself under the `getpiper` org — no task does this, and tasks 4, 6, 7 and 12 cannot be exercised against real GitHub without it. Permissions `contents:read`, `deployments:write`, `pull_requests:read`; events `push`, `pull_request`, `installation`; webhook URL `https://api.<relay-apex>/gh` (the account-API host — Task 6 mounts `/gh` there); **"Request user authorization (OAuth) during installation" ON**; **"Enable Device Flow" ON** — device flow is the CLI's only login path, and GitHub Apps reject it unless this box is checked.
 - [ ] Production rollout note: the `agents` schema changes in place, so deploying this relay to `public.getpiper.dev` means resetting `relay.db` (pre-1.x policy — no migrations). Every account re-runs `piper login`, every box re-runs `piper connect` (the pi4 included). The swap to the App's client id is otherwise invisible — accounts key on the stable `github_id`.
-- [x] Org-install follow-up opened: **[#290](https://github.com/getpiper/piper/issues/290)** — stays open after this plan lands.
-- [x] CLI one-trip browser-login follow-up opened: **[#291](https://github.com/getpiper/piper/issues/291)** — this plan ships device flow + install-page polling for `piper login`.
+- [x] Org-install follow-up opened: **[#290](https://github.com/piperbox/piper/issues/290)** — stays open after this plan lands.
+- [x] CLI one-trip browser-login follow-up opened: **[#291](https://github.com/piperbox/piper/issues/291)** — this plan ships device flow + install-page polling for `piper login`.
 - [ ] Tick this plan's task checkboxes on #289 as each task merges.
 - [ ] PR body carries `Closes #289` and links the spec.

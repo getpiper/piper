@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/domain"
+	"github.com/piperbox/piper/internal/domain"
 )
 
 // domainDetailView shows one per-app custom domain: live status, the CNAME the

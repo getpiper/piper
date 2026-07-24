@@ -1,13 +1,13 @@
 # Relay control-plane trust model — design
 
 Trust-model spec for the remote control-plane epic
-([#49](https://github.com/getpiper/piper/issues/49)). It reconciles the two token
+([#49](https://github.com/piperbox/piper/issues/49)). It reconciles the two token
 systems that exist after the authenticated control API
-([#77](https://github.com/getpiper/piper/pull/77) / #72) landed, and defines the
+([#77](https://github.com/piperbox/piper/pull/77) / #72) landed, and defines the
 end-to-end trust model that the relay control-stream routing
-([#73](https://github.com/getpiper/piper/issues/73)), the CLI remote target
-([#74](https://github.com/getpiper/piper/issues/74)), and the hosted dashboard
-([#76](https://github.com/getpiper/piper/issues/76)) implement against.
+([#73](https://github.com/piperbox/piper/issues/73)), the CLI remote target
+([#74](https://github.com/piperbox/piper/issues/74)), and the hosted dashboard
+([#76](https://github.com/piperbox/piper/issues/76)) implement against.
 
 This is a **trust-model doc, not a UX doc**. It fixes who authenticates whom at
 each hop and what the relay may and may not see. Exact wire formats, cert

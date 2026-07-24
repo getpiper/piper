@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`; SQLite driver is `modernc.org/sqlite` only.
-- **Module path:** `github.com/getpiper/piper`.
+- **Module path:** `github.com/piperbox/piper`.
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Preview host format:** `pr-<N>-<app>.<base>` (single label under `<base>` — no cert/DNS/relay change).
 - **Layering:** `deploy` imports `runtime`/`store` only (never `source`); `webhook` drives `deploy` through an interface.
@@ -1107,11 +1107,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/getpiper/piper/internal/deploy"
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/source/github"
-	"github.com/getpiper/piper/internal/store"
-	"github.com/getpiper/piper/internal/webhook"
+	"github.com/piperbox/piper/internal/deploy"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/source/github"
+	"github.com/piperbox/piper/internal/store"
+	"github.com/piperbox/piper/internal/webhook"
 )
 
 type recordingCaddy struct {
@@ -1311,13 +1311,13 @@ Expected: no output.
 In `PROGRESS.md`, change the Plan 3 PR-preview line from:
 
 ```
-- ⬜ PR-preview URLs + teardown (`pr-N.<app>.<base>`) — deferred behind the seam — [#32](https://github.com/getpiper/piper/issues/32)
+- ⬜ PR-preview URLs + teardown (`pr-N.<app>.<base>`) — deferred behind the seam — [#32](https://github.com/piperbox/piper/issues/32)
 ```
 
 to:
 
 ```
-- ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#32](https://github.com/getpiper/piper/issues/32)
+- ✅ PR-preview URLs + teardown (`pr-<N>-<app>.<base>`, flattened for the wildcard cert) — [#32](https://github.com/piperbox/piper/issues/32)
 ```
 
 And update the `_Last updated_` line to note PR previews landed.

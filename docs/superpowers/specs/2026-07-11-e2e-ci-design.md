@@ -1,6 +1,6 @@
 # e2e suite in CI — design
 
-**Issue:** [#128](https://github.com/getpiper/piper/issues/128)
+**Issue:** [#128](https://github.com/piperbox/piper/issues/128)
 **Date:** 2026-07-11
 
 ## Problem

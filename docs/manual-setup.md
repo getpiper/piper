@@ -66,7 +66,7 @@ piper agent up
 ```
 
 The agent stores everything under `~/.piper/` (SQLite DB, Caddy data, logs at
-`~/.piper/piper{,.err}.log`, the generated `com.getpiper.piperd.plist`) and serves
+`~/.piper/piper{,.err}.log`, the generated `com.piperbox.piperd.plist`) and serves
 apps at `http://<name>.piper.localhost:8080`, with the Caddy admin on `:2020`.
 It is **ephemeral**, exactly like Linux rootless: the plist lives outside
 `~/Library/LaunchAgents`, so nothing auto-starts it at login — re-run `piper agent

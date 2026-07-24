@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func (p *Provider) Report(ctx context.Context, ev source.Event, status source.Status, url string) error {

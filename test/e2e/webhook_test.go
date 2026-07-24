@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/client"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/client"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // TestWebhookPushAndPreview proves Plan 3 end-to-end on the passthrough relay:

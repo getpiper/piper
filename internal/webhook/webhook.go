@@ -13,8 +13,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/getpiper/piper/internal/source"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/source"
+	"github.com/piperbox/piper/internal/store"
 )
 
 const maxBody = 5 << 20 // 5 MiB

@@ -1,6 +1,6 @@
 # Piper Relay systemd Service Design
 
-**Issue:** [#38](https://github.com/getpiper/piper/issues/38)
+**Issue:** [#38](https://github.com/piperbox/piper/issues/38)
 
 ## Goal
 

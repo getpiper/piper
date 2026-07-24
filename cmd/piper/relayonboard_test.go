@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // The shipped default must point at the live hosted relay: a stale default
@@ -663,7 +663,7 @@ func TestAgentInstalledDetectsEachFlavor(t *testing.T) {
 			}
 			plist := filepath.Join(t.TempDir(), "absent.plist")
 			if tc.plist {
-				plist = filepath.Join(t.TempDir(), "dev.getpiper.piperd.plist")
+				plist = filepath.Join(t.TempDir(), "dev.piperbox.piperd.plist")
 				if err := os.WriteFile(plist, []byte("plist"), 0o644); err != nil {
 					t.Fatal(err)
 				}
@@ -749,7 +749,7 @@ func TestRestartHintMatchesInstallFlavor(t *testing.T) {
 	// Expected launchd line, built independently of guiTarget()/launchdLabel so a
 	// production-side change to either is caught rather than mirrored.
 	launchdWant := "restart piperd to connect, e.g.:\n\n    launchctl kickstart -k gui/" +
-		strconv.Itoa(os.Getuid()) + "/com.getpiper.piperd\n"
+		strconv.Itoa(os.Getuid()) + "/com.piperbox.piperd\n"
 
 	cases := []struct {
 		name        string
@@ -797,7 +797,7 @@ func TestRestartHintMatchesInstallFlavor(t *testing.T) {
 			}
 			plist := filepath.Join(t.TempDir(), "absent.plist")
 			if tc.plist {
-				plist = filepath.Join(t.TempDir(), "com.getpiper.piperd.plist")
+				plist = filepath.Join(t.TempDir(), "com.piperbox.piperd.plist")
 				if err := os.WriteFile(plist, []byte("plist"), 0o644); err != nil {
 					t.Fatal(err)
 				}

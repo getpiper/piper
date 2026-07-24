@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // startTestRelay opens a store with one enrolled account-bound agent, starts

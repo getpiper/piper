@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/store"
-	"github.com/getpiper/piper/internal/tunnel"
-	"github.com/getpiper/piper/internal/version"
+	"github.com/piperbox/piper/internal/store"
+	"github.com/piperbox/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/version"
 )
 
 type recorder struct {
