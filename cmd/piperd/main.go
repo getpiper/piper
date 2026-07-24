@@ -421,7 +421,7 @@ func main() {
 	if tc != nil {
 		ghTokenFn = tc.GitHubToken
 	}
-	apiHandler := api.New(st, dep, cfg.BaseDomain, "", func() {
+	apiHandler := api.New(st, dep, cfg.BaseDomain, cfg.GitHubAPIBase, func() {
 		if wh != nil {
 			wh.start()
 		}
@@ -734,6 +734,7 @@ func newRepoFetcher(st *store.Store, cfg config.Config, ghToken func(repo string
 		case webhookProviderBYO:
 			p, err := github.New(github.Config{
 				AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+				APIBase: cfg.GitHubAPIBase,
 			})
 			if err != nil {
 				return fmt.Errorf("github provider: %w", err)
@@ -764,6 +765,7 @@ func (w *webhookStarter) run() {
 	case webhookProviderBYO:
 		p, err := github.New(github.Config{
 			AppID: gh.AppID, PrivateKeyPEM: gh.PrivateKey, WebhookSecret: gh.WebhookSecret,
+			APIBase: w.cfg.GitHubAPIBase,
 		})
 		if err != nil {
 			log.Printf("webhook: github provider: %v", err)
