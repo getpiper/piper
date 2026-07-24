@@ -17,7 +17,7 @@
 - Layering: `store` persistence only; `caddy` Caddy admin only; `domain` orchestrates via interfaces; `api` transport. Nothing imports "up".
 - Secrets: `dns_token` is write-only on the API (never in any response); cert private key + ACME account key never leave the box (0600 files under DataDir).
 - Branch: `ozykhan/domain-config-api`. One commit per task, conventional-commit style, body line `Part of #102`, and end every commit message with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Each task: run the named package tests per step; run `make verify` before the task's commit.
 
 ---
@@ -219,7 +219,7 @@ git commit -m "feat(store): domain_config table + CRUD
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -427,7 +427,7 @@ git commit -m "feat(certs): persisted ACME account key + token-configured cloudf
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -703,7 +703,7 @@ git commit -m "feat(proxy): runtime HTTPS enablement (piper-tls server) + TLS ro
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -812,7 +812,7 @@ git commit -m "feat(agent): set-domain tunnel control op
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1114,7 +1114,7 @@ git commit -m "feat(relay): custom-domain record, SNI routing, set-domain contro
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1842,7 +1842,7 @@ git commit -m "feat(agent): domain manager — issuance state machine to live ac
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2015,7 +2015,7 @@ git commit -m "feat(agent): domain status — dns records, dns_ok probe, teardow
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2340,7 +2340,7 @@ git commit -m "feat(agent): domain resume, renewal loop, env-managed RunEnv
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2446,7 +2446,7 @@ git commit -m "feat(deploy): dual-host routing when a custom domain is active
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2671,7 +2671,7 @@ git commit -m "feat(agent): GET/PUT/DELETE /v1/domain on the control API
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2896,7 +2896,7 @@ git commit -m "feat(agent): wire domain manager into piperd; document config pre
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -3025,7 +3025,7 @@ git commit -m "test(e2e): free-tier box adds BYO custom domain via the control A
 
 Part of #102
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

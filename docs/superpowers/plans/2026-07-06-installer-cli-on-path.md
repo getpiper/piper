@@ -405,7 +405,7 @@ Part of #47. install.sh with OS/arch detection, checksum-verified
 download+extract, and --cli-only mode (explicit PIPER_VERSION). Offline
 exec harness runs the script against an httptest fake release.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -561,7 +561,7 @@ Part of #46. Default resolves releases/latest (stable) and errors with
 an --rc hint when none exists yet; --rc installs the newest release
 including pre-releases. Only pre-releases exist today (v0.1.0-rc.x).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -737,7 +737,7 @@ writes the env skeleton only when absent (never clobbers an edited env),
 and daemon-reload + enable --now when systemd is present. Linux/root
 only; macOS is directed to --cli-only (launchd is #56).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -892,7 +892,7 @@ Closes #46, closes #47. README Install section (full / --cli-only / --rc,
 PIPER_ADDR remote guidance) with a documentation test; attach install.sh
 to releases; flip PROGRESS.md.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```

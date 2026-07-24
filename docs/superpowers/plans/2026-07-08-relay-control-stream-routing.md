@@ -14,7 +14,7 @@
 - Module path `github.com/piperbox/piper`; work lands on branch `faruk/relay-control-routing`, PR into `main`.
 - Run `make verify` (gofmt → vet → test → cross) before claiming done; `make fmt` fixes formatting.
 - One commit per task, conventional-commit style, ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Reference the issue in commits (`Part of #73`); the final PR body carries `Closes #73`.
 - Layering: `internal/agent` imports only `internal/tunnel` + stdlib; `internal/relay` never imports `internal/store`; nothing imports "up".
 - Error semantics at the relay proxy (from the spec): bad/missing account credential → **401**; unknown agent OR another account's agent → **404** (no existence leak); owned but tunnel not connected → **503**; otherwise the box's response verbatim. No Token B stored → forward *without* Authorization (box 401s; not special-cased).
@@ -173,7 +173,7 @@ git commit -m "feat(relay): per-agent control_token storage
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -276,7 +276,7 @@ git commit -m "feat(relay): provision control op — box pushes its Token B over
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -409,7 +409,7 @@ git commit -m "feat(agent): TunnelClient.Provision + OnConnect hook
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -756,7 +756,7 @@ git commit -m "feat(relay): account-authz'd control proxy over KindControlAPI tu
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -973,7 +973,7 @@ git commit -m "feat(relay): TLS-terminated control plane at api.<apex>, SNI-disp
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1199,7 +1199,7 @@ git commit -m "feat(agent): serve relay control streams; agent-push Token B prov
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1360,7 +1360,7 @@ git commit -m "test(e2e): remote control plane through the relay + authz denial
 
 Part of #73.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

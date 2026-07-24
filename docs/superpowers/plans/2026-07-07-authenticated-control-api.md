@@ -17,7 +17,7 @@
 - **TDD:** every task is failing-test-first. Run `make test` and `make cross` before the final commit of any task that changes buildable code.
 - **Commits:** conventional-commit style, one per task, ending with:
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+  Co-Authored-By: Claude {current model} <noreply@anthropic.com>
   ```
 - **Branch:** all work on `ozykhan/auth-control-api` (already created); reference `Part of #49` / `Closes #72` in the PR body, not per-commit.
 
@@ -261,7 +261,7 @@ feat(store): API tokens (create/authenticate/list/revoke)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -415,7 +415,7 @@ feat(api): require bearer token on the control plane
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -597,7 +597,7 @@ feat(agent): piperd token create/list/revoke (bootstrap)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -800,7 +800,7 @@ feat(config): ~/.piper/piper credentials + ~/.piper/piperd data dir
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -969,7 +969,7 @@ feat(cli): send Authorization: Bearer from saved credentials
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1140,7 +1140,7 @@ feat(cli): piper login stores a verified token in ~/.piper/piper
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```

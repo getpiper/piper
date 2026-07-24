@@ -16,7 +16,7 @@
 - **Defaults unchanged on Linux:** control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, base domain `piper.localhost`, app container port `8080`, and Caddy HTTP/HTTPS listen `:80`/`:443`.
 - **Test-first (TDD).** Every change starts with a failing test (or, for static asset/doc files, a contract test that fails until the file exists).
 - **Commits:** conventional-commit style, one per task step-group, ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - **Before claiming done:** run `make verify` (gofmt → vet → test → cross).
 - Branch already created: `ozykhan/macos-launchd-rootless`. Reference issues in commits (`Part of #207` / `#56` / `#208`).
 
@@ -126,7 +126,7 @@ Expected: build succeeds; tests PASS. (Defaults match the old literals, so no be
 ```bash
 gofmt -w internal/config/config.go cmd/piperd/main.go internal/config/config_test.go
 git add internal/config/config.go internal/config/config_test.go cmd/piperd/main.go
-git commit -m "$(printf 'feat(agent): configurable PIPER_HTTP_ADDR/PIPER_HTTPS_ADDR listen (default :80/:443)\n\nPart of #207\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(agent): configurable PIPER_HTTP_ADDR/PIPER_HTTPS_ADDR listen (default :80/:443)\n\nPart of #207\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -280,7 +280,7 @@ Expected: `packaging/launchd/com.piperbox.piperd.plist: OK`.
 
 ```bash
 git add packaging/launchd/
-git commit -m "$(printf 'feat(repo): rootless macOS launchd LaunchAgent + env example\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(repo): rootless macOS launchd LaunchAgent + env example\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ### Task 3: macOS docs + doc contract test
@@ -389,7 +389,7 @@ Expected: PASS (all three tests).
 
 ```bash
 git add docs/manual-setup.md docs/runbooks/git-deploy-e2e.md packaging/launchd/piperd_test.go
-git commit -m "$(printf 'docs(repo): macOS launchd agent setup + runbook note\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'docs(repo): macOS launchd agent setup + runbook note\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -665,7 +665,7 @@ Expected: build succeeds; PASS.
 ```bash
 gofmt -w cmd/piper/agent.go cmd/piper/agent_test.go cmd/piper/main.go
 git add cmd/piper/agent.go cmd/piper/agent_test.go cmd/piper/main.go
-git commit -m "$(printf 'feat(cli): piper agent up/down/status to toggle the macOS launchd agent\n\nPart of #208\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(cli): piper agent up/down/status to toggle the macOS launchd agent\n\nPart of #208\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---

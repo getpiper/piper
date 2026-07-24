@@ -20,7 +20,7 @@ This is **Plan 3 of 3** for the slice specced in [`docs/superpowers/specs/2026-0
 - **Stream-kind bytes** are exactly `'T'` (passthrough), `'H'` (terminated HTTP), `'C'` (control).
 - **Deployment status strings** remain exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Free-tier apex default** `public.getpiper.co`; **default per-account app cap** `10`.
-- Commit messages are conventional-commit style ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`, and reference `Part of #49`.
+- Commit messages are conventional-commit style ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`, and reference `Part of #49`.
 
 ## File Structure
 
@@ -215,7 +215,7 @@ git commit -m "feat(tunnel): typed streams + control message framing
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -511,7 +511,7 @@ git commit -m "feat(relay): hostnames registry — assign, app-cap, kill-switch
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -644,7 +644,7 @@ git commit -m "feat(relay): router byHost map for terminated hostnames
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1172,7 +1172,7 @@ git commit -m "feat(relay): wildcard TLS termination + control-stream hostname r
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1255,7 +1255,7 @@ git commit -m "feat(relay): wire wildcard cert env + test auto-approve verifier
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1566,7 +1566,7 @@ git commit -m "feat(agent): TunnelClient with typed-stream dial + hostname regis
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1721,7 +1721,7 @@ git commit -m "feat(cli): terminated mode marker in relay.json
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1868,7 +1868,7 @@ git commit -m "feat(deploy): HostnameRegistrar seam for relay-terminated hostnam
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1961,7 +1961,7 @@ git commit -m "feat(agent): piperd terminated mode — no box TLS, :80 forward, 
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2210,7 +2210,7 @@ git commit -m "test(e2e): self-service relay-terminated shared domain loop; docs
 Part of #49
 Closes #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

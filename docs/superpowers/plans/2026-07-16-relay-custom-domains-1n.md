@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - `CGO_ENABLED=0` everywhere; `make verify` (gofmt → vet → test → arm64 cross-build) must pass before the work is done.
-- Branch `ozykhan/relay-custom-domains` (already created, spec committed). One commit per task, conventional-commit style, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Branch `ozykhan/relay-custom-domains` (already created, spec committed). One commit per task, conventional-commit style, ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 - Status strings for custom_domains rows are exactly `"pending"` and `"active"`.
 - Pending TTL is exactly `const pendingTTL = time.Hour`.
 - Per-agent domain cap defaults to **5**, counting live rows (active + unexpired pending), operator-configurable via `Configure` / `PIPER_RELAY_MAX_DOMAINS`.
@@ -168,7 +168,7 @@ git commit -m "feat(relay): custom_domains table + one-way column migration
 
 Part of #227.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -526,7 +526,7 @@ git commit -m "feat(relay): AddCustomDomain/CustomDomains — pending claims wit
 
 Part of #227.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -666,7 +666,7 @@ git commit -m "feat(relay): ConfirmCustomDomain + RemoveCustomDomain
 
 Part of #227.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -892,7 +892,7 @@ CustomDomain getter and the column's unique-index test retire with it.
 
 Part of #227.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1027,7 +1027,7 @@ git commit -m "feat(agent): tunnel-client add/remove/confirm custom-domain ops
 
 Part of #227.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1284,7 +1284,7 @@ domains and expired squats die by router overwrite or re-derive filtering.
 
 Closes #227.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

@@ -14,7 +14,7 @@
 - Module path `github.com/piperbox/piper`.
 - Work on branch `ozykhan/relay-orgs-design` (already holds the spec commit); PR into `main`, squash-merge.
 - One commit per task, conventional-commit style, each ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Reference the issue in commits/PR body: `Part of #104`.
 - Run tests with `go test ./internal/relay/ -run <Name> -v`; run `make verify` before claiming done (gofmt → vet → tests → arm64 cross-build).
 - All tests are white-box (package `relay`), using the existing `openTestStore(t)` helper from `accounts_test.go`.
@@ -231,7 +231,7 @@ git commit -m "feat(relay): org-aware accounts schema + legacy rebuild migration
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -402,7 +402,7 @@ git commit -m "feat(relay): store and refresh the raw GitHub login on accounts
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -690,7 +690,7 @@ git commit -m "feat(relay): org accounts — create, list, role resolution, iner
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -922,7 +922,7 @@ git commit -m "feat(relay): org membership — list, role changes, last-owner gu
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1232,7 +1232,7 @@ git commit -m "feat(relay): org invites — create, list, revoke, accept, declin
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1409,7 +1409,7 @@ git commit -m "feat(relay): CanControl + AgentsVisibleTo replace AgentsForAccoun
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1595,7 +1595,7 @@ git commit -m "feat(relay): org members drive org boxes through the control prox
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1842,7 +1842,7 @@ git commit -m "feat(relay): org API — create and list orgs, shared authAccount
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2090,7 +2090,7 @@ git commit -m "feat(relay): org members API — list, role changes, removal, sel
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2360,7 +2360,7 @@ git commit -m "feat(relay): invites API — org-side manage, caller-side accept/
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2491,7 +2491,7 @@ git commit -m "feat(relay): enroll a box into an org (owner-gated org param)
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2666,7 +2666,7 @@ git commit -m "feat(relay): delete empty orgs, refused while agents exist
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -2701,7 +2701,7 @@ git commit -m "docs: record relay organizations in PROGRESS
 
 Part of #104.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 git push -u origin ozykhan/relay-orgs-design
 ```
 

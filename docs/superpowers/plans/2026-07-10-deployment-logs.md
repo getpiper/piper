@@ -15,7 +15,7 @@
 - Layering: `store` = persistence only, `runtime` = Docker only, `deploy` orchestrates via interfaces, `api` = transport. Nothing imports "up".
 - Run `make verify` (gofmt → vet → test → cross) before claiming any task done. Docker-gated tests skip without Docker; run them when Docker is available.
 - One commit per task step-cycle, conventional-commit style, body includes `Part of #101`, and every commit message ends with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Branch: `ozykhan/deploy-logs` (already exists, carries the spec commit).
 
 ---
@@ -329,7 +329,7 @@ git commit -m "feat(store): deployment logs column, history queries, 20-per-app 
 
 Part of #101
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -564,7 +564,7 @@ git commit -m "feat(runtime): capture build log in BuildResult, demux container 
 
 Part of #101
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -777,7 +777,7 @@ git commit -m "feat(deploy): persist build + container output per deployment
 
 Part of #101
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -946,7 +946,7 @@ git commit -m "feat(api): deployment history and per-deployment logs endpoints
 
 Part of #101
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -975,7 +975,7 @@ Read `PROGRESS.md`, find the agent/control-API section, and add one line followi
 git add PROGRESS.md
 git commit -m "docs: note deployment history + logs (#101) in PROGRESS
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 git push -u origin ozykhan/deploy-logs
 ```
 

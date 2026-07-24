@@ -14,7 +14,7 @@
 - Module path `github.com/piperbox/piper`; helpers live in `cmd/piperd`, `store` stays ignorant of paths/privileges (layering rule).
 - Concurrent access with the running daemon is fine by design: `store.Open` already sets `busy_timeout(5000)` for exactly this case. Do NOT add service stop/start logic.
 - Run `make verify` (gofmt → vet → test → cross) before claiming any task done.
-- Commit style: conventional commits, body line `Part of #134`, trailer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Commit style: conventional commits, body line `Part of #134`, trailer `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 - Branch: `ozykhan/token-systemd-db` (already created off `origin/main`).
 
 ---
@@ -145,7 +145,7 @@ git commit -m "feat(agent): add state-dir owner drop for piperd token
 
 Part of #134
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -285,7 +285,7 @@ git commit -m "feat(agent): resolve piperd token data dir on systemd installs
 
 Part of #134
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -344,7 +344,7 @@ git commit -m "fix(agent): point piperd token at the service DB under systemd
 
 Part of #134
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -398,7 +398,7 @@ git commit -m "docs: document sudo piperd token create for systemd installs
 
 Part of #134
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

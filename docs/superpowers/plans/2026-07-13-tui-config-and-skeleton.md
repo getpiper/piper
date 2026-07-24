@@ -16,7 +16,7 @@
 - Defaults: control API `127.0.0.1:8088`, base domain `piper.localhost`.
 - TDD: every task writes the failing test first. Run `make verify` before every push.
 - One commit per task step group, conventional-commit style, ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Trunk-based: never commit to `main`; one PR per phase, squash-merged.
 
 **Spec deviations locked in this plan (both noted for the spec's later phases):**
@@ -273,7 +273,7 @@ git commit -m "feat(cli): add multi-box client config schema with legacy migrati
 
 Part of #P1
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -459,7 +459,7 @@ git commit -m "feat(cli): route LoadClient/SaveClient through multi-box config
 
 Part of #P1
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -521,7 +521,7 @@ git commit -m "build: add bubbletea and lipgloss for the TUI
 
 Part of #P2
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -646,7 +646,7 @@ git commit -m "feat(cli): scaffold internal/tui with API seam and render helpers
 
 Part of #P2
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -800,7 +800,7 @@ git commit -m "feat(cli): add read-only apps view to the TUI
 
 Part of #P2
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1028,7 +1028,7 @@ git commit -m "feat(cli): add TUI root model with view stack, poll tick, status 
 
 Part of #P2
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1161,7 +1161,7 @@ git commit -m "feat(cli): bare piper in a terminal opens the TUI
 
 Part of #P2
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

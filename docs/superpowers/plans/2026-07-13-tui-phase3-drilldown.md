@@ -17,7 +17,7 @@
 - Read-only only. No deploy / stop / delete / link / create actions (phase 4+). No `internal/config` changes (leave #186/#187 for phase 5). No new agent endpoints.
 - TDD: every task writes the failing test first. Run `make verify` before pushing.
 - One commit per task step group, conventional-commit style, ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Trunk-based: never commit to `main`; one PR into `main` for this phase, squash-merged. Work proceeds on branch `ozykhan/tui-drilldown` (already holds the spec + this plan).
 
 **Reference — current shapes (already in the codebase):**
@@ -50,7 +50,7 @@ git commit -m "docs: add TUI phase-3 drill-down implementation plan
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 3: Edit the epic** — check the Phase 3 line's context if desired and note `#P3` for later steps.
@@ -435,7 +435,7 @@ relay base-domain + https URL rendering. Resolves the #189 polish items.
 
 Part of #P3
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -860,7 +860,7 @@ git commit -m "feat(cli): add app-detail view with live deployments table and ap
 
 Part of #P3
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1172,7 +1172,7 @@ git commit -m "feat(cli): add deployment log viewer with follow
 
 Part of #P3
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1209,7 +1209,7 @@ git commit -m "docs: record TUI drill-down in PROGRESS.md
 
 Part of #P3
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 4: Push and open the PR**

@@ -16,7 +16,7 @@
 - **Targets:** linux/{amd64, arm64, armv7}, darwin/{amd64, arm64}. No Windows.
 - **Strip flags:** carry `-s -w` (matches the Makefile release build).
 - **Checksum filename:** exactly `checksums.txt` (#46's installer expects it).
-- **Conventional commits**, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Work is on branch `ozykhan/release-pipeline` (already created).
+- **Conventional commits**, ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`. Work is on branch `ozykhan/release-pipeline` (already created).
 
 ---
 
@@ -154,7 +154,7 @@ git commit -m "feat(repo): goreleaser config for per-binary release archives (#5
 
 Part of #58
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -218,7 +218,7 @@ git commit -m "feat(repo): release workflow — v* tag to GitHub Release (#58)
 
 Part of #58
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -299,7 +299,7 @@ git commit -m "ci(repo): lint goreleaser config on PRs; mark #58 built
 
 Part of #58
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

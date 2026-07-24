@@ -17,7 +17,7 @@
 - **Relay boxes** (a `Box` with a non-empty `RelayAPI`) are **listed** but **not switchable** in this phase: they render `—` for status and decline `↵`. The box form edits only name/addr/token and preserves `RelayAPI`/`AccountCredential` untouched.
 - **Commits:** conventional-commit style, `Part of #183` in the body, ending with:
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+  Co-Authored-By: Claude {current model} <noreply@anthropic.com>
   ```
 - **Verify gate:** `make verify` (gofmt → vet → test → cross) must pass before the work is done. If gofmt flags files, run `make fmt` and re-run.
 - **Existing test helpers** (in `internal/tui/app_test.go`, same package — reuse, do not redefine): `keyRunes(r rune) tea.KeyMsg`, `keyEnter()`, `keyBackspace()`, `keyTab()`, `pump(t, m, cmd) Model`, and the `fakeAPI` fake. Existing `NewModel(box, addr string, remote bool, c API) Model` keeps its 4-arg signature; the dialer is attached via `.WithDialer(...)`.
@@ -468,7 +468,7 @@ git commit -m "feat(cli): add TUI boxes view with switcher and t key
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -671,7 +671,7 @@ git commit -m "feat(cli): add per-box reachability probes to the TUI boxes view
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1097,7 +1097,7 @@ git commit -m "feat(cli): add/edit box form with verify-before-save to the TUI
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1318,7 +1318,7 @@ git commit -m "feat(cli): remove a box from the TUI boxes view with a y/n confir
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1402,7 +1402,7 @@ git commit -m "docs: record TUI boxes view; add boxes keymap to help overlay
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

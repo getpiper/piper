@@ -18,7 +18,7 @@
 - **No data migration** on `daemonize` (`~/.piper/piperd` → `/var/lib/piper`): promotion is a fresh durable install.
 - **Deployment status strings** unchanged: `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Commits:** conventional-commit style, one per task step-group, referencing the design and `#56` (agent packaging), ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - **Before claiming done:** run `make verify` (gofmt → vet → test → cross).
 - Design: `docs/superpowers/specs/2026-07-14-linux-rootless-toggleable-piperd-design.md`.
 
@@ -117,7 +117,7 @@ Expected: PASS.
 
 ```bash
 git add packaging/systemd/piperd.user.service packaging/systemd/piperd_test.go .goreleaser.yaml
-git commit -m "$(printf 'feat(repo): rootless systemd user unit (piperd.user.service)\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(repo): rootless systemd user unit (piperd.user.service)\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -414,7 +414,7 @@ Expected: build succeeds; PASS.
 ```bash
 gofmt -w cmd/piper/agent.go cmd/piper/agent_test.go
 git add cmd/piper/agent.go cmd/piper/agent_test.go
-git commit -m "$(printf 'feat(cli): piper agent up/down/status on Linux (systemctl --user)\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(cli): piper agent up/down/status on Linux (systemctl --user)\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ### Task 3: `piper agent daemonize` (promote rootless → system daemon)
@@ -755,7 +755,7 @@ Expected: build succeeds; PASS.
 ```bash
 gofmt -w cmd/piper/agent.go cmd/piper/agent_test.go
 git add cmd/piper/agent.go cmd/piper/agent_test.go cmd/piper/piperd.service cmd/piper/piperd.env.example
-git commit -m "$(printf 'feat(cli): piper agent daemonize — promote rootless to systemd system daemon\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(cli): piper agent daemonize — promote rootless to systemd system daemon\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -935,7 +935,7 @@ Expected: PASS — including `TestAgentInstallDropsUnitAndEnv` (which sets `PIPE
 
 ```bash
 git add install.sh packaging/install/install_test.go
-git commit -m "$(printf 'feat(repo): install.sh installs rootless when run non-root\n\nRoot install (curl | sudo sh) is unchanged; non-root now drops a per-user\npiperd + systemd user unit under ~/.piper instead of erroring.\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(repo): install.sh installs rootless when run non-root\n\nRoot install (curl | sudo sh) is unchanged; non-root now drops a per-user\npiperd + systemd user unit under ~/.piper instead of erroring.\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1080,7 +1080,7 @@ Expected: PASS.
 
 ```bash
 git add docs/getting-started.md docs/manual-setup.md docs/runbooks/git-deploy-e2e.md packaging/install/install_test.go
-git commit -m "$(printf 'docs(repo): Linux rootless install + piper agent daemonize\n\nPart of #56\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'docs(repo): Linux rootless install + piper agent daemonize\n\nPart of #56\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---

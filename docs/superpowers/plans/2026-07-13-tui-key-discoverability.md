@@ -15,7 +15,7 @@
 - **Layering:** pure `internal/tui` change; nothing imports up. No API-surface change.
 - **Commits:** conventional-commit style, `Part of #196` in the body, ending with:
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+  Co-Authored-By: Claude {current model} <noreply@anthropic.com>
   ```
 - **Verify gate:** `make verify` (gofmt → vet → test → cross) must pass before the work is done.
 - **Existing test helpers** (in `internal/tui/app_test.go`, same package): `keyRunes(r rune) tea.KeyMsg`, `keyEnter()`, `keyTab()`, `pump(t, m, cmd) Model`, and the `fakeAPI` fake. Reuse them; do not redefine.
@@ -157,7 +157,7 @@ git commit -m "feat(cli): add key-legend footer to TUI navigation views
 
 Part of #196
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -332,7 +332,7 @@ git commit -m "feat(cli): add ? help overlay with full keymap to the TUI
 
 Part of #196
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -372,7 +372,7 @@ git commit -m "docs: record TUI key discoverability in PROGRESS.md
 
 Part of #196
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

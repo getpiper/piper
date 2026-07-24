@@ -18,7 +18,7 @@
 - **Test gates:** `make test` (unit; Docker/ACME/e2e tests skip cleanly when their deps are absent) and `make cross` must both pass before any task is done.
 - **Commits:** conventional-commit style, one per step where the plan says "Commit". End every commit message with:
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+  Co-Authored-By: Claude {current model} <noreply@anthropic.com>
   ```
 
 ---
@@ -260,7 +260,7 @@ git commit -m "feat(tunnel): yamux transport with token+base-domain handshake
 
 Part of #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -526,7 +526,7 @@ git commit -m "feat(certs): lego DNS-01 wildcard issuance + renewal-due check
 
 Part of #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -711,7 +711,7 @@ git commit -m "feat(caddy): optional :443 TLS listener + load_pem cert push
 
 Part of #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1252,7 +1252,7 @@ git commit -m "feat(relay): piper-relay binary — enrollment, SNI routing, tunn
 
 Part of #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1620,7 +1620,7 @@ git commit -m "feat(agent): relay-mode tunnel client + cert wiring in piperd
 
 Part of #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1823,7 +1823,7 @@ git commit -m "test(e2e): loopback relay path — tunnel + SNI + on-box TLS
 
 Part of #10. Closes #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1842,7 +1842,7 @@ git commit -m "docs: mark Plan 2 (relay + tunnel + TLS) complete in PROGRESS
 
 Part of #10.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 3: Finish the branch**

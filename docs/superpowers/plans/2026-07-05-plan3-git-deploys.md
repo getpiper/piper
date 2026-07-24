@@ -17,7 +17,7 @@
 - **Layering — nothing imports "up":** `source` knows only GitHub + git; `source/github` does **not** import `store`; `webhook` orchestrates `source`+`store`+`deploy`; `deploy` stays ignorant of the source.
 - **Hostname convention (matches existing code):** apps serve at `<app>.<BaseDomain>`; the reserved webhook host is `hooks.<BaseDomain>`. (`hooks` is a reserved app name.) The wildcard cert `*.<BaseDomain>` already covers it; the relay already routes `*.<BaseDomain>` by SNI suffix — **no relay change**.
 - **TDD, DRY, YAGNI, frequent commits.** One commit per task. Conventional-commit style, ending every message with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - **Reference the issue:** each commit body includes `Part of #11`.
 - **Green gates:** `make test` and `make cross` pass before any task is considered done.
 
@@ -248,7 +248,7 @@ Expected: PASS (new test + existing store tests).
 
 ```bash
 git add internal/store/schema.sql internal/store/store.go internal/store/store_test.go
-git commit -m "$(printf 'feat(store): bind apps to a repo/branch\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(store): bind apps to a repo/branch\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -360,7 +360,7 @@ Expected: PASS.
 
 ```bash
 git add internal/store/schema.sql internal/store/store.go internal/store/store_test.go
-git commit -m "$(printf 'feat(store): persist GitHub App credentials\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(store): persist GitHub App credentials\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -523,7 +523,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/source.go internal/source/source_test.go
-git commit -m "$(printf 'feat(source): provider seam types and interface\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source): provider seam types and interface\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -750,7 +750,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/github/github.go internal/source/github/github_test.go
-git commit -m "$(printf 'feat(source/github): provider construction, app JWT, installation token\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): provider construction, app JWT, installation token\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -946,7 +946,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/github/parse.go internal/source/github/parse_test.go internal/source/github/testdata
-git commit -m "$(printf 'feat(source/github): verify HMAC and parse push/ping webhooks\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): verify HMAC and parse push/ping webhooks\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1167,7 +1167,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/github/fetch.go internal/source/github/fetch_test.go
-git commit -m "$(printf 'feat(source/github): fetch repo tarball at commit via installation token\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): fetch repo tarball at commit via installation token\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1387,7 +1387,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/github/report.go internal/source/github/report_test.go
-git commit -m "$(printf 'feat(source/github): report deploy status via GitHub Deployments API\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): report deploy status via GitHub Deployments API\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1553,7 +1553,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/github/manifest.go internal/source/github/manifest_test.go
-git commit -m "$(printf 'feat(source/github): app manifest build and code exchange\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): app manifest build and code exchange\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1898,7 +1898,7 @@ Expected: PASS (all five tests; `-race` clean).
 
 ```bash
 git add internal/webhook/webhook.go internal/webhook/webhook_test.go
-git commit -m "$(printf 'feat(webhook): receive signed webhook and drive the deployer\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(webhook): receive signed webhook and drive the deployer\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -2097,7 +2097,7 @@ Expected: PASS.
 
 ```bash
 git add internal/config/config.go internal/api/api.go internal/api/api_test.go
-git commit -m "$(printf 'feat(api): app-repo link and GitHub App onboarding endpoints\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(api): app-repo link and GitHub App onboarding endpoints\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -2264,7 +2264,7 @@ Expected: build OK; webhook tests PASS; `make cross` (arm64, `CGO_ENABLED=0`) OK
 
 ```bash
 git add cmd/piperd/main.go internal/webhook/integration_test.go
-git commit -m "$(printf 'feat(agent): serve webhook over the tunnel in relay mode\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(agent): serve webhook over the tunnel in relay mode\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -2494,7 +2494,7 @@ Expected: client tests PASS; full build OK.
 
 ```bash
 git add internal/client/client.go internal/client/client_test.go cmd/piper/main.go
-git commit -m "$(printf 'feat(cli): github setup and app link commands\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(cli): github setup and app link commands\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -2539,7 +2539,7 @@ Expected: PASS.
 
 ```bash
 git add PROGRESS.md README.md
-git commit -m "$(printf 'docs: record Plan 3 push-to-deploy (GitHub App)\n\nPart of #11\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'docs: record Plan 3 push-to-deploy (GitHub App)\n\nPart of #11\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
