@@ -34,7 +34,16 @@ func (a *appTokenSource) Token(ctx context.Context, ev source.Event) (string, er
 	if err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", a.apiBase, ev.InstallationID)
+	// Webhook events carry the installation ID; manual (API-triggered) deploys
+	// have no event, so resolve it from the repository instead.
+	instID := ev.InstallationID
+	if instID == 0 {
+		instID, err = a.installationForRepo(ctx, jwt, ev.Repo)
+		if err != nil {
+			return "", err
+		}
+	}
+	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", a.apiBase, instID)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -54,4 +63,28 @@ func (a *appTokenSource) Token(ctx context.Context, ev source.Event) (string, er
 		return "", err
 	}
 	return out.Token, nil
+}
+
+// installationForRepo finds the App's installation covering repo.
+func (a *appTokenSource) installationForRepo(ctx context.Context, jwt, repo string) (int64, error) {
+	url := fmt.Sprintf("%s/repos/%s/installation", a.apiBase, repo)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return 0, fmt.Errorf("repo installation: %s: %s", resp.Status, body)
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, err
+	}
+	return out.ID, nil
 }
