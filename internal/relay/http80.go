@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // Port-80 routing for BYO custom domains (#228). Custom domains are :443

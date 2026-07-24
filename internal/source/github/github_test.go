@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // testKeyPEM returns a fresh PKCS#1 RSA private key in PEM form.

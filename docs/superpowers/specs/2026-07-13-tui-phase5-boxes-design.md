@@ -4,7 +4,7 @@
 **Status:** approved design, pre-implementation
 **Surface:** `[cli]` — the `piper` binary only; no `piperd` or `piper-relay` changes
 
-Phase 5 of the Interactive TUI epic [#183](https://github.com/getpiper/piper/issues/183).
+Phase 5 of the Interactive TUI epic [#183](https://github.com/piperbox/piper/issues/183).
 The multi-box config (schema v2) landed in phase 1 (#184); this phase gives it a
 UI: a full-screen view that lists the configured boxes, switches the active box,
 and adds/edits/removes boxes. Parent design:

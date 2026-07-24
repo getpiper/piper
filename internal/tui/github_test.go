@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // fakeRelay is a scriptable RelayAPI for wizard and picker tests.

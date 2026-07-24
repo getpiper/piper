@@ -16,7 +16,7 @@ Go `testing` + `net/http/httptest` for the harness. No new Go dependencies.
 
 ## Global Constraints
 
-- **Module path:** `github.com/getpiper/piper`. Repo: `getpiper/piper`.
+- **Module path:** `github.com/piperbox/piper`. Repo: `getpiper/piper`.
 - **No new runtime deps in the script:** POSIX `sh` only; `curl` or `wget`;
   `sha256sum` or `shasum`; `tar`; `install`. No `jq`.
 - **Release asset naming (goreleaser, verbatim):** archives are
@@ -230,7 +230,7 @@ Create `install.sh`:
 
 ```sh
 #!/bin/sh
-# Piper installer — https://github.com/getpiper/piper
+# Piper installer — https://github.com/piperbox/piper
 # Installs the piperd agent (+ systemd unit) or just the piper CLI.
 set -eu
 
@@ -777,7 +777,7 @@ func TestInstallDocumentation(t *testing.T) {
 	}
 	readme := string(b)
 	for _, want := range []string{
-		"raw.githubusercontent.com/getpiper/piper/main/install.sh",
+		"raw.githubusercontent.com/piperbox/piper/main/install.sh",
 		"--cli-only",
 		"--rc",
 		"PIPER_ADDR",
@@ -805,7 +805,7 @@ In `README.md`, insert this section immediately **before** the existing
 One line gets a Linux box to a running `piperd` service:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh
 ```
 
 It detects your OS/arch, downloads the matching release binaries, verifies their
@@ -817,7 +817,7 @@ Install just the CLI (Linux or macOS) — for driving a remote daemon from your
 workstation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --cli-only
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh -s -- --cli-only
 ```
 
 As root this installs `piper` to `/usr/local/bin`; unprivileged, to
@@ -831,11 +831,11 @@ Only pre-release builds exist for now, so add `--rc` to install the latest
 release candidate:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh -s -- --rc
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh -s -- --rc
 ```
 
 The full service install is Linux + systemd; on macOS use `--cli-only` (a
-launchd unit is tracked in [#56](https://github.com/getpiper/piper/issues/56)).
+launchd unit is tracked in [#56](https://github.com/piperbox/piper/issues/56)).
 Shell completions and a Homebrew tap are planned follow-ups. Prefer to build from
 source, or wire your own automation? The manual steps below still work.
 ````
@@ -864,15 +864,15 @@ In `PROGRESS.md`, under the `## Install & run piperd as a service` section,
 replace these two lines:
 
 ```markdown
-- ⬜ One-line `curl … | sh` installer (blocked on Release artifacts) — [#46](https://github.com/getpiper/piper/issues/46)
-- ⬜ Standalone `piper` CLI on PATH — [#47](https://github.com/getpiper/piper/issues/47)
+- ⬜ One-line `curl … | sh` installer (blocked on Release artifacts) — [#46](https://github.com/piperbox/piper/issues/46)
+- ⬜ Standalone `piper` CLI on PATH — [#47](https://github.com/piperbox/piper/issues/47)
 ```
 
 with:
 
 ```markdown
-- ✅ One-line `curl … | sh` installer (OS/arch detect, checksum-verified, `--cli-only`/`--rc`) — [#46](https://github.com/getpiper/piper/issues/46)
-- ✅ Standalone `piper` CLI on PATH (`--cli-only`; drives a remote daemon via `PIPER_ADDR`) — [#47](https://github.com/getpiper/piper/issues/47)
+- ✅ One-line `curl … | sh` installer (OS/arch detect, checksum-verified, `--cli-only`/`--rc`) — [#46](https://github.com/piperbox/piper/issues/46)
+- ✅ Standalone `piper` CLI on PATH (`--cli-only`; drives a remote daemon via `PIPER_ADDR`) — [#47](https://github.com/piperbox/piper/issues/47)
 ```
 
 - [ ] **Step 7: Verify everything green**

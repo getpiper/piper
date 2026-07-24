@@ -79,7 +79,7 @@ because the defaults match the old literals.
 ## (B) `[repo]` launchd LaunchAgent
 
 ### Files
-- `packaging/launchd/com.getpiper.piperd.plist`
+- `packaging/launchd/com.piperbox.piperd.plist`
 - `packaging/launchd/piperd.env.macos.example`
 - `packaging/launchd/piperd_test.go`
 
@@ -126,7 +126,7 @@ override file `~/.piper/piperd.env`** to play the role systemd's env file plays.
   auto-bootstrap at install/boot.
 - **No `StandardOutPath`/`StandardErrorPath`** — launchd won't tilde-expand them;
   the wrapper redirects to `~/.piper/piper{,.err}.log` itself (after `mkdir -p`).
-- `Label` = `com.getpiper.piperd`.
+- `Label` = `com.piperbox.piperd`.
 
 No `sudo` and no pre-created system dirs: the wrapper creates `~/.piper` itself, and
 piperd creates its own `~/.piper/piperd` subdir.
@@ -150,7 +150,7 @@ overrides the plist wrapper's defaults):
   data/log paths and `$HOME/.piper/piperd.env` sourcing.
 - Env example: asserts `PIPER_API_ADDR`, `PIPER_BASE_DOMAIN`, `DOCKER_HOST` present.
 - Doc test (via the existing `repositoryFile` helper): `docs/manual-setup.md`
-  mentions `packaging/launchd/com.getpiper.piperd.plist` and `piper agent up`;
+  mentions `packaging/launchd/com.piperbox.piperd.plist` and `piper agent up`;
   runbook mentions the macOS verify/teardown snippet.
 
 ## (C) `[cli]` `piper agent up` / `down` / `status`
@@ -160,9 +160,9 @@ status/stop), macOS-only, no `sudo`:
 
 | Command | Action |
 |---|---|
-| `piper agent up` | `launchctl bootstrap gui/<uid> ~/Library/LaunchAgents/com.getpiper.piperd.plist` |
-| `piper agent down` | `launchctl bootout gui/<uid>/com.getpiper.piperd` |
-| `piper agent status` | `launchctl print gui/<uid>/com.getpiper.piperd` (summarized: running / stopped / not installed) |
+| `piper agent up` | `launchctl bootstrap gui/<uid> ~/Library/LaunchAgents/com.piperbox.piperd.plist` |
+| `piper agent down` | `launchctl bootout gui/<uid>/com.piperbox.piperd` |
+| `piper agent status` | `launchctl print gui/<uid>/com.piperbox.piperd` (summarized: running / stopped / not installed) |
 
 - `uid` from `os.Getuid()`.
 - On non-macOS (`runtime.GOOS != "darwin"`): print a clear message pointing at the

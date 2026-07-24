@@ -1,6 +1,6 @@
 # TUI key discoverability — contextual footer + `?` help overlay
 
-Closes the gap tracked in [#196](https://github.com/getpiper/piper/issues/196),
+Closes the gap tracked in [#196](https://github.com/piperbox/piper/issues/196),
 part of the Interactive TUI epic #183. The original TUI design spec
 (`2026-07-12-piper-tui-design.md:34`) already lists `?` help as a global key; it
 was never built, and the two navigation views expose no key hints at all.

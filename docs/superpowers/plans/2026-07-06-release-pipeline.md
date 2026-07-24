@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - **No cgo.** Every build sets `CGO_ENABLED=0` (pure-Go SQLite via `modernc.org/sqlite`).
-- **Module path:** `github.com/getpiper/piper`.
-- **Version var:** stamp `github.com/getpiper/piper/internal/version.value` (NOT goreleaser's default `main.version`).
+- **Module path:** `github.com/piperbox/piper`.
+- **Version var:** stamp `github.com/piperbox/piper/internal/version.value` (NOT goreleaser's default `main.version`).
 - **Targets:** linux/{amd64, arm64, armv7}, darwin/{amd64, arm64}. No Windows.
 - **Strip flags:** carry `-s -w` (matches the Makefile release build).
 - **Checksum filename:** exactly `checksums.txt` (#46's installer expects it).
@@ -35,7 +35,7 @@
 - Create: `.goreleaser.yaml`
 
 **Interfaces:**
-- Consumes: `cmd/piperd`, `cmd/piper`, `cmd/piper-relay` (existing mains); the version var `github.com/getpiper/piper/internal/version.value`.
+- Consumes: `cmd/piperd`, `cmd/piper`, `cmd/piper-relay` (existing mains); the version var `github.com/piperbox/piper/internal/version.value`.
 - Produces: `dist/` snapshot artifacts — per-binary `.tar.gz` archives named `<binary>_<version>_<os>_<arch>[vN].tar.gz` and `checksums.txt`. Task 2 and Task 3 invoke the same config via `goreleaser release` / `goreleaser check`.
 
 - [ ] **Step 1: Ensure goreleaser is installed, then check with no config (verify it fails)**
@@ -65,7 +65,7 @@ builds:
       - goos: darwin
         goarch: arm
     ldflags:
-      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+      - -s -w -X github.com/piperbox/piper/internal/version.value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
   - id: piper
@@ -80,7 +80,7 @@ builds:
       - goos: darwin
         goarch: arm
     ldflags:
-      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+      - -s -w -X github.com/piperbox/piper/internal/version.value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
   - id: piper-relay
@@ -95,7 +95,7 @@ builds:
       - goos: darwin
         goarch: arm
     ldflags:
-      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+      - -s -w -X github.com/piperbox/piper/internal/version.value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -282,13 +282,13 @@ Expected: `ok`.
 In `PROGRESS.md`, change the #58 line from stubbed to built. Change:
 
 ```
-- ⬜ Release pipeline (goreleaser: tag → GitHub Release + cross-compiled binaries/checksums); unblocks installer/image — [#58](https://github.com/getpiper/piper/issues/58)
+- ⬜ Release pipeline (goreleaser: tag → GitHub Release + cross-compiled binaries/checksums); unblocks installer/image — [#58](https://github.com/piperbox/piper/issues/58)
 ```
 
 to:
 
 ```
-- ✅ Release pipeline (goreleaser: tag → GitHub Release + cross-compiled binaries/checksums); unblocks installer/image — [#58](https://github.com/getpiper/piper/issues/58)
+- ✅ Release pipeline (goreleaser: tag → GitHub Release + cross-compiled binaries/checksums); unblocks installer/image — [#58](https://github.com/piperbox/piper/issues/58)
 ```
 
 - [ ] **Step 5: Commit**

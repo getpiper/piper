@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/client"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/client"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // TestEndToEndDeploy builds piperd, runs it against real Docker + Caddy, deploys

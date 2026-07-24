@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo** — everything passes `CGO_ENABLED=0`; `make cross` (linux/arm64) must stay green.
-- Module path `github.com/getpiper/piper`.
+- Module path `github.com/piperbox/piper`.
 - Domain-config status strings are exactly `""`, `"issuing"`, `"active"`, `"failed"` (deployment statuses `"building"`/`"running"`/`"failed"`/`"stopped"` are untouched).
 - Defaults: control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, base domain `piper.localhost`, HTTPS listen `:443`.
 - Layering: `store` persistence only; `caddy` Caddy admin only; `domain` orchestrates via interfaces; `api` transport. Nothing imports "up".
@@ -1161,7 +1161,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // selfSignedPEM issues a throwaway wildcard cert so the fake issuer's output
@@ -1476,8 +1476,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getpiper/piper/internal/certs"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/certs"
+	"github.com/piperbox/piper/internal/store"
 )
 
 const (
@@ -2564,7 +2564,7 @@ func TestDomainEndpointsWithoutRelay(t *testing.T) {
 }
 ```
 
-Add `"github.com/getpiper/piper/internal/domain"` to imports. Update `newTestHandler` and every other `New(` call in the package's tests to pass a trailing `nil`.
+Add `"github.com/piperbox/piper/internal/domain"` to imports. Update `newTestHandler` and every other `New(` call in the package's tests to pass a trailing `nil`.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -2591,7 +2591,7 @@ Change the signature:
 func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager) http.Handler {
 ```
 
-Add the handlers inside `New` (import `"github.com/getpiper/piper/internal/domain"`):
+Add the handlers inside `New` (import `"github.com/piperbox/piper/internal/domain"`):
 
 ```go
 	noRelay := func(w http.ResponseWriter) bool {
@@ -2755,7 +2755,7 @@ func newEnvIssuer(cfg config.Config) (domain.Issuer, error) {
 }
 ```
 
-(new imports: `crypto/x509`, `crypto/x509/pkix`, `encoding/pem`, `math/big`, `github.com/getpiper/piper/internal/domain`; `crypto/ecdsa`, `crypto/elliptic`, `crypto/rand` are already imported.)
+(new imports: `crypto/x509`, `crypto/x509/pkix`, `encoding/pem`, `math/big`, `github.com/piperbox/piper/internal/domain`; `crypto/ecdsa`, `crypto/elliptic`, `crypto/rand` are already imported.)
 
 3. Construct the manager before the relay branch (after `dep := deploy.New(...)`):
 
@@ -3011,7 +3011,7 @@ Expected: PASS (needs Docker; Caddy embedded).
 Under the Plan-2 public-relay onboarding sub-list, add:
 
 ```markdown
-  - ✅ domain-config API — BYO base domain + DNS creds settable remotely, live cert issuance + relay splice, shared-domain coexistence — [#102](https://github.com/getpiper/piper/issues/102)
+  - ✅ domain-config API — BYO base domain + DNS creds settable remotely, live cert issuance + relay splice, shared-domain coexistence — [#102](https://github.com/piperbox/piper/issues/102)
 ```
 
 - [ ] **Step 4: Full gate + commit**

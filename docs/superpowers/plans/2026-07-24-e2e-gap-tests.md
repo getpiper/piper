@@ -348,8 +348,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/client"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/client"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // TestWebhookPushAndPreview proves Plan 3 end-to-end on the passthrough relay:
@@ -695,7 +695,7 @@ Expected: all six tests pass (four existing + two new). This catches inter-test 
 In `PROGRESS.md`, under the Plan 3 section, append after the last `✅` line (replace `#N` with the tracking issue):
 
 ```markdown
-- ✅ e2e — deploy-failure resilience (failed build keeps the old version serving) + synthetic webhook push → deploy → PR-preview lifecycle through the relay — [#N](https://github.com/getpiper/piper/issues/N)
+- ✅ e2e — deploy-failure resilience (failed build keeps the old version serving) + synthetic webhook push → deploy → PR-preview lifecycle through the relay — [#N](https://github.com/piperbox/piper/issues/N)
 ```
 
 - [ ] **Step 3: Verify, commit, push, open the PR**

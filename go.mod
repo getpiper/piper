@@ -1,4 +1,4 @@
-module github.com/getpiper/piper
+module github.com/piperbox/piper
 
 go 1.26.0
 

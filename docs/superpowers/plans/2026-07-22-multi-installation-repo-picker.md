@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds must pass with `CGO_ENABLED=0`. (`make cross` proves the arm64 build.)
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **Pre-1.x compat policy:** break wire/response shapes in place — no shim, no version negotiation, no SQLite migration. The dashboard is updated in tandem.
 - **Deployment status strings** unchanged; not touched here.
 - **Verification gate:** `make verify` (gofmt → `go vet` → `go test ./...` → `make cross`) must pass before the branch is done.

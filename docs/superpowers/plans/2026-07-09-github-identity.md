@@ -1329,7 +1329,7 @@ Check for stragglers: `grep -rn -i google --include="*.go" --include="*.md" . | 
 Under the public-relay onboarding section (near line 42), add one line:
 
 ```markdown
-  - ✅ GitHub identity — relay accounts on GitHub OAuth (device flow for `piper login`, relay-hosted authorization-code flow for the browser); Google flow removed — [#99](https://github.com/getpiper/piper/issues/99)
+  - ✅ GitHub identity — relay accounts on GitHub OAuth (device flow for `piper login`, relay-hosted authorization-code flow for the browser); Google flow removed — [#99](https://github.com/piperbox/piper/issues/99)
 ```
 
 - [ ] **Step 3: Run the full verify gate**
@@ -1369,4 +1369,4 @@ EOF
 )"
 ```
 
-[#99]: https://github.com/getpiper/piper/issues/99
+[#99]: https://github.com/piperbox/piper/issues/99

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 //go:embed piperd.service
@@ -32,7 +32,7 @@ var embeddedUserEnv string
 //go:embed piperd.env.macos.example
 var embeddedMacEnv string
 
-const launchdLabel = "com.getpiper.piperd"
+const launchdLabel = "com.piperbox.piperd"
 
 // agentGOOS is runtime.GOOS; a var so tests can exercise the non-darwin gate.
 var agentGOOS = runtime.GOOS

@@ -20,11 +20,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/getpiper/piper/internal/deploy"
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/source/github"
-	"github.com/getpiper/piper/internal/store"
-	"github.com/getpiper/piper/internal/webhook"
+	"github.com/piperbox/piper/internal/deploy"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/source/github"
+	"github.com/piperbox/piper/internal/store"
+	"github.com/piperbox/piper/internal/webhook"
 )
 
 // gzTarball returns a gzipped tar with a single top-level dir wrapping a

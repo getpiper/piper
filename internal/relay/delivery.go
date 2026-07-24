@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // ErrAgentOffline is returned when a bound agent has no live tunnel session.

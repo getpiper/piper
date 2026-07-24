@@ -321,7 +321,7 @@ should appear.
 
 Everything above (Parts A–F) is **bring-your-own (BYO)**: each box creates and holds
 its own GitHub App. **Brokered mode** is the alternative — the relay operator
-registers *one* App under the `getpiper` org and holds its key; every account's
+registers *one* App under the `piperbox` org and holds its key; every account's
 `piper login` installs that shared App and the relay re-signs and forwards webhooks
 to the right box over the tunnel. This is what the public hosted relay runs, and
 it's the default flow in [`getting-started.md`](../getting-started.md).

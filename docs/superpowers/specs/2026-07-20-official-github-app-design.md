@@ -14,7 +14,7 @@ A newcomer on the public relay has to cross seven steps and two browser trips be
 3. `piper enroll`
 4. `piper create myapp --port 8080`
 5. `piper github setup` — App manifest dance, browser trip #2
-6. **manually** install the resulting App on the repo (no deep link — [#152](https://github.com/getpiper/piper/issues/152))
+6. **manually** install the resulting App on the repo (no deep link — [#152](https://github.com/piperbox/piper/issues/152))
 7. `piper app link myapp --repo owner/name --branch main`
 
 Steps 5 and 6 exist only because every box creates its *own* private GitHub App
@@ -240,7 +240,7 @@ PR-heavy repo cannot grow it without bound.
 - `piper github repos` — new; lists installation-accessible repositories. The
   dashboard's repo picker calls the same relay endpoint.
 
-### Repo-list shape ([#308](https://github.com/getpiper/piper/issues/308))
+### Repo-list shape ([#308](https://github.com/piperbox/piper/issues/308))
 
 `GET /v1/github/repos` returns one object per repository, not a bare name, so the
 picker can render a visibility badge and sort by recency:
@@ -392,7 +392,7 @@ Test-first per `CLAUDE.md`. Layering holds: `relay` gains GitHub knowledge,
 
 | Today | Brokered |
 | --- | --- |
-| `piper login` — browser trip #1 | `piper login` — authorize + install, one consent screen (one-trip login: [#291](https://github.com/getpiper/piper/issues/291)) |
+| `piper login` — browser trip #1 | `piper login` — authorize + install, one consent screen (one-trip login: [#291](https://github.com/piperbox/piper/issues/291)) |
 | `piper enroll` | `piper enroll` |
 | `piper create myapp --port 8080` | `piper create myapp --port 8080` |
 | `piper github setup` — browser trip #2 | — |

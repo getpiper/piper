@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/getpiper/piper/internal/relay"
-	"github.com/getpiper/piper/internal/version"
+	"github.com/piperbox/piper/internal/relay"
+	"github.com/piperbox/piper/internal/version"
 )
 
 // versionRequested reports whether args ask for the build version. Kept

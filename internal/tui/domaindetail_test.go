@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/domain"
+	"github.com/piperbox/piper/internal/domain"
 )
 
 func TestDomainDetailShowsCNAMEStatusAndNote(t *testing.T) {

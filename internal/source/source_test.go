@@ -3,7 +3,7 @@ package source_test
 import (
 	"testing"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 func TestKindString(t *testing.T) {

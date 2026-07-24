@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // LoadWildcardConfig loads certFile/keyFile into a *tls.Config the relay uses to

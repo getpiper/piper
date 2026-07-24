@@ -82,7 +82,7 @@ func TestAppDetailRefreshIncludesDomains(t *testing.T) {
 }
 ```
 
-Add `"github.com/getpiper/piper/internal/domain"` to the file's imports.
+Add `"github.com/piperbox/piper/internal/domain"` to the file's imports.
 
 In `internal/tui/app_test.go`, extend `apiCalls`:
 
@@ -137,7 +137,7 @@ Expected: compile FAIL — `appDetailLoadedMsg` has no field `domains`, `fakeAPI
 	RemoveAppDomain(app, dom string) error
 ```
 
-add `"github.com/getpiper/piper/internal/domain"` to imports, and extend the message:
+add `"github.com/piperbox/piper/internal/domain"` to imports, and extend the message:
 
 ```go
 	appDetailLoadedMsg struct {
@@ -477,7 +477,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/domain"
+	"github.com/piperbox/piper/internal/domain"
 )
 
 func TestDomainDetailShowsCNAMEStatusAndNote(t *testing.T) {
@@ -597,7 +597,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/domain"
+	"github.com/piperbox/piper/internal/domain"
 )
 
 // domainDetailView shows one per-app custom domain: live status, the CNAME the

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/ghjwt"
+	"github.com/piperbox/piper/internal/ghjwt"
 )
 
 const defaultGitHubAPIBase = "https://api.github.com"

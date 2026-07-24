@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // pollSleep is the device-flow poll delay; a seam so tests don't really sleep.

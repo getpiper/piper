@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // responseHeaderTimeout bounds how long the relay waits for a box to start

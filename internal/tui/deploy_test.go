@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func TestDeployViewConfirmRender(t *testing.T) {

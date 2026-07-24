@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Orgs on the relay ([#104](https://github.com/getpiper/piper/issues/104)): an org is a login-less account that owns boxes/apps; members see and drive its boxes through the existing control plane; owners manage membership via GitHub-username invites.
+**Goal:** Orgs on the relay ([#104](https://github.com/piperbox/piper/issues/104)): an org is a login-less account that owns boxes/apps; members see and drive its boxes through the existing control plane; owners manage membership via GitHub-username invites.
 
 **Architecture:** Per the approved spec (`docs/superpowers/specs/2026-07-11-relay-organizations-design.md`), an org is an `accounts` row with `type='org'`, `NULL github_id`, and no credentials — so agents, hostnames, quotas, and the kill-switch reuse `accounts.id` unchanged. New tables `org_members` and `org_invites`; the control proxy's owner check becomes owner-or-member (still `404` on failure — no existence leak); `/v1/enroll` gains an optional owner-gated `org` slug. All work is in `internal/relay/`.
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - `CGO_ENABLED=0` everywhere; only `modernc.org/sqlite` for SQLite.
-- Module path `github.com/getpiper/piper`.
+- Module path `github.com/piperbox/piper`.
 - Work on branch `ozykhan/relay-orgs-design` (already holds the spec commit); PR into `main`, squash-merge.
 - One commit per task, conventional-commit style, each ending with:
   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Go module path:** `github.com/getpiper/piper` (GitHub org is `getpiper`). Copy verbatim.
+- **Go module path:** `github.com/piperbox/piper` (GitHub org is `getpiper`). Copy verbatim.
 - **No cgo.** All builds must pass with `CGO_ENABLED=0`. This forbids cgo-based SQLite drivers — use `modernc.org/sqlite` only. Cross-compile sanity: `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...` must succeed.
 - **Binary names:** daemon `piperd`, CLI `piper`. Built to `bin/`.
 - **Base domain (Plan 1 default):** `piper.localhost`. App hostname = `<app-name>.piper.localhost`. `*.localhost` resolves to `127.0.0.1` on macOS/Linux with no DNS setup.
@@ -26,7 +26,7 @@
 ## File Structure
 
 ```
-go.mod                              module github.com/getpiper/piper
+go.mod                              module github.com/piperbox/piper
 go.sum
 Makefile                            build/test/cross-compile shortcuts
 cmd/piperd/main.go                  daemon entrypoint: wire config→store→docker→caddy→deploy→api
@@ -73,7 +73,7 @@ Establishes the toolchain and proves `go test` works before any real logic.
 Run:
 ```bash
 cd /Users/fcanozkan/Documents/workspace/piper
-go mod init github.com/getpiper/piper
+go mod init github.com/piperbox/piper
 go mod edit -go=1.23
 mkdir -p cmd/piper cmd/piperd internal/version bin
 ```
@@ -115,7 +115,7 @@ func String() string { return value }
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `go test ./internal/version/`
-Expected: PASS (`ok  github.com/getpiper/piper/internal/version`).
+Expected: PASS (`ok  github.com/piperbox/piper/internal/version`).
 
 - [ ] **Step 6: Add the CLI entrypoint with a `version` subcommand**
 
@@ -127,7 +127,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/getpiper/piper/internal/version"
+	"github.com/piperbox/piper/internal/version"
 )
 
 func main() {
@@ -1094,8 +1094,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type fakeCaddy struct {
@@ -1189,8 +1189,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type RouteSetter interface {
@@ -1325,7 +1325,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type fakeDeployer struct{ gotApp string }
@@ -1399,7 +1399,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type Deployerer interface {
@@ -1648,7 +1648,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type Client struct {
@@ -1761,8 +1761,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/getpiper/piper/internal/client"
-	"github.com/getpiper/piper/internal/version"
+	"github.com/piperbox/piper/internal/client"
+	"github.com/piperbox/piper/internal/version"
 )
 
 func main() {
@@ -1859,12 +1859,12 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/caddy"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/deploy"
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/caddy"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/deploy"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func main() {
@@ -1941,7 +1941,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/client"
+	"github.com/piperbox/piper/internal/client"
 )
 
 // TestEndToEndDeploy builds piperd, runs it against real Docker + Caddy, deploys

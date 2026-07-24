@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds must pass with `CGO_ENABLED=0`; pure-Go SQLite (`modernc.org/sqlite`) only.
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Layering:** `store` knows only persistence; `runtime` only Docker; `deploy` orchestrates through interfaces; `api` is transport over `deploy`+`store`; `client` is the CLI's view of `api`. Nothing imports "up".
 - **TDD:** every task is failing-test-first, then minimal implementation.
@@ -898,7 +898,7 @@ Expected: FAIL — `c.pollInterval undefined`, `c.FollowDeploy undefined`.
 
 - [ ] **Step 3: Add the poll field and methods**
 
-In `internal/client/client.go`: add `"io"`, `"time"`, and `"github.com/getpiper/piper/internal/store"` to imports (io is already imported). Add `pollInterval time.Duration` to the `Client` struct and set it in `New`:
+In `internal/client/client.go`: add `"io"`, `"time"`, and `"github.com/piperbox/piper/internal/store"` to imports (io is already imported). Add `pollInterval time.Duration` to the `Client` struct and set it in `New`:
 
 ```go
 type Client struct {

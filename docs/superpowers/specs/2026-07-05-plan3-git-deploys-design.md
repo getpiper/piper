@@ -2,7 +2,7 @@
 
 > **Status:** Design approved in brainstorming (2026-07-05). Not yet implemented.
 > Builds on Plan 1 (agent core, LAN-only) and Plan 2 (relay + tunnel + on-box TLS).
-> Tracked by epic [#11](https://github.com/getpiper/piper/issues/11).
+> Tracked by epic [#11](https://github.com/piperbox/piper/issues/11).
 > Parent design: [`2026-07-04-piper-design.md`](2026-07-04-piper-design.md).
 
 ## One-liner

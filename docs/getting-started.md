@@ -10,7 +10,7 @@ a LAN-only box never needs the relay sections.
 One line puts the binaries on the box:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh
 ```
 
 The installer **only places binaries**: it detects your OS/arch (Linux and

@@ -1,10 +1,10 @@
 # Piper TUI — Phase 3 (drill-down) design
 
-> Detailed design for **phase 3** of the TUI epic ([#183](https://github.com/getpiper/piper/issues/183)),
+> Detailed design for **phase 3** of the TUI epic ([#183](https://github.com/piperbox/piper/issues/183)),
 > elaborating the phase-3 row of the master spec
 > ([`2026-07-12-piper-tui-design.md`](2026-07-12-piper-tui-design.md)). Phases 1
-> ([#184](https://github.com/getpiper/piper/issues/184)) and 2
-> ([#185](https://github.com/getpiper/piper/issues/185)) are merged; this builds
+> ([#184](https://github.com/piperbox/piper/issues/184)) and 2
+> ([#185](https://github.com/piperbox/piper/issues/185)) are merged; this builds
 > directly on that skeleton.
 
 **Goal:** make the read-only surface complete. Bare `piper` already opens a live
@@ -19,15 +19,15 @@ and into a single deployment's logs (scrollable viewport with follow). No action
   storm. The table stays `NAME · STATUS · URL`; deploy times appear in the
   app-detail deployments table instead. LAST DEPLOY returns when the apps API
   grows a timestamp (its own `[agent]`/`[store]`/`[api]` issue).
-- **Config-layer follow-ups** [#186](https://github.com/getpiper/piper/issues/186)
+- **Config-layer follow-ups** [#186](https://github.com/piperbox/piper/issues/186)
   (SaveClient `CurrentBox` fallback) and
-  [#187](https://github.com/getpiper/piper/issues/187) (atomic config write) are
+  [#187](https://github.com/piperbox/piper/issues/187) (atomic config write) are
   left for phase 5's boxes view, which starts writing config. Phase 3 does not
   touch `internal/config`.
 - No new agent endpoints. Phase 3 consumes only the client methods that already
   exist.
 
-**Closes** [#189](https://github.com/getpiper/piper/issues/189) (TUI phase-3
+**Closes** [#189](https://github.com/piperbox/piper/issues/189) (TUI phase-3
 polish) in full — see [§6](#6--189-cleanups-folded-in).
 
 ## Architecture
@@ -167,7 +167,7 @@ in the view (e.g. `following…`) so the mode is visible.
 ## 6 — #189 cleanups, folded in
 
 Phase 3 already refactors the root and the apps view, so it closes
-[#189](https://github.com/getpiper/piper/issues/189) entirely:
+[#189](https://github.com/piperbox/piper/issues/189) entirely:
 
 - **Breadcrumb.** The root header is rendered from the stack's `title()`s joined
   with ` › ` (e.g. `apps › blog › logs`), replacing the hardcoded ` piper · apps`.

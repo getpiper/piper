@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 type fakeRouter struct {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // Router maps an incoming SNI hostname to the agent session whose base domain

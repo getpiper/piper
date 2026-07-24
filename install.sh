@@ -1,9 +1,9 @@
 #!/bin/sh
-# Piper installer — https://github.com/getpiper/piper
+# Piper installer — https://github.com/piperbox/piper
 # Places the piper + piperd binaries; lifecycle belongs to `piper agent`.
 set -eu
 
-PIPER_REPO="${PIPER_REPO:-getpiper/piper}"
+PIPER_REPO="${PIPER_REPO:-piperbox/piper}"
 PIPER_BASE_URL="${PIPER_BASE_URL:-https://github.com}"
 PIPER_API_URL="${PIPER_API_URL:-https://api.github.com}"
 PIPER_VERSION="${PIPER_VERSION:-}"

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // connQueue adapts SNI-dispatched control-plane connections into a

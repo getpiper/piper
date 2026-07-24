@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func TestLogsFollowStartsWhileBuilding(t *testing.T) {

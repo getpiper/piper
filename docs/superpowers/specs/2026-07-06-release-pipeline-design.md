@@ -1,6 +1,6 @@
 # Release pipeline — goreleaser tag → GitHub Release
 
-**Issue:** [#58](https://github.com/getpiper/piper/issues/58) `[repo]`
+**Issue:** [#58](https://github.com/piperbox/piper/issues/58) `[repo]`
 **Date:** 2026-07-06
 **Status:** Approved design
 
@@ -19,7 +19,7 @@ addition, not required for a first `0.x` release.
 
 - Three commands, all pure-Go (`CGO_ENABLED=0`): `cmd/piperd`, `cmd/piper`,
   `cmd/piper-relay`.
-- Version is a single overridable var: `github.com/getpiper/piper/internal/version.value`
+- Version is a single overridable var: `github.com/piperbox/piper/internal/version.value`
   (default `"0.0.0-dev"`), surfaced by `piper version`. goreleaser's **default**
   ldflags target `main.version`, which this repo does not use — so the config must
   set custom ldflags pointing at this var.
@@ -52,7 +52,7 @@ addition, not required for a first `0.x` release.
 - `goos: [linux, darwin]`, `goarch: [amd64, arm64, arm]`, `goarm: ["7"]`.
 - `ignore: [{goos: darwin, goarch: arm}]` — drops macOS armv7.
   Net targets per binary: linux/{amd64, arm64, armv7}, darwin/{amd64, arm64}.
-- `ldflags: -s -w -X github.com/getpiper/piper/internal/version.value={{.Version}}`
+- `ldflags: -s -w -X github.com/piperbox/piper/internal/version.value={{.Version}}`
   — carries the strip flags and stamps the real version var.
 - `mod_timestamp: "{{.CommitTimestamp}}"` — reproducible builds.
 

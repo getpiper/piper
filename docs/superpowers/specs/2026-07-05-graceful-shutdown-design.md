@@ -1,6 +1,6 @@
 # Graceful SIGTERM shutdown for piperd — design
 
-_Date: 2026-07-05 · Issue: [#48](https://github.com/getpiper/piper/issues/48) · Part of the install-&-run epic ([#43](https://github.com/getpiper/piper/issues/43))_
+_Date: 2026-07-05 · Issue: [#48](https://github.com/piperbox/piper/issues/48) · Part of the install-&-run epic ([#43](https://github.com/piperbox/piper/issues/43))_
 
 ## Goal
 

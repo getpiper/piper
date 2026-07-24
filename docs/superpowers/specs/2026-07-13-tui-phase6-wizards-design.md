@@ -5,7 +5,7 @@
 **Surface:** `[cli]` — the `piper` binary only; one surgical `internal/client` addition (a `StatusError.Unauthorized()` helper). No `piperd` or `piper-relay` changes.
 
 Phase 6 — the final phase — of the Interactive TUI epic
-[#183](https://github.com/getpiper/piper/issues/183). Phases 1–5 built the
+[#183](https://github.com/piperbox/piper/issues/183). Phases 1–5 built the
 multi-box config, the read-only dashboard, drill-down, actions, and the boxes
 view. This phase adds the three flows the TUI still shells out to the CLI for:
 **login**, **GitHub App setup**, and **link repo**. Parent design:

@@ -1,8 +1,8 @@
 # Piper
 
-[![Release](https://img.shields.io/github/v/release/getpiper/piper)](https://github.com/getpiper/piper/releases/latest)
-[![CI](https://github.com/getpiper/piper/actions/workflows/ci.yml/badge.svg)](https://github.com/getpiper/piper/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/getpiper/piper)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/piperbox/piper)](https://github.com/piperbox/piper/releases/latest)
+[![CI](https://github.com/piperbox/piper/actions/workflows/ci.yml/badge.svg)](https://github.com/piperbox/piper/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/piperbox/piper)](LICENSE)
 
 **An open-source, developer-first PaaS: `git push → live HTTPS URL` on hardware
 you own — including a Raspberry Pi at home behind CGNAT.**
@@ -27,7 +27,7 @@ that kills most homelab hosting.
 On a Linux box (a Pi counts):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/piperbox/piper/main/install.sh | sh
 piper agent daemonize        # durable service on :80/:443 — a server or Pi
                              # (dev box: `piper agent up` runs it until reboot)
 piper login                  # GitHub device-flow; stores your account credential
@@ -100,9 +100,9 @@ tunnel as your traffic; nothing else on the box is exposed.
 
 ## Contributing
 
-[Issues](https://github.com/getpiper/piper/issues) carry an `[area]` title
+[Issues](https://github.com/piperbox/piper/issues) carry an `[area]` title
 prefix (`[agent]`, `[cli]`, `[relay]`, …); new here? Look for
-[`good first issue`](https://github.com/getpiper/piper/labels/good%20first%20issue).
+[`good first issue`](https://github.com/piperbox/piper/labels/good%20first%20issue).
 How to work in this repo — coding principles, branch workflow, issue
 conventions — lives in [`CLAUDE.md`](CLAUDE.md). Trunk-based: branch off
 `main`, open a PR back into it, squash-merge; CI's `verify` gate (gofmt ·

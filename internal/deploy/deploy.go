@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getpiper/piper/internal/runtime"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/runtime"
+	"github.com/piperbox/piper/internal/store"
 )
 
 const deploymentCleanupTimeout = 5 * time.Second

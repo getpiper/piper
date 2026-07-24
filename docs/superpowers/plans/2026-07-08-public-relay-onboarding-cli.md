@@ -13,7 +13,7 @@ This is **Plan 2 of 3** for the slice specced in [`docs/superpowers/specs/2026-0
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`; `make cross` (linux/arm64) must stay green. No new dependencies.
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **TDD.** Every task is failing-test-first. Run `make test` before each commit; it must pass.
 - **Layering.** `internal/relayclient` imports only stdlib. `cmd/piper` imports `internal/relayclient` + `internal/config`. `internal/config` imports only stdlib. Nothing imports "up".
 - **Default relay control-API base URL** is `https://api.public.getpiper.co` (overridable with `piper login --relay <url>`).
@@ -645,7 +645,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/config"
+	"github.com/piperbox/piper/internal/config"
 )
 
 func TestRelayLoginStoresCredential(t *testing.T) {
@@ -734,8 +734,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
 )
 
 // defaultRelayAPI is the hosted public relay's control API. Override with

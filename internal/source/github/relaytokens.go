@@ -3,7 +3,7 @@ package github
 import (
 	"context"
 
-	"github.com/getpiper/piper/internal/source"
+	"github.com/piperbox/piper/internal/source"
 )
 
 // RelayTokens is the brokered TokenSource: the box holds no GitHub App key, so

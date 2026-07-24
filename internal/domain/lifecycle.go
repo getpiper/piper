@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/getpiper/piper/internal/certs"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/certs"
+	"github.com/piperbox/piper/internal/store"
 )
 
 const (

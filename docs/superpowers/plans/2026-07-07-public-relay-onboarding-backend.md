@@ -13,7 +13,7 @@ This is **Plan 1 of 3** for the slice specced in [`docs/superpowers/specs/2026-0
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`; SQLite is `modernc.org/sqlite` only. `make cross` (arm64) must stay green.
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **TDD.** Every task is failing-test-first. Run `make test` before each commit; it must pass.
 - **Layering.** `relay` is cloud-side and imports only `internal/tunnel` + stdlib + the OAuth/OIDC libs. It must not import `store`, `deploy`, `api`, `runtime`, or `caddy`.
 - **Dependencies already vendored** (indirect today; these tasks promote them to direct — no `go get` of new modules): `golang.org/x/oauth2 v0.36.0`, `github.com/coreos/go-oidc/v3 v3.17.0`, `github.com/google/uuid v1.6.0`.
@@ -1433,7 +1433,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getpiper/piper/internal/relay"
+	"github.com/piperbox/piper/internal/relay"
 )
 
 func TestRunAdminDisable(t *testing.T) {

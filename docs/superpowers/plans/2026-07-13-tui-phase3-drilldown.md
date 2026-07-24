@@ -4,14 +4,14 @@
 
 **Goal:** Complete the TUI's read-only surface — drill from the apps table into an app (header + live deployments table) and into a single deployment's logs (scrollable viewport with follow) — per the approved design ([`docs/superpowers/specs/2026-07-13-tui-phase3-drilldown-design.md`](../specs/2026-07-13-tui-phase3-drilldown-design.md)).
 
-**Architecture:** Generalize the phase-2 skeleton's single-view root into a view **stack**. Every stacked view implements a `view` interface (`tea.Model` + `refresh(API) tea.Cmd` + `title() string`); the root's 2s poll refreshes the top view, views request navigation with a `pushMsg`, and the header renders a breadcrumb from the stack. Two new views — `appDetailView` (depth 1) and `logsView` (depth 2, a `bubbles/viewport`) — sit on top of the existing `appsView`. Closes the phase-2 polish issue [#189](https://github.com/getpiper/piper/issues/189).
+**Architecture:** Generalize the phase-2 skeleton's single-view root into a view **stack**. Every stacked view implements a `view` interface (`tea.Model` + `refresh(API) tea.Cmd` + `title() string`); the root's 2s poll refreshes the top view, views request navigation with a `pushMsg`, and the header renders a breadcrumb from the stack. Two new views — `appDetailView` (depth 1) and `logsView` (depth 2, a `bubbles/viewport`) — sit on top of the existing `appsView`. Closes the phase-2 polish issue [#189](https://github.com/piperbox/piper/issues/189).
 
 **Tech Stack:** Go, `charmbracelet/bubbletea` v1 + `lipgloss` v1 (already present), `charmbracelet/bubbles` v1 (added here for `viewport`).
 
 ## Global Constraints
 
 - `CGO_ENABLED=0` everywhere; `make cross` (linux/arm64) must stay green.
-- Module path `github.com/getpiper/piper`; nothing imports "up": `internal/tui` imports `internal/api` + `internal/store` (types) + charmbracelet libs only; it must NOT import `internal/client`. `cmd/piper` imports `internal/tui`.
+- Module path `github.com/piperbox/piper`; nothing imports "up": `internal/tui` imports `internal/api` + `internal/store` (types) + charmbracelet libs only; it must NOT import `internal/client`. `cmd/piper` imports `internal/tui`.
 - New dep `github.com/charmbracelet/bubbles` pinned to the **v1** major (matching bubbletea/lipgloss). `go mod tidy` drops a dep with no importer — only add `bubbles` in the task that imports it (Task 4).
 - Deployment status strings are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`; `""` means never deployed → `—` icon. **Follow is meaningful only while a deployment is `"building"`** (the build log grows then); it auto-stops when the deployment leaves `"building"`.
 - Read-only only. No deploy / stop / delete / link / create actions (phase 4+). No `internal/config` changes (leave #186/#187 for phase 5). No new agent endpoints.
@@ -122,7 +122,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
+	"github.com/piperbox/piper/internal/api"
 )
 
 // API is the slice of the piperd control API the TUI consumes.
@@ -212,7 +212,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
+	"github.com/piperbox/piper/internal/api"
 )
 
 // appsView is the depth-0 home view: a table of apps. Cursor + drill-in arrive
@@ -461,8 +461,8 @@ Add the depth-1 `appDetailView` (app header + live deployments table with a curs
 ```go
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // API is the slice of the piperd control API the TUI consumes.
@@ -517,8 +517,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func fixtureDeps() []store.Deployment {
@@ -671,7 +671,7 @@ func repoLine(a api.App) string {
 }
 ```
 
-Add `"github.com/getpiper/piper/internal/api"` to `render.go`'s imports (for `repoLine`).
+Add `"github.com/piperbox/piper/internal/api"` to `render.go`'s imports (for `repoLine`).
 
 - [ ] **Step 5: Create `internal/tui/appdetail.go`**:
 
@@ -683,8 +683,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/api"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // appDetailView is the depth-1 view: an app header plus its deployment history.
@@ -980,7 +980,7 @@ func TestLogsRefreshMatchesDeploymentStatus(t *testing.T) {
 }
 ```
 
-Add `"github.com/getpiper/piper/internal/store"` to `logs_test.go` imports (for the last test).
+Add `"github.com/piperbox/piper/internal/store"` to `logs_test.go` imports (for the last test).
 
 - [ ] **Step 5: Run to verify failure**
 
@@ -1198,7 +1198,7 @@ Expected: apps table with a `▸` cursor; `↓`/`↑` move it; `↵` on an app o
 - [ ] **Step 3: PROGRESS.md** — under the Interactive TUI epic section, add after the phase-2 line:
 
 ```markdown
-- ✅ Drill-down: app detail + live deployments table, per-deployment log viewer with follow, breadcrumb navigation — [#P3](https://github.com/getpiper/piper/issues/P3)
+- ✅ Drill-down: app detail + live deployments table, per-deployment log viewer with follow, breadcrumb navigation — [#P3](https://github.com/piperbox/piper/issues/P3)
 ```
 
 (substitute the real `#P3` number), and commit:

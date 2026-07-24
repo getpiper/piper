@@ -80,7 +80,7 @@ Always run `make verify` before claiming work is done or pushing — it catches 
 ## Hard constraints
 
 - **No cgo.** All builds must pass with `CGO_ENABLED=0` so we can cross-compile to arm64/armv7 for a Pi. This forbids cgo SQLite drivers — use `modernc.org/sqlite` (pure Go) only.
-- **Module path** is `github.com/getpiper/piper` (GitHub org `getpiper`).
+- **Module path** is `github.com/piperbox/piper` (GitHub org `piperbox`).
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - Defaults: control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, base domain `piper.localhost`, app container port `8080`.
 
@@ -117,7 +117,7 @@ There is no `dev`/`master` split: Piper's software is installed and run by users
 
 Releases are **semver git tags** (`v0.1.0`), which a release workflow turns into a **GitHub Release** with cross-compiled binaries — including linux/arm64 + armv7 for the Pi. Pre-1.0 (`0.x`), breaking changes may land in minor bumps. Tooling ([goreleaser](https://goreleaser.com)) gets wired in at the first real release, not before. An "edge" channel, if wanted, is CI artifacts built from `main` — not a branch.
 
-> **Future — hosted relay (convenience, never lock-in):** getpiper will eventually run a hosted relay so users don't *have* to stand up their own. It runs the **same open-source `piper-relay`** — no privileged fork, no closed features — and the relay stays **always fully self-deployable**. Piper is open source at heart and always will be; the hosted instance is a convenience, not the product. That hosted deployment gets its own pipeline **scoped to that service** (GitHub Environments + deploy-on-tag), kept separate from this repo-wide trunk flow.
+> **Future — hosted relay (convenience, never lock-in):** piperbox will eventually run a hosted relay so users don't *have* to stand up their own. It runs the **same open-source `piper-relay`** — no privileged fork, no closed features — and the relay stays **always fully self-deployable**. Piper is open source at heart and always will be; the hosted instance is a convenience, not the product. That hosted deployment gets its own pipeline **scoped to that service** (GitHub Environments + deploy-on-tag), kept separate from this repo-wide trunk flow.
 
 ## Issue tracking & progress
 

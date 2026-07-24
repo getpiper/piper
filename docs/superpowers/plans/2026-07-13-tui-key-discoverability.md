@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** All builds pass with `CGO_ENABLED=0`. (This change is pure UI code; no new deps.)
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **Layering:** pure `internal/tui` change; nothing imports up. No API-surface change.
 - **Commits:** conventional-commit style, `Part of #196` in the body, ending with:
   ```
@@ -147,7 +147,7 @@ Expected: PASS (both).
 - [ ] **Step 7: Run the full package to check nothing regressed**
 
 Run: `go test ./internal/tui/`
-Expected: `ok  github.com/getpiper/piper/internal/tui`
+Expected: `ok  github.com/piperbox/piper/internal/tui`
 
 - [ ] **Step 8: Commit**
 
@@ -322,7 +322,7 @@ Expected: PASS (all four).
 - [ ] **Step 6: Run the full package**
 
 Run: `go test ./internal/tui/`
-Expected: `ok  github.com/getpiper/piper/internal/tui`
+Expected: `ok  github.com/piperbox/piper/internal/tui`
 
 - [ ] **Step 7: Commit**
 

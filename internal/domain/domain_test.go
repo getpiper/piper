@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/agent"
-	"github.com/getpiper/piper/internal/caddy"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/agent"
+	"github.com/piperbox/piper/internal/caddy"
+	"github.com/piperbox/piper/internal/store"
 )
 
 // selfSignedPEM issues a throwaway wildcard cert so the fake issuer's output

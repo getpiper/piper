@@ -5,7 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
 ifeq ($(strip $(VERSION)),)
 VERSION := 0.0.0-dev
 endif
-LDFLAGS := -s -w -X github.com/getpiper/piper/internal/version.value=$(VERSION)
+LDFLAGS := -s -w -X github.com/piperbox/piper/internal/version.value=$(VERSION)
 build:
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/piperd ./cmd/piperd
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/piper  ./cmd/piper

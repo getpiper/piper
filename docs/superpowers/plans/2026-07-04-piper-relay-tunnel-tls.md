@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** Every build must pass `CGO_ENABLED=0`; use pure-Go deps only (`modernc.org/sqlite`, never a cgo SQLite driver). Prove with `make cross` (linux/arm64).
-- **Module path** is `github.com/getpiper/piper`.
+- **Module path** is `github.com/piperbox/piper`.
 - **Layering:** nothing imports "up". `tunnel` knows only yamux+net; `certs` knows only lego; `relay` knows tunnel(server)+SQLite; `caddy` knows only Caddy's admin API; `piperd` wires them. `deploy`/`api`/`store`/`client` are **not modified** by this plan.
 - **Deployment status strings** stay exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Defaults:** control API `127.0.0.1:8088`, Caddy admin `http://127.0.0.1:2019`, app container port `8080`. New: relay tunnel `:7000`, relay TLS `:443`.
@@ -885,7 +885,7 @@ package relay
 import (
 	"testing"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 func TestRouterSuffixMatch(t *testing.T) {
@@ -924,7 +924,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // Router maps an incoming SNI hostname to the agent session whose base domain
@@ -1088,7 +1088,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // Serve runs the relay: it accepts agent tunnels on tunnelAddr and public TLS
@@ -1185,7 +1185,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/getpiper/piper/internal/relay"
+	"github.com/piperbox/piper/internal/relay"
 )
 
 func env(key, def string) string {
@@ -1352,7 +1352,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // The tunnel client forwards an accepted stream to the local dialer. We stand up
@@ -1436,7 +1436,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/getpiper/piper/internal/tunnel"
+	"github.com/piperbox/piper/internal/tunnel"
 )
 
 // RunTunnelClient maintains an outbound tunnel to relayAddr, registering
@@ -1511,7 +1511,7 @@ Expected: PASS.
 
 - [ ] **Step 9: Wire relay mode into piperd main**
 
-In `cmd/piperd/main.go`, add imports `"crypto/ecdsa"`, `"crypto/elliptic"`, `"crypto/rand"`, `"net"`, `"os"`, `"time"`, and the packages `"github.com/getpiper/piper/internal/agent"`, `"github.com/getpiper/piper/internal/certs"`, and `"github.com/go-acme/lego/v4/providers/dns/cloudflare"`. After the existing Caddy-manager block and before `dep := deploy.New(...)`, insert the relay-mode setup:
+In `cmd/piperd/main.go`, add imports `"crypto/ecdsa"`, `"crypto/elliptic"`, `"crypto/rand"`, `"net"`, `"os"`, `"time"`, and the packages `"github.com/piperbox/piper/internal/agent"`, `"github.com/piperbox/piper/internal/certs"`, and `"github.com/go-acme/lego/v4/providers/dns/cloudflare"`. After the existing Caddy-manager block and before `dep := deploy.New(...)`, insert the relay-mode setup:
 ```go
 	// Relay mode: obtain/serve TLS on :443, dial the relay, register the base domain.
 	if cfg.RelayAddr != "" {
@@ -1661,7 +1661,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/client"
+	"github.com/piperbox/piper/internal/client"
 )
 
 // TestRelayLoopback proves the full relay path locally: browser→relay:8443

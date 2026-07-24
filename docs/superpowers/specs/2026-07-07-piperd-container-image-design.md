@@ -1,6 +1,6 @@
 # piperd Container Image + Compose Design
 
-**Issue:** [#45](https://github.com/getpiper/piper/issues/45) (part of epic [#43](https://github.com/getpiper/piper/issues/43))
+**Issue:** [#45](https://github.com/piperbox/piper/issues/45) (part of epic [#43](https://github.com/piperbox/piper/issues/43))
 
 ## Goal
 

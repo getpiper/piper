@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **No cgo.** Everything must build with `CGO_ENABLED=0`; only `modernc.org/sqlite` for SQLite. Verify with `make cross` (`CGO_ENABLED=0 GOOS=linux GOARCH=arm64`).
-- **Module path** `github.com/getpiper/piper`.
+- **Module path** `github.com/piperbox/piper`.
 - **Layering:** `store` knows only persistence; `api` is transport over `store`; `client` is the CLI's view of `api`. Nothing imports "up". `store` must **not** import `relay` (hence the `hashToken` helper is duplicated, not shared).
 - **Defaults:** control API `127.0.0.1:8088`.
 - **TDD:** every task is failing-test-first. Run `make test` and `make cross` before the final commit of any task that changes buildable code.
@@ -447,7 +447,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func tokenTestStore(t *testing.T) *store.Store {
@@ -1000,8 +1000,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/store"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/store"
 )
 
 func TestLoginSavesConfigOnSuccess(t *testing.T) {

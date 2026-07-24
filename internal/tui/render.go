@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/getpiper/piper/internal/api"
+	"github.com/piperbox/piper/internal/api"
 )
 
 // appURL renders the URL a box serves an app on from its stored hostname. A

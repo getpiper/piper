@@ -19,12 +19,12 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/getpiper/piper/internal/client"
-	"github.com/getpiper/piper/internal/config"
-	"github.com/getpiper/piper/internal/relayclient"
-	"github.com/getpiper/piper/internal/store"
-	"github.com/getpiper/piper/internal/tui"
-	"github.com/getpiper/piper/internal/version"
+	"github.com/piperbox/piper/internal/client"
+	"github.com/piperbox/piper/internal/config"
+	"github.com/piperbox/piper/internal/relayclient"
+	"github.com/piperbox/piper/internal/store"
+	"github.com/piperbox/piper/internal/tui"
+	"github.com/piperbox/piper/internal/version"
 )
 
 var openBrowserFn = openBrowser

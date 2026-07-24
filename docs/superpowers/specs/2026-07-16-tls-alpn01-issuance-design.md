@@ -1,6 +1,6 @@
 # TLS-ALPN-01 issuance path in internal/certs (tokenless exact-host certs)
 
-**Issue:** [#226](https://github.com/getpiper/piper/issues/226) · **Epic:** [#224](https://github.com/getpiper/piper/issues/224) · **Date:** 2026-07-16 · **Status:** approved
+**Issue:** [#226](https://github.com/piperbox/piper/issues/226) · **Epic:** [#224](https://github.com/piperbox/piper/issues/224) · **Date:** 2026-07-16 · **Status:** approved
 
 First agent-side building block of per-app BYO domains: issue an exact-host
 certificate with **no DNS-provider API token**. The ACME validator connects

@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getpiper/piper/internal/client"
+	"github.com/piperbox/piper/internal/client"
 )
 
 // TestRelayLoopback proves the full relay path locally: browser→relay:8443

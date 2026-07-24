@@ -1,6 +1,6 @@
 # Domain-config API: manage BYO base domain + cert issuance remotely
 
-**Issue:** [#102](https://github.com/getpiper/piper/issues/102) · **Date:** 2026-07-10 · **Status:** approved
+**Issue:** [#102](https://github.com/piperbox/piper/issues/102) · **Date:** 2026-07-10 · **Status:** approved
 
 Phase 2 dependency of the dashboard roadmap (getpiper/dashboard — part of #76).
 

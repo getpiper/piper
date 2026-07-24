@@ -15,7 +15,7 @@ builds:
       - goos: darwin
         goarch: arm
     ldflags:
-      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+      - -s -w -X github.com/piperbox/piper/internal/version.value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
   - id: piper
@@ -30,7 +30,7 @@ builds:
       - goos: darwin
         goarch: arm
     ldflags:
-      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+      - -s -w -X github.com/piperbox/piper/internal/version.value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
   - id: piper-relay
@@ -45,7 +45,7 @@ builds:
       - goos: darwin
         goarch: arm
     ldflags:
-      - -s -w -X github.com/getpiper/piper/internal/version.value={{ .Version }}
+      - -s -w -X github.com/piperbox/piper/internal/version.value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:

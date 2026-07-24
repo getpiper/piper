@@ -1202,7 +1202,7 @@ Expected: gofmt clean, `go vet` clean, all tests pass, arm64 cross-build succeed
 After the line for #101 (`- ✅ Deployment history + build/deploy logs on the control API — [#101](...)`), add:
 
 ```markdown
-- ✅ App lifecycle: stop + delete on the control API and CLI — [#103](https://github.com/getpiper/piper/issues/103)
+- ✅ App lifecycle: stop + delete on the control API and CLI — [#103](https://github.com/piperbox/piper/issues/103)
 ```
 
 - [ ] **Step 3: Commit and push**

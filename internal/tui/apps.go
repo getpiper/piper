@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/getpiper/piper/internal/api"
+	"github.com/piperbox/piper/internal/api"
 )
 
 // appsView is the depth-0 home view: a table of apps.

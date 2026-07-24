@@ -137,7 +137,7 @@ func TestCLIOnlyInstallsOnlyPiper(t *testing.T) {
 
 	prefix := t.TempDir()
 	out, err := run(t, []string{"--cli-only", "--version", tag}, map[string]string{
-		"PIPER_REPO":     "getpiper/piper",
+		"PIPER_REPO":     "piperbox/piper",
 		"PIPER_BASE_URL": srv.URL,
 		"PIPER_PREFIX":   prefix,
 	})
@@ -390,7 +390,7 @@ func TestInstallDocumentation(t *testing.T) {
 	// overrides live in docs/getting-started.md (see #181).
 	docs := map[string][]string{
 		"README.md": {
-			"raw.githubusercontent.com/getpiper/piper/main/install.sh",
+			"raw.githubusercontent.com/piperbox/piper/main/install.sh",
 		},
 		filepath.Join("docs", "getting-started.md"): {
 			"--cli-only",

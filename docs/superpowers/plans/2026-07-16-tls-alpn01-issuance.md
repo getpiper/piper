@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - `CGO_ENABLED=0` must keep building (no cgo anywhere).
-- Module path `github.com/getpiper/piper`.
+- Module path `github.com/piperbox/piper`.
 - Layering: `internal/agent` depends only on `internal/tunnel` + stdlib — do NOT import lego there (use a local `"acme-tls/1"` constant). `internal/relay` is not touched at all.
 - DNS-01 behavior must stay byte-for-byte: `NewCloudflareIssuer`, `Manager.Obtain`, account-key handling unchanged.
 - Run `make verify` (gofmt → vet → test → arm64 cross-build) before claiming done.
@@ -896,7 +896,7 @@ Expected: gofmt clean, vet clean, all tests pass, arm64 cross-build succeeds. Fi
 In the Plan-2 section (near the `#102` domain-config line, after the `#225` entry if one exists), add:
 
 ```markdown
-  - ✅ TLS-ALPN-01 issuance path — tokenless exact-host certs; `acme-tls/1` passthrough spliced to an in-process solver — [#226](https://github.com/getpiper/piper/issues/226)
+  - ✅ TLS-ALPN-01 issuance path — tokenless exact-host certs; `acme-tls/1` passthrough spliced to an in-process solver — [#226](https://github.com/piperbox/piper/issues/226)
 ```
 
 Match the indentation/style of the surrounding lines exactly.
