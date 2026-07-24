@@ -70,7 +70,6 @@ func TestPiperdDocumentation(t *testing.T) {
 
 	manual := repositoryFile(t, "docs", "manual-setup.md")
 	for _, text := range []string{
-		"packaging/launchd/com.getpiper.piperd.plist",
 		"piper agent daemonize",
 	} {
 		if !strings.Contains(manual, text) {

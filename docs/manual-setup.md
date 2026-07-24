@@ -55,24 +55,25 @@ section above.
 
 macOS is a **development** target: instead of a boot-surviving root service, piperd
 runs **rootless** as your user on high ports (`:8080`/`:8443`), toggled on and off by
-hand — no `sudo` to run it (only to drop the binary in `/usr/local/bin`). Install the
-binary and the shipped LaunchAgent:
+hand — no `sudo` anywhere. There is no LaunchAgent to install: `piper agent up`
+generates one (pointing at whichever `piperd` sits beside the `piper` you ran) and
+seeds `~/.piper/piperd.env`. Just put the binaries on `PATH`:
 
 ```bash
-sudo install -m 0755 bin/piperd /usr/local/bin/piperd
-install -m 0644 packaging/launchd/com.getpiper.piperd.plist \
-  ~/Library/LaunchAgents/com.getpiper.piperd.plist
-mkdir -p ~/.piper
-cp packaging/launchd/piperd.env.macos.example ~/.piper/piperd.env   # optional overrides
+install -m 0755 bin/piperd ~/.local/bin/piperd
+install -m 0755 bin/piper  ~/.local/bin/piper
 piper agent up
 ```
 
 The agent stores everything under `~/.piper/` (SQLite DB, Caddy data, logs at
-`~/.piper/piper{,.err}.log`) and serves apps at `http://<name>.piper.localhost:8080`.
-A plist in `~/Library/LaunchAgents` auto-loads at every login, so the macOS agent
-is semi-persistent by launchd's nature; there is no `piper agent daemonize` on
-macOS. Stop it with `piper agent down`; check it with `piper agent status`. This
-path is LAN-only; the relay/public-URL flow is Linux/Pi (systemd) only.
+`~/.piper/piper{,.err}.log`, the generated `com.getpiper.piperd.plist`) and serves
+apps at `http://<name>.piper.localhost:8080`, with the Caddy admin on `:2020`.
+It is **ephemeral**, exactly like Linux rootless: the plist lives outside
+`~/Library/LaunchAgents`, so nothing auto-starts it at login — re-run `piper agent
+up` after a reboot. There is no `piper agent daemonize` on macOS; durability is
+the Linux system-service tier. Stop it with `piper agent down`; check it with
+`piper agent status`. This path is LAN-only; the relay/public-URL flow is
+Linux/Pi (systemd) only.
 
 ## Run piperd in Docker (Compose)
 

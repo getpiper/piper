@@ -557,7 +557,7 @@ On a Mac dev box the agent runs rootless via launchd (see
 [manual setup](../manual-setup.md#run-the-agent-on-macos-dev-box)):
 
 ```bash
-piper agent status          # running / stopped / not installed
+piper agent status          # running / loaded (not running) / stopped
 tail -f ~/.piper/piper.log  # agent logs (errors in ~/.piper/piper.err.log)
 piper agent down            # stop it
 ```

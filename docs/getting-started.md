@@ -91,12 +91,13 @@ later `piper agent up` runs rootless again.
 
 ### macOS (dev boxes)
 
-macOS mechanics are unchanged: `piper agent up`/`down`/`status` drive a
-launchd agent whose plist you install once by hand — see
-[`manual-setup.md`](manual-setup.md#run-the-agent-on-macos-dev-box). One note:
-a plist in `~/Library/LaunchAgents` auto-loads at every login, so the macOS
-agent is semi-persistent by launchd's nature; there is no `daemonize` on
-macOS.
+`piper agent up`/`down`/`status` drive a launchd agent the CLI generates for
+you — nothing to install by hand, and it points at whichever `piperd` sits
+beside the `piper` you ran. Like Linux rootless it is ephemeral: the plist is
+kept out of `~/Library/LaunchAgents`, so login never auto-starts it and a reboot
+ends it — run `piper agent up` again. There is no `daemonize` on macOS; it's a
+dev box, so durability stays a Linux system-service concern. See
+[`manual-setup.md`](manual-setup.md#run-the-agent-on-macos-dev-box).
 
 Shell completions and a Homebrew tap are planned follow-ups.
 
