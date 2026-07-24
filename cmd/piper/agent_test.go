@@ -23,44 +23,41 @@ func TestAgentUnsupportedGOOS(t *testing.T) {
 	}
 }
 
-func TestAgentUpLinuxStarts(t *testing.T) {
+// onLinux points agentGOOS at linux and systemUnitDir at an empty temp dir, so
+// tier detection sees a rootless box; restoration is registered via t.Cleanup
+// so it runs after daemonizeDirs' cleanup (LIFO) and the globals end up back at
+// their real values.
+func onLinux(t *testing.T) {
+	t.Helper()
 	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+	oldUnitDir := systemUnitDir
+	systemUnitDir = t.TempDir()
+	t.Cleanup(func() {
+		agentGOOS = runtime.GOOS
+		systemUnitDir = oldUnitDir
+	})
+}
 
-	dir := t.TempDir()
-	unit := filepath.Join(dir, "piperd.service")
-	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
+// daemonized marks the current (temp) systemUnitDir as holding a system unit,
+// flipping tier detection to the system service.
+func daemonized(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(systemUnitDir, "piperd.service"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	oldPath := userUnitPath
+}
+
+// rootlessPaths points userUnitPath/userEnvPath into a temp dir and returns the
+// two paths, so `up` materializes into a sandbox; restore via the returned func.
+func rootlessPaths(t *testing.T) (unit, env string, restore func()) {
+	t.Helper()
+	dir := t.TempDir()
+	unit = filepath.Join(dir, "systemd", "piperd.service")
+	env = filepath.Join(dir, ".piper", "piperd.env")
+	oldUnit, oldEnv := userUnitPath, userEnvPath
 	userUnitPath = func() (string, error) { return unit, nil }
-	defer func() { userUnitPath = oldPath }()
-
-	defer fastPoll(t)()
-	var startArgs []string
-	oldRun := systemctlRun
-	systemctlRun = func(args ...string) (string, error) {
-		if len(args) >= 2 && args[1] == "start" {
-			startArgs = args
-		}
-		if len(args) >= 2 && args[1] == "is-active" {
-			return "active", nil // stays up
-		}
-		return "", nil
-	}
-	defer func() { systemctlRun = oldRun }()
-
-	var out, errb bytes.Buffer
-	if code := agent([]string{"up"}, &out, &errb); code != 0 {
-		t.Fatalf("code = %d, stderr = %s", code, errb.String())
-	}
-	want := []string{"--user", "start", "piperd"}
-	if strings.Join(startArgs, " ") != strings.Join(want, " ") {
-		t.Errorf("start args = %v, want %v", startArgs, want)
-	}
-	if !strings.Contains(out.String(), "started") {
-		t.Errorf("stdout = %q", out.String())
-	}
+	userEnvPath = func() (string, error) { return env, nil }
+	return unit, env, func() { userUnitPath, userEnvPath = oldUnit, oldEnv }
 }
 
 // fastPoll zeroes waitActive's inter-poll delay so readiness-check tests don't
@@ -72,18 +69,112 @@ func fastPoll(t *testing.T) func() {
 	return func() { activePollDelay = old }
 }
 
-func TestAgentUpLinuxReportsCrashLoop(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+func TestAgentUpLinuxMaterializesAndStarts(t *testing.T) {
+	onLinux(t)
+	unit, env, restore := rootlessPaths(t)
+	defer restore()
 
-	dir := t.TempDir()
-	unit := filepath.Join(dir, "piperd.service")
-	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	defer fastPoll(t)()
+	var calls [][]string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		calls = append(calls, args)
+		if len(args) >= 2 && args[1] == "is-active" {
+			return "active", nil // stays up
+		}
+		return "", nil
 	}
-	oldPath := userUnitPath
-	userUnitPath = func() (string, error) { return unit, nil }
-	defer func() { userUnitPath = oldPath }()
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	if b, err := os.ReadFile(unit); err != nil || string(b) != embeddedUserUnit {
+		t.Errorf("user unit not materialized from embed: %v", err)
+	}
+	if b, err := os.ReadFile(env); err != nil || string(b) != embeddedUserEnv {
+		t.Errorf("env not seeded from embed: %v", err)
+	}
+	joined := ""
+	for _, c := range calls {
+		joined += strings.Join(c, " ") + "\n"
+	}
+	for _, want := range []string{"--user daemon-reload", "--user start piperd"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing systemctl call %q; got:\n%s", want, joined)
+		}
+	}
+	if !strings.Contains(out.String(), "started") {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if !strings.Contains(out.String(), "won't survive a reboot") {
+		t.Errorf("up must note rootless ephemerality: %q", out.String())
+	}
+}
+
+func TestAgentUpLinuxRefreshesStaleUnitKeepsEnv(t *testing.T) {
+	onLinux(t)
+	unit, env, restore := rootlessPaths(t)
+	defer restore()
+	os.MkdirAll(filepath.Dir(unit), 0o755)
+	os.WriteFile(unit, []byte("stale unit from an older piper"), 0o644)
+	os.MkdirAll(filepath.Dir(env), 0o700)
+	edited := "PIPER_API_ADDR=0.0.0.0:8088\n"
+	os.WriteFile(env, []byte(edited), 0o600)
+
+	defer fastPoll(t)()
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 2 && args[1] == "is-active" {
+			return "active", nil
+		}
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	if b, _ := os.ReadFile(unit); string(b) != embeddedUserUnit {
+		t.Errorf("stale unit not refreshed; got %q", string(b))
+	}
+	if b, _ := os.ReadFile(env); string(b) != edited {
+		t.Errorf("env clobbered: got %q", string(b))
+	}
+}
+
+func TestAgentUpLinuxSkipsReloadWhenUnitCurrent(t *testing.T) {
+	onLinux(t)
+	unit, _, restore := rootlessPaths(t)
+	defer restore()
+	os.MkdirAll(filepath.Dir(unit), 0o755)
+	os.WriteFile(unit, []byte(embeddedUserUnit), 0o644)
+
+	defer fastPoll(t)()
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 2 && args[1] == "daemon-reload" {
+			t.Errorf("daemon-reload must be skipped when the unit is current")
+		}
+		if len(args) >= 2 && args[1] == "is-active" {
+			return "active", nil
+		}
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+}
+
+func TestAgentUpLinuxReportsCrashLoop(t *testing.T) {
+	onLinux(t)
+	_, _, restore := rootlessPaths(t)
+	defer restore()
 
 	defer fastPoll(t)()
 	oldRun := systemctlRun
@@ -108,25 +199,72 @@ func TestAgentUpLinuxReportsCrashLoop(t *testing.T) {
 	}
 }
 
-func TestAgentUpLinuxNotInstalled(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
-	oldPath := userUnitPath
-	userUnitPath = func() (string, error) { return filepath.Join(t.TempDir(), "absent.service"), nil }
-	defer func() { userUnitPath = oldPath }()
+func TestAgentUpSystemEscalates(t *testing.T) {
+	onLinux(t)
+	daemonized(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 1000 }
+	defer func() { agentEUID = oldEUID }()
+
+	var gotArgs []string
+	oldExec := selfExecSudo
+	selfExecSudo = func(args []string, stdout, stderr io.Writer) int { gotArgs = args; return 7 }
+	defer func() { selfExecSudo = oldExec }()
+
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		t.Fatalf("must not run systemctl before escalating; called %v", args)
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
 
 	var out, errb bytes.Buffer
-	if code := agent([]string{"up"}, &out, &errb); code != 1 {
-		t.Fatalf("code = %d, want 1", code)
+	if code := agent([]string{"up"}, &out, &errb); code != 7 {
+		t.Fatalf("code = %d, want the re-exec's exit code 7", code)
 	}
-	if !strings.Contains(errb.String(), "not installed") {
-		t.Errorf("stderr = %q", errb.String())
+	if strings.Join(gotArgs, " ") != "agent up" {
+		t.Errorf("re-exec args = %v, want [agent up]", gotArgs)
+	}
+}
+
+func TestAgentUpSystemStarts(t *testing.T) {
+	onLinux(t)
+	daemonized(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+
+	defer fastPoll(t)()
+	var startArgs []string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		if len(args) >= 1 && args[0] == "start" {
+			startArgs = args
+		}
+		if len(args) >= 1 && args[0] == "is-active" {
+			return "active", nil
+		}
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"up"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	if strings.Join(startArgs, " ") != "start piperd" {
+		t.Errorf("start args = %v, want [start piperd] (no --user)", startArgs)
+	}
+	if !strings.Contains(out.String(), "system service") {
+		t.Errorf("stdout should name the tier: %q", out.String())
+	}
+	if strings.Contains(out.String(), "won't survive") {
+		t.Errorf("system tier must not print the rootless ephemerality note: %q", out.String())
 	}
 }
 
 func TestAgentDownLinuxStops(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+	onLinux(t)
 	var gotArgs []string
 	oldRun := systemctlRun
 	systemctlRun = func(args ...string) (string, error) { gotArgs = args; return "", nil }
@@ -142,18 +280,57 @@ func TestAgentDownLinuxStops(t *testing.T) {
 	}
 }
 
-func TestAgentStatusLinux(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+func TestAgentDownSystemStops(t *testing.T) {
+	onLinux(t)
+	daemonized(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
 
-	dir := t.TempDir()
-	unit := filepath.Join(dir, "piperd.service")
-	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	var gotArgs []string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { gotArgs = args; return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"down"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
 	}
-	oldPath := userUnitPath
-	userUnitPath = func() (string, error) { return unit, nil }
-	defer func() { userUnitPath = oldPath }()
+	if strings.Join(gotArgs, " ") != "stop piperd" {
+		t.Errorf("args = %v, want [stop piperd] (no --user)", gotArgs)
+	}
+	if !strings.Contains(out.String(), "system service") {
+		t.Errorf("stdout should name the tier: %q", out.String())
+	}
+}
+
+func TestAgentDownSystemEscalates(t *testing.T) {
+	onLinux(t)
+	daemonized(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 1000 }
+	defer func() { agentEUID = oldEUID }()
+
+	var gotArgs []string
+	oldExec := selfExecSudo
+	selfExecSudo = func(args []string, stdout, stderr io.Writer) int { gotArgs = args; return 0 }
+	defer func() { selfExecSudo = oldExec }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"down"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	if strings.Join(gotArgs, " ") != "agent down" {
+		t.Errorf("re-exec args = %v, want [agent down]", gotArgs)
+	}
+}
+
+func TestAgentStatusLinux(t *testing.T) {
+	onLinux(t)
+	unit, _, restore := rootlessPaths(t)
+	defer restore()
+	os.MkdirAll(filepath.Dir(unit), 0o755)
+	os.WriteFile(unit, []byte("x"), 0o644)
 
 	cases := []struct {
 		active string
@@ -178,24 +355,18 @@ func TestAgentStatusLinux(t *testing.T) {
 }
 
 func TestAgentStatusLinuxShowsAddresses(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
-
-	dir := t.TempDir()
-	unit := filepath.Join(dir, "piperd.service")
-	if err := os.WriteFile(unit, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	oldPath := userUnitPath
-	userUnitPath = func() (string, error) { return unit, nil }
-	defer func() { userUnitPath = oldPath }()
+	onLinux(t)
+	unit, _, restore := rootlessPaths(t)
+	defer restore()
+	os.MkdirAll(filepath.Dir(unit), 0o755)
+	os.WriteFile(unit, []byte("x"), 0o644)
 
 	oldRun := systemctlRun
 	systemctlRun = func(args ...string) (string, error) { return "active\n", nil }
 	defer func() { systemctlRun = oldRun }()
 
 	oldEnv := agentEnviron
-	agentEnviron = func() map[string]string {
+	agentEnviron = func(scope ...string) map[string]string {
 		return map[string]string{
 			"PIPER_API_ADDR":   "0.0.0.0:8088",
 			"PIPER_HTTP_ADDR":  ":8080",
@@ -216,19 +387,39 @@ func TestAgentStatusLinuxShowsAddresses(t *testing.T) {
 	}
 }
 
-func TestAgentStatusLinuxNotInstalled(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
-	oldPath := userUnitPath
-	userUnitPath = func() (string, error) { return filepath.Join(t.TempDir(), "absent.service"), nil }
-	defer func() { userUnitPath = oldPath }()
+func TestAgentStatusLinuxNotSetUp(t *testing.T) {
+	onLinux(t)
+	_, _, restore := rootlessPaths(t)
+	defer restore()
 
 	var out, errb bytes.Buffer
 	if code := agent([]string{"status"}, &out, &errb); code != 0 {
 		t.Fatalf("code = %d", code)
 	}
-	if !strings.Contains(out.String(), "not installed") {
-		t.Errorf("stdout = %q", out.String())
+	if !strings.Contains(out.String(), "piper agent up") {
+		t.Errorf("stdout should point at `piper agent up`: %q", out.String())
+	}
+}
+
+func TestAgentStatusSystem(t *testing.T) {
+	onLinux(t)
+	daemonized(t)
+
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { return "active\n", nil }
+	defer func() { systemctlRun = oldRun }()
+	oldEnv := agentEnviron
+	agentEnviron = func(scope ...string) map[string]string { return nil } // root-only /proc
+	defer func() { agentEnviron = oldEnv }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"status"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d", code)
+	}
+	for _, want := range []string{"piperd: running (system service)", "http://127.0.0.1:8088", ":80", ":443", "/var/lib/piper"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status missing %q:\n%s", want, out.String())
+		}
 	}
 }
 
@@ -293,8 +484,19 @@ func TestAgentUsage(t *testing.T) {
 	}
 }
 
+func TestAgentUsageLinuxDaemonizeBadFlag(t *testing.T) {
+	onLinux(t)
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize", "--bogus"}, &out, &errb); code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if !strings.Contains(errb.String(), "--undo") {
+		t.Errorf("usage should mention --undo: %q", errb.String())
+	}
+}
+
 func TestEmbeddedSystemFilesMatchCanonical(t *testing.T) {
-	for _, name := range []string{"piperd.service", "piperd.env.example"} {
+	for _, name := range []string{"piperd.service", "piperd.env.example", "piperd.user.service", "piperd.env.user.example"} {
 		got, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -310,8 +512,7 @@ func TestEmbeddedSystemFilesMatchCanonical(t *testing.T) {
 }
 
 func TestDaemonizeSelfEscalatesWhenNotRoot(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+	onLinux(t)
 	oldEUID := agentEUID
 	agentEUID = func() int { return 1000 }
 	defer func() { agentEUID = oldEUID }()
@@ -341,26 +542,18 @@ func TestDaemonizeSelfEscalatesWhenNotRoot(t *testing.T) {
 	}
 }
 
-func TestDaemonizeNeedsSudoUser(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
-	oldEUID := agentEUID
-	agentEUID = func() int { return 0 }
-	defer func() { agentEUID = oldEUID }()
-	t.Setenv("SUDO_USER", "")
-
-	var out, errb bytes.Buffer
-	if code := agent([]string{"daemonize"}, &out, &errb); code != 1 {
-		t.Fatalf("code = %d, want 1", code)
-	}
-	if !strings.Contains(errb.String(), "SUDO_USER") {
-		t.Errorf("stderr = %q", errb.String())
-	}
+// daemonizeDirs sandboxes the system install targets and returns them.
+func daemonizeDirs(t *testing.T) (binDir, unitDir, envDir string) {
+	t.Helper()
+	binDir, unitDir, envDir = t.TempDir(), t.TempDir(), t.TempDir()
+	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
+	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
+	t.Cleanup(func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv })
+	return binDir, unitDir, envDir
 }
 
 func TestDaemonizePromotes(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+	onLinux(t)
 	oldEUID := agentEUID
 	agentEUID = func() int { return 0 }
 	defer func() { agentEUID = oldEUID }()
@@ -380,10 +573,7 @@ func TestDaemonizePromotes(t *testing.T) {
 	userHomeDir = func(u string) (string, error) { return home, nil }
 	defer func() { userHomeDir = oldHome }()
 
-	binDir, unitDir, envDir := t.TempDir(), t.TempDir(), t.TempDir()
-	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
-	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
-	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
+	binDir, unitDir, envDir := daemonizeDirs(t)
 
 	defer fastPoll(t)()
 	var calls [][]string
@@ -432,9 +622,74 @@ func TestDaemonizePromotes(t *testing.T) {
 	}
 }
 
+func TestDaemonizeRealRootUsesInstalledBinaries(t *testing.T) {
+	onLinux(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+	t.Setenv("SUDO_USER", "") // real root login, not sudo
+
+	binDir, unitDir, _ := daemonizeDirs(t)
+	// The installer already placed the binaries in the system bindir.
+	os.WriteFile(filepath.Join(binDir, "piperd"), []byte("PIPERD-BIN"), 0o755)
+	os.WriteFile(filepath.Join(binDir, "piper"), []byte("PIPER-CLI"), 0o755)
+
+	defer fastPoll(t)()
+	var calls [][]string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		calls = append(calls, args)
+		if len(args) >= 1 && args[0] == "is-active" {
+			return "active", nil
+		}
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	for _, c := range calls {
+		if strings.Contains(strings.Join(c, " "), "--machine") {
+			t.Errorf("real root has no rootless service to tear down; called %v", c)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(binDir, "piperd")); string(b) != "PIPERD-BIN" {
+		t.Errorf("pre-installed piperd must be kept; got %q", string(b))
+	}
+	if _, err := os.Stat(filepath.Join(unitDir, "piperd.service")); err != nil {
+		t.Errorf("system unit not written: %v", err)
+	}
+	if !strings.Contains(out.String(), "daemonized") {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+func TestDaemonizeRealRootMissingBinaries(t *testing.T) {
+	onLinux(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+	t.Setenv("SUDO_USER", "")
+
+	daemonizeDirs(t) // empty bindir: nothing installed anywhere
+
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize"}, &out, &errb); code != 1 {
+		t.Fatalf("code = %d, want 1 (stderr=%q)", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "installer") {
+		t.Errorf("stderr should point at the installer: %q", errb.String())
+	}
+}
+
 func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+	onLinux(t)
 	oldEUID := agentEUID
 	agentEUID = func() int { return 0 }
 	defer func() { agentEUID = oldEUID }()
@@ -448,10 +703,7 @@ func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
 	userHomeDir = func(u string) (string, error) { return home, nil }
 	defer func() { userHomeDir = oldHome }()
 
-	binDir, unitDir, envDir := t.TempDir(), t.TempDir(), t.TempDir()
-	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
-	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
-	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
+	_, _, envDir := daemonizeDirs(t)
 
 	edited := "PIPER_BASE_DOMAIN=example.com\n"
 	if err := os.WriteFile(filepath.Join(envDir, "piperd.env"), []byte(edited), 0o600); err != nil {
@@ -477,8 +729,7 @@ func TestDaemonizeDoesNotClobberEnv(t *testing.T) {
 }
 
 func TestDaemonizeReportsCrashLoop(t *testing.T) {
-	agentGOOS = "linux"
-	defer func() { agentGOOS = runtime.GOOS }()
+	onLinux(t)
 	oldEUID := agentEUID
 	agentEUID = func() int { return 0 }
 	defer func() { agentEUID = oldEUID }()
@@ -492,10 +743,7 @@ func TestDaemonizeReportsCrashLoop(t *testing.T) {
 	userHomeDir = func(u string) (string, error) { return home, nil }
 	defer func() { userHomeDir = oldHome }()
 
-	binDir, unitDir, envDir := t.TempDir(), t.TempDir(), t.TempDir()
-	oldBin, oldUnit, oldEnv := systemBinDir, systemUnitDir, systemEnvDir
-	systemBinDir, systemUnitDir, systemEnvDir = binDir, unitDir, envDir
-	defer func() { systemBinDir, systemUnitDir, systemEnvDir = oldBin, oldUnit, oldEnv }()
+	daemonizeDirs(t)
 
 	defer fastPoll(t)()
 	oldRun := systemctlRun
@@ -518,6 +766,93 @@ func TestDaemonizeReportsCrashLoop(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "not active") || !strings.Contains(errb.String(), "piper agent down") {
 		t.Errorf("stderr should flag the failure and the remedy: %q", errb.String())
+	}
+}
+
+func TestDaemonizeUndoEscalates(t *testing.T) {
+	onLinux(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 1000 }
+	defer func() { agentEUID = oldEUID }()
+
+	var gotArgs []string
+	oldExec := selfExecSudo
+	selfExecSudo = func(args []string, stdout, stderr io.Writer) int { gotArgs = args; return 0 }
+	defer func() { selfExecSudo = oldExec }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize", "--undo"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d", code)
+	}
+	if strings.Join(gotArgs, " ") != "agent daemonize --undo" {
+		t.Errorf("re-exec args = %v, want [agent daemonize --undo]", gotArgs)
+	}
+}
+
+func TestDaemonizeUndoDemotes(t *testing.T) {
+	onLinux(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+
+	_, unitDir, envDir := daemonizeDirs(t)
+	daemonized(t) // systemUnitDir == unitDir now holds piperd.service
+	edited := "PIPER_BASE_DOMAIN=example.com\n"
+	if err := os.WriteFile(filepath.Join(envDir, "piperd.env"), []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls [][]string
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) { calls = append(calls, args); return "", nil }
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize", "--undo"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	joined := ""
+	for _, c := range calls {
+		joined += strings.Join(c, " ") + "\n"
+	}
+	for _, want := range []string{"disable --now piperd", "daemon-reload"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing systemctl call %q; got:\n%s", want, joined)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(unitDir, "piperd.service")); err == nil {
+		t.Errorf("system unit must be removed")
+	}
+	if b, _ := os.ReadFile(filepath.Join(envDir, "piperd.env")); string(b) != edited {
+		t.Errorf("demotion must keep the env file: got %q", string(b))
+	}
+	if !strings.Contains(out.String(), "un-daemonized") {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if !strings.Contains(out.String(), "not migrated") {
+		t.Errorf("stdout should note the fresh-state stance: %q", out.String())
+	}
+}
+
+func TestDaemonizeUndoNothingToUndo(t *testing.T) {
+	onLinux(t)
+	oldEUID := agentEUID
+	agentEUID = func() int { return 0 }
+	defer func() { agentEUID = oldEUID }()
+
+	oldRun := systemctlRun
+	systemctlRun = func(args ...string) (string, error) {
+		t.Fatalf("nothing to undo must not touch systemctl; called %v", args)
+		return "", nil
+	}
+	defer func() { systemctlRun = oldRun }()
+
+	var out, errb bytes.Buffer
+	if code := agent([]string{"daemonize", "--undo"}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "nothing to undo") {
+		t.Errorf("stdout = %q", out.String())
 	}
 }
 

@@ -28,9 +28,11 @@ On a Linux box (a Pi counts):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getpiper/piper/main/install.sh | sh
+piper agent daemonize        # durable service on :80/:443 — a server or Pi
+                             # (dev box: `piper agent up` runs it until reboot)
 piper login                  # GitHub device-flow; stores your account credential
 piper connect                # enrolls this box on the public relay
-                             # (systemd installs: run the sudo command it prints)
+                             # (run the sudo command it prints)
 sudo systemctl restart piperd
 piper deploy blog --path .   # → https://<hash>-<you>.public.getpiper.dev
 ```

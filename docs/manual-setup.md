@@ -1,7 +1,8 @@
 # Manual setup (building from source)
 
-The one-line installer in [getting started](getting-started.md#install) already does everything
-below for you. Use this instead if you're building `piperd`/`piper-relay` from source,
+The one-line installer plus `piper agent up` / `piper agent daemonize` in
+[getting started](getting-started.md#install) already do everything below for you.
+Use this instead if you're building `piperd`/`piper-relay` from source,
 or wiring your own automation.
 
 ## Run the agent as a service (manual / from source)
@@ -24,32 +25,31 @@ sudo systemctl enable --now piperd
 The unit runs as a `DynamicUser` in the `docker` group (so piperd can drive the host
 Docker daemon), keeps state under `PIPER_DATA_DIR=/var/lib/piper`, and binds `:80`/`:443`
 via `CAP_NET_BIND_SERVICE` — no root. Edit `/etc/piper/piperd.env` to override defaults
-or switch on relay mode. See the
+or switch on relay mode. `piper agent daemonize` does all of the above for you (and
+`daemonize --undo` reverses it); use the manual steps only when you need to wire it
+yourself. See the
 [end-to-end runbook](runbooks/git-deploy-e2e.md) for verification, logs, and teardown.
 
 ## Run the agent on Linux, rootless (dev box)
 
 For a dev box you can run piperd **rootless** as your user — the systemd twin of
-the macOS LaunchAgent. Install the binary and the shipped **user** unit, then
-toggle it with `piper agent`:
+the macOS LaunchAgent. There is no unit to install by hand: `piper agent up`
+materializes the systemd **user** unit and seeds `~/.piper/piperd.env` itself,
+from files embedded in the CLI. Just put the binaries on `PATH`:
 
 ```bash
 install -m 0755 bin/piperd ~/.local/bin/piperd
 install -m 0755 bin/piper  ~/.local/bin/piper
-mkdir -p ~/.config/systemd/user ~/.piper
-install -m 0644 packaging/systemd/piperd.user.service \
-  ~/.config/systemd/user/piperd.service
-cp packaging/systemd/piperd.env.user.example ~/.piper/piperd.env   # optional overrides
-systemctl --user daemon-reload
 piper agent up
 ```
 
-It serves apps on `http://<name>.piper.localhost:8080`, stores state under
-`~/.piper/`, and is **not** boot-surviving on a headless box (no login to start
-the user manager after reboot; re-run `piper agent up`). Your user must reach a Docker socket (`docker` group or
-`DOCKER_HOST`). To make it durable on `:80`/`:443`, run `piper agent daemonize`
-(no `sudo` — it re-runs itself under `sudo` and prompts for your password) — see
-the system-service section above.
+It serves apps on `http://<name>.piper.localhost:8080` (`:8080`/`:8443`, Caddy
+admin on `:2020`), stores state under `~/.piper/`, and is intentionally
+ephemeral — it does **not** survive a reboot; re-run `piper agent up`. Your
+user must reach a Docker socket (`docker` group or `DOCKER_HOST`). To make it
+durable on `:80`/`:443`, run `piper agent daemonize` (no `sudo` — it re-runs
+itself under `sudo` and prompts for your password) — see the system-service
+section above.
 
 ## Run the agent on macOS (dev box)
 
@@ -69,9 +69,10 @@ piper agent up
 
 The agent stores everything under `~/.piper/` (SQLite DB, Caddy data, logs at
 `~/.piper/piper{,.err}.log`) and serves apps at `http://<name>.piper.localhost:8080`.
-It is **not** a boot service — it's gone after a reboot; re-run `piper agent up`.
-Stop it with `piper agent down`; check it with `piper agent status`. This path is
-LAN-only; the relay/public-URL flow is Linux/Pi (systemd) only.
+A plist in `~/Library/LaunchAgents` auto-loads at every login, so the macOS agent
+is semi-persistent by launchd's nature; there is no `piper agent daemonize` on
+macOS. Stop it with `piper agent down`; check it with `piper agent status`. This
+path is LAN-only; the relay/public-URL flow is Linux/Pi (systemd) only.
 
 ## Run piperd in Docker (Compose)
 

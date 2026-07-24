@@ -190,18 +190,19 @@ export PIPER_DATA_DIR=$HOME/.piper
 
 For anything past a one-off test, run `piperd` under systemd so it comes back on
 boot and restarts on failure. Put the TLS/relay env from the option above into
-`/etc/piper/piperd.env` (mode `0600`) instead of exporting it, then install the
-unit. State lives at `PIPER_DATA_DIR=/var/lib/piper` (set by the unit, not `$HOME`):
+`/etc/piper/piperd.env` (mode `0600`) instead of exporting it, then promote with
+`piper agent daemonize`. State lives at `PIPER_DATA_DIR=/var/lib/piper` (set by
+the unit, not `$HOME`):
 
 ```bash
-sudo install -m 0755 bin/piperd /usr/local/bin/piperd
-sudo install -m 0644 packaging/systemd/piperd.service /etc/systemd/system/piperd.service
+sudo install -m 0755 bin/piperd /usr/local/bin/piperd   # from-source builds; the
+sudo install -m 0755 bin/piper  /usr/local/bin/piper    # curl installer places both
 sudo install -d -m 0700 /etc/piper
 sudo install -m 0600 packaging/systemd/piperd.env.example /etc/piper/piperd.env
 # edit /etc/piper/piperd.env — add PIPER_RELAY_ADDR, PIPER_ACME_EMAIL, etc.
-sudo systemctl daemon-reload
-sudo systemctl enable --now piperd
-sudo systemctl status piperd
+piper agent daemonize        # installs + enables the system service; keeps the
+                             # /etc/piper/piperd.env you just edited (self-sudo)
+piper agent status
 sudo journalctl -u piperd -n 50 --no-pager
 ```
 
@@ -485,9 +486,11 @@ API — not for a genuine end-to-end push.
 ## Teardown
 
 ```bash
-# Box: stop piperd. Foreground run: Ctrl-C. Managed service:
-sudo systemctl disable --now piperd
+# Box: stop piperd. Foreground run: Ctrl-C. Daemonized service:
+piper agent down                            # stop the system service
 sudo systemctl clean --what=state piperd    # drops /var/lib/piper
+piper agent daemonize --undo                # disables + removes the system unit
+                                            # (keeps /etc/piper/piperd.env and the binaries)
 # Piper images are tagged piper/<app>:<ts>; containers get auto-generated names,
 # so clean up by image ancestor, per app:
 docker rm -f $(docker ps -aq --filter ancestor=piper/myapp) 2>/dev/null

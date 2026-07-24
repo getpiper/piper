@@ -93,6 +93,17 @@ func newReleaseServer(t *testing.T, assets map[string][]byte, checksumsOverride 
 	return srv
 }
 
+// bothArchives returns fake piper + piperd archives for the host os/arch.
+func bothArchives(t *testing.T, tag string) map[string][]byte {
+	t.Helper()
+	osTok, archTok := hostOSArch()
+	ver := strings.TrimPrefix(tag, "v")
+	return map[string][]byte{
+		fmt.Sprintf("piper_%s_%s_%s.tar.gz", ver, osTok, archTok):  tarGz(t, "piper", "fake-piper"),
+		fmt.Sprintf("piperd_%s_%s_%s.tar.gz", ver, osTok, archTok): tarGz(t, "piperd", "fake-piperd"),
+	}
+}
+
 // run executes install.sh with the given args and env overlay.
 func run(t *testing.T, args []string, env map[string]string) (string, error) {
 	t.Helper()
@@ -120,18 +131,14 @@ func run(t *testing.T, args []string, env map[string]string) (string, error) {
 	return string(out), err
 }
 
-func TestCLIOnlyInstall(t *testing.T) {
-	osTok, archTok := hostOSArch()
+func TestCLIOnlyInstallsOnlyPiper(t *testing.T) {
 	tag := "v9.9.9"
-	archive := fmt.Sprintf("piper_%s_%s_%s.tar.gz", strings.TrimPrefix(tag, "v"), osTok, archTok)
-	assets := map[string][]byte{archive: tarGz(t, "piper", "#!/bin/sh\necho fake-piper\n")}
-	srv := newReleaseServer(t, assets, nil)
+	srv := newReleaseServer(t, bothArchives(t, tag), nil)
 
 	prefix := t.TempDir()
-	out, err := run(t, []string{"--cli-only", "--no-enable"}, map[string]string{
+	out, err := run(t, []string{"--cli-only", "--version", tag}, map[string]string{
 		"PIPER_REPO":     "getpiper/piper",
 		"PIPER_BASE_URL": srv.URL,
-		"PIPER_VERSION":  tag,
 		"PIPER_PREFIX":   prefix,
 	})
 	if err != nil {
@@ -143,6 +150,66 @@ func TestCLIOnlyInstall(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o100 == 0 {
 		t.Errorf("piper not executable: %v", info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(prefix, "piperd")); err == nil {
+		t.Errorf("--cli-only installed piperd:\n%s", out)
+	}
+	// A fresh temp prefix is never on PATH; the script must say so.
+	if !strings.Contains(out, "not on your PATH") {
+		t.Errorf("expected PATH note, got:\n%s", out)
+	}
+}
+
+func TestDefaultInstallsBothBinaries(t *testing.T) {
+	tag := "v9.9.9"
+	srv := newReleaseServer(t, bothArchives(t, tag), nil)
+
+	prefix := t.TempDir()
+	out, err := run(t, nil, map[string]string{
+		"PIPER_BASE_URL": srv.URL,
+		"PIPER_VERSION":  tag,
+		"PIPER_PREFIX":   prefix,
+	})
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	for _, name := range []string{"piper", "piperd"} {
+		if _, err := os.Stat(filepath.Join(prefix, name)); err != nil {
+			t.Errorf("%s not installed: %v\n%s", name, err, out)
+		}
+	}
+	// Next-step hint: lifecycle belongs to the CLI, not the installer.
+	switch runtime.GOOS {
+	case "linux":
+		if !strings.Contains(out, "next: piper agent up") {
+			t.Errorf("expected linux next-step hint, got:\n%s", out)
+		}
+	case "darwin":
+		if !strings.Contains(out, "docs/manual-setup.md") {
+			t.Errorf("expected darwin next-step hint, got:\n%s", out)
+		}
+	}
+}
+
+func TestDefaultPrefixIsHomeLocalBin(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("non-root default prefix requires a non-root user")
+	}
+	tag := "v9.9.9"
+	srv := newReleaseServer(t, bothArchives(t, tag), nil)
+
+	home := t.TempDir()
+	out, err := run(t, []string{"--cli-only"}, map[string]string{
+		"PIPER_BASE_URL": srv.URL,
+		"PIPER_VERSION":  tag,
+		"PIPER_PREFIX":   "", // unset: fall back to $HOME/.local/bin
+		"HOME":           home,
+	})
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "piper")); err != nil {
+		t.Fatalf("piper not installed under $HOME/.local/bin: %v\n%s", err, out)
 	}
 }
 
@@ -156,7 +223,7 @@ func TestChecksumMismatchAborts(t *testing.T) {
 	srv := newReleaseServer(t, assets, bogus)
 
 	prefix := t.TempDir()
-	out, err := run(t, []string{"--cli-only", "--no-enable"}, map[string]string{
+	out, err := run(t, []string{"--cli-only"}, map[string]string{
 		"PIPER_BASE_URL": srv.URL,
 		"PIPER_VERSION":  tag,
 		"PIPER_PREFIX":   prefix,
@@ -199,17 +266,36 @@ func newAPIServer(t *testing.T, latestTag string, allTags []string) *httptest.Se
 	return srv
 }
 
+func TestResolveLatestStable(t *testing.T) {
+	tag := "v1.2.3"
+	dl := newReleaseServer(t, bothArchives(t, tag), nil)
+	api := newAPIServer(t, tag, []string{tag})
+
+	prefix := t.TempDir()
+	out, err := run(t, []string{"--cli-only"}, map[string]string{
+		"PIPER_BASE_URL": dl.URL,
+		"PIPER_API_URL":  api.URL,
+		"PIPER_VERSION":  "", // unset: resolve from the API
+		"PIPER_PREFIX":   prefix,
+	})
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(prefix, "piper")); err != nil {
+		t.Fatalf("piper (from %s) not installed: %v\n%s", tag, err, out)
+	}
+}
+
 func TestResolveRCPicksNewestPrerelease(t *testing.T) {
-	osTok, archTok := hostOSArch()
 	tag := "v0.2.0-rc.1"
-	archive := fmt.Sprintf("piper_%s_%s_%s.tar.gz", strings.TrimPrefix(tag, "v"), osTok, archTok)
-	dl := newReleaseServer(t, map[string][]byte{archive: tarGz(t, "piper", "x")}, nil)
+	dl := newReleaseServer(t, bothArchives(t, tag), nil)
 	api := newAPIServer(t, "", []string{tag, "v0.1.0-rc.1"})
 
 	prefix := t.TempDir()
-	out, err := run(t, []string{"--cli-only", "--rc", "--no-enable"}, map[string]string{
+	out, err := run(t, []string{"--cli-only", "--rc"}, map[string]string{
 		"PIPER_BASE_URL": dl.URL,
 		"PIPER_API_URL":  api.URL,
+		"PIPER_VERSION":  "",
 		"PIPER_PREFIX":   prefix,
 	})
 	if err != nil {
@@ -222,9 +308,10 @@ func TestResolveRCPicksNewestPrerelease(t *testing.T) {
 
 func TestDefaultNoStableReleaseErrors(t *testing.T) {
 	api := newAPIServer(t, "", []string{"v0.1.0-rc.1"}) // no stable
-	out, err := run(t, []string{"--cli-only", "--no-enable"}, map[string]string{
+	out, err := run(t, []string{"--cli-only"}, map[string]string{
 		"PIPER_BASE_URL": "http://127.0.0.1:0",
 		"PIPER_API_URL":  api.URL,
+		"PIPER_VERSION":  "",
 		"PIPER_PREFIX":   t.TempDir(),
 	})
 	if err == nil {
@@ -235,119 +322,19 @@ func TestDefaultNoStableReleaseErrors(t *testing.T) {
 	}
 }
 
-func TestAgentInstallDropsUnitAndEnv(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("agent install path targets Linux/systemd")
-	}
-	osTok, archTok := hostOSArch()
-	tag := "v9.9.9"
-	ver := strings.TrimPrefix(tag, "v")
-	assets := map[string][]byte{
-		fmt.Sprintf("piperd_%s_%s_%s.tar.gz", ver, osTok, archTok): tarGz(t, "piperd", "fake-piperd"),
-		fmt.Sprintf("piper_%s_%s_%s.tar.gz", ver, osTok, archTok):  tarGz(t, "piper", "fake-piper"),
-		"piperd.service":     []byte("[Service]\nExecStart=/usr/local/bin/piperd\n"),
-		"piperd.env.example": []byte("#PIPER_API_ADDR=127.0.0.1:8088\n"),
-	}
-	srv := newReleaseServer(t, assets, nil)
-
-	prefix := t.TempDir()
-	unitDir := t.TempDir()
-	envDir := t.TempDir()
-	env := map[string]string{
-		"PIPER_BASE_URL":    srv.URL,
-		"PIPER_VERSION":     tag,
-		"PIPER_PREFIX":      prefix,
-		"PIPER_SYSTEMD_DIR": unitDir,
-		"PIPER_ENV_DIR":     envDir,
-	}
-	out, err := run(t, []string{"--no-enable"}, env)
-	if err != nil {
-		t.Fatalf("agent install failed: %v\n%s", err, out)
-	}
-	for _, p := range []string{
-		filepath.Join(prefix, "piperd"),
-		filepath.Join(prefix, "piper"),
-		filepath.Join(unitDir, "piperd.service"),
-		filepath.Join(envDir, "piperd.env"),
-	} {
-		if _, err := os.Stat(p); err != nil {
-			t.Errorf("missing %s: %v\n%s", p, err, out)
-		}
-	}
-
-	// Re-run must not clobber an operator-edited env file.
-	edited := "PIPER_BASE_DOMAIN=example.com\n"
-	if err := os.WriteFile(filepath.Join(envDir, "piperd.env"), []byte(edited), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run(t, []string{"--no-enable"}, env); err != nil {
-		t.Fatalf("re-run failed: %v\n%s", err, out)
-	}
-	got, err := os.ReadFile(filepath.Join(envDir, "piperd.env"))
+// TestInstallerIsDumbBinaryPlacer guards the new contract: the installer never
+// manages services or touches system config — that is `piper agent`'s job.
+func TestInstallerIsDumbBinaryPlacer(t *testing.T) {
+	b, err := os.ReadFile(scriptPath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != edited {
-		t.Errorf("env file was clobbered on re-run: got %q", string(got))
+	script := string(b)
+	if strings.Contains(script, "systemctl") {
+		t.Error("install.sh mentions systemctl; the installer must not manage services")
 	}
-}
-
-func TestRootlessAgentInstall(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("rootless agent path targets Linux/systemd")
-	}
-	if os.Getuid() == 0 {
-		t.Skip("rootless path requires a non-root user")
-	}
-	osTok, archTok := hostOSArch()
-	tag := "v9.9.9"
-	ver := strings.TrimPrefix(tag, "v")
-	assets := map[string][]byte{
-		fmt.Sprintf("piperd_%s_%s_%s.tar.gz", ver, osTok, archTok): tarGz(t, "piperd", "fake-piperd"),
-		fmt.Sprintf("piper_%s_%s_%s.tar.gz", ver, osTok, archTok):  tarGz(t, "piper", "fake-piper"),
-		"piperd.user.service":     []byte("[Service]\nExecStart=%h/.local/bin/piperd\n"),
-		"piperd.env.user.example": []byte("#PIPER_API_ADDR=127.0.0.1:8088\n"),
-	}
-	srv := newReleaseServer(t, assets, nil)
-
-	home := t.TempDir()
-	unitDir := t.TempDir()
-	env := map[string]string{
-		"PIPER_BASE_URL":         srv.URL,
-		"PIPER_VERSION":          tag,
-		"HOME":                   home,
-		"PIPER_USER_SYSTEMD_DIR": unitDir,
-	}
-	// No --cli-only (full agent) and --no-enable (skip systemctl --user shell-out).
-	out, err := run(t, []string{"--no-enable"}, env)
-	if err != nil {
-		t.Fatalf("rootless install failed: %v\n%s", err, out)
-	}
-	for _, p := range []string{
-		filepath.Join(home, ".local", "bin", "piperd"),
-		filepath.Join(home, ".local", "bin", "piper"),
-		filepath.Join(unitDir, "piperd.service"),
-		filepath.Join(home, ".piper", "piperd.env"),
-	} {
-		if _, err := os.Stat(p); err != nil {
-			t.Errorf("missing %s: %v\n%s", p, err, out)
-		}
-	}
-
-	// Re-run must not clobber an operator-edited env file.
-	edited := "PIPER_BASE_DOMAIN=example.com\n"
-	if err := os.WriteFile(filepath.Join(home, ".piper", "piperd.env"), []byte(edited), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run(t, []string{"--no-enable"}, env); err != nil {
-		t.Fatalf("re-run failed: %v\n%s", err, out)
-	}
-	got, err := os.ReadFile(filepath.Join(home, ".piper", "piperd.env"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != edited {
-		t.Errorf("env file clobbered on re-run: got %q", string(got))
+	if strings.Contains(script, "/etc/") {
+		t.Error("install.sh references /etc/; the installer must not touch system config")
 	}
 }
 
@@ -367,38 +354,6 @@ func TestInstallDocumentation(t *testing.T) {
 			"--cli-only",
 			"--rc",
 			"PIPER_ADDR",
-		},
-	}
-	for name, wants := range docs {
-		b, err := os.ReadFile(filepath.Join(repoRoot(t), name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		content := string(b)
-		for _, want := range wants {
-			if !strings.Contains(content, want) {
-				t.Errorf("%s missing %q", name, want)
-			}
-		}
-	}
-}
-
-func TestRootlessDocumentation(t *testing.T) {
-	docs := map[string][]string{
-		filepath.Join("docs", "getting-started.md"): {
-			"piper agent up",
-			"piper agent daemonize",
-			"in the foreground", // #211: journalctl --user may be empty
-		},
-		filepath.Join("docs", "manual-setup.md"): {
-			"packaging/systemd/piperd.user.service",
-			"packaging/systemd/piperd.env.user.example", // #211: rootless env template
-			"systemctl --user",
-		},
-		filepath.Join("docs", "runbooks", "git-deploy-e2e.md"): {
-			"piper agent status",
-			"journalctl --user -u piperd",
-			"in the foreground", // #211: foreground-run fallback
 		},
 	}
 	for name, wants := range docs {

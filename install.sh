@@ -1,6 +1,6 @@
 #!/bin/sh
 # Piper installer — https://github.com/getpiper/piper
-# Installs the piperd agent (+ systemd unit) or just the piper CLI.
+# Places the piper + piperd binaries; lifecycle belongs to `piper agent`.
 set -eu
 
 PIPER_REPO="${PIPER_REPO:-getpiper/piper}"
@@ -8,12 +8,8 @@ PIPER_BASE_URL="${PIPER_BASE_URL:-https://github.com}"
 PIPER_API_URL="${PIPER_API_URL:-https://api.github.com}"
 PIPER_VERSION="${PIPER_VERSION:-}"
 PIPER_PREFIX="${PIPER_PREFIX:-}"
-PIPER_SYSTEMD_DIR="${PIPER_SYSTEMD_DIR:-/etc/systemd/system}"
-PIPER_ENV_DIR="${PIPER_ENV_DIR:-/etc/piper}"
-PIPER_USER_SYSTEMD_DIR="${PIPER_USER_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 cli_only="${PIPER_CLI_ONLY:-}"
 use_rc="${PIPER_RC:-}"
-no_enable=""
 
 die() { echo "piper-install: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -22,7 +18,6 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--cli-only) cli_only=1 ;;
 		--rc) use_rc=1 ;;
-		--no-enable) no_enable=1 ;;
 		--version) shift; PIPER_VERSION="${1:-}" ;;
 		--version=*) PIPER_VERSION="${1#--version=}" ;;
 		-h|--help) echo "Usage: install.sh [--cli-only] [--rc] [--version vX.Y.Z]"; exit 0 ;;
@@ -115,87 +110,25 @@ cli_prefix() {
 	if [ "$(id -u)" -eq 0 ]; then echo /usr/local/bin; else echo "$HOME/.local/bin"; fi
 }
 
-install_cli() { # install_cli OS ARCH TAG
-	prefix="$(cli_prefix)"
-	mkdir -p "$prefix"
-	download_verify piper "$3" "$1" "$2" "$prefix"
-	echo "installed piper $3 -> $prefix/piper"
-	case ":$PATH:" in
-		*":$prefix:"*) ;;
-		*) echo "note: $prefix is not on your PATH — add it to use piper" ;;
-	esac
-}
-
-install_agent_rootless() { # install_agent_rootless OS ARCH TAG
-	os="$1"; arch="$2"; tag="$3"
-	prefix="$HOME/.local/bin"
-	mkdir -p "$prefix"
-	download_verify piperd "$tag" "$os" "$arch" "$prefix"
-	download_verify piper "$tag" "$os" "$arch" "$prefix"
-
-	mkdir -p "$PIPER_USER_SYSTEMD_DIR"
-	fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.user.service" \
-		"$PIPER_USER_SYSTEMD_DIR/piperd.service" || die "download failed: piperd.user.service"
-
-	mkdir -p "$HOME/.piper"
-	if [ ! -f "$HOME/.piper/piperd.env" ]; then
-		fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.env.user.example" \
-			"$HOME/.piper/piperd.env" || die "download failed: piperd.env.user.example"
-	fi
-	echo "installed rootless piperd + piper $tag -> $prefix"
-
-	if [ -z "$no_enable" ] && have systemctl; then
-		systemctl --user daemon-reload
-		systemctl --user enable --now piperd
-		echo "rootless piperd enabled and started (systemctl --user)"
-	else
-		echo "note: not started (no systemctl or --no-enable); start with: piper agent up"
-	fi
-	case ":$PATH:" in
-		*":$prefix:"*) ;;
-		*) echo "note: $prefix is not on your PATH — add it to use piper/piperd" ;;
-	esac
-}
-
-install_agent() { # install_agent OS ARCH TAG
-	os="$1"; arch="$2"; tag="$3"
-	[ "$os" = linux ] || die "on macOS use --cli-only, then follow docs/manual-setup.md (Run the agent on macOS) to run 'piper agent up'"
-	if [ -z "$PIPER_PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
-		install_agent_rootless "$os" "$arch" "$tag"
-		return
-	fi
-	prefix="${PIPER_PREFIX:-/usr/local/bin}"
-	mkdir -p "$prefix"
-	download_verify piperd "$tag" "$os" "$arch" "$prefix"
-	download_verify piper "$tag" "$os" "$arch" "$prefix"
-
-	mkdir -p "$PIPER_SYSTEMD_DIR"
-	fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.service" \
-		"$PIPER_SYSTEMD_DIR/piperd.service" || die "download failed: piperd.service"
-
-	mkdir -p "$PIPER_ENV_DIR"
-	chmod 0700 "$PIPER_ENV_DIR" 2>/dev/null || true
-	if [ ! -f "$PIPER_ENV_DIR/piperd.env" ]; then
-		fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/piperd.env.example" \
-			"$PIPER_ENV_DIR/piperd.env" || die "download failed: piperd.env.example"
-		chmod 0600 "$PIPER_ENV_DIR/piperd.env" 2>/dev/null || true
-	fi
-	echo "installed piperd + piper $tag -> $prefix"
-
-	if [ -z "$no_enable" ] && have systemctl; then
-		systemctl daemon-reload
-		systemctl enable --now piperd
-		echo "piperd service enabled and started"
-	else
-		echo "note: service not enabled (no systemctl or --no-enable); start with: systemctl enable --now piperd"
-	fi
-}
-
 os="$(detect_os)"
 arch="$(detect_arch)"
 tag="$(resolve_version)"
+prefix="$(cli_prefix)"
+mkdir -p "$prefix"
 if [ -n "$cli_only" ]; then
-	install_cli "$os" "$arch" "$tag"
+	download_verify piper "$tag" "$os" "$arch" "$prefix"
+	echo "installed piper $tag -> $prefix/piper"
 else
-	install_agent "$os" "$arch" "$tag"
+	download_verify piperd "$tag" "$os" "$arch" "$prefix"
+	download_verify piper "$tag" "$os" "$arch" "$prefix"
+	echo "installed piper + piperd $tag -> $prefix"
+	if [ "$os" = linux ]; then
+		echo "next: piper agent up   (or: piper agent daemonize — durable system service on :80/:443)"
+	else
+		echo "next: see docs/manual-setup.md (Run the agent on macOS)"
+	fi
 fi
+case ":$PATH:" in
+	*":$prefix:"*) ;;
+	*) echo "note: $prefix is not on your PATH — add it to use piper" ;;
+esac
