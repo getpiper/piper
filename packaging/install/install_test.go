@@ -324,6 +324,48 @@ func TestDefaultNoStableReleaseErrors(t *testing.T) {
 
 // TestInstallerIsDumbBinaryPlacer guards the new contract: the installer never
 // manages services or touches system config — that is `piper agent`'s job.
+// TestDownloadAnnouncesEachBinary: a default install pulls ~36 MB of archives.
+// The bar itself is TTY-gated (curl and wget render a meter only when stderr is
+// a terminal), so the announcement is the part a piped or CI run still sees —
+// and the part that says which binary the wait belongs to.
+func TestDownloadAnnouncesEachBinary(t *testing.T) {
+	tag := "v9.9.9"
+	srv := newReleaseServer(t, bothArchives(t, tag), nil)
+
+	out, err := run(t, nil, map[string]string{
+		"PIPER_BASE_URL": srv.URL,
+		"PIPER_VERSION":  tag,
+		"PIPER_PREFIX":   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{"downloading piperd " + tag, "downloading piper " + tag} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+// TestArchiveDownloadShowsProgress pins the meter to the archive fetch only: the
+// release-metadata fetch is captured in a command substitution and the checksum
+// file is a few hundred bytes, so neither should render one.
+func TestArchiveDownloadShowsProgress(t *testing.T) {
+	b, err := os.ReadFile(scriptPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(b)
+	for _, want := range []string{"--progress-bar", "--show-progress", "-t 2"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("install.sh missing %q — archive downloads should show progress on a terminal", want)
+		}
+	}
+	if !strings.Contains(script, "curl -fsSL") {
+		t.Error("install.sh no longer has a silent fetch; metadata and checksums must stay quiet")
+	}
+}
+
 func TestInstallerIsDumbBinaryPlacer(t *testing.T) {
 	b, err := os.ReadFile(scriptPath(t))
 	if err != nil {
