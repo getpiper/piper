@@ -18,7 +18,7 @@
 - Liveness offline is **200 with `connected:false`**, not an error; proxied `/v1/...` to an offline box stays 503.
 - Relay gate order & codes unchanged: bad credential 401; unknown or cross-tenant agent 404 (no existence leak).
 - Branch: `faruk/health-metrics-surface`. One commit per task, conventional style, body references `Part of #75`, trailer:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Run `make verify` (gofmt → vet → test → cross) before claiming done.
 
 ---
@@ -116,7 +116,7 @@ git commit -m "feat(store): LatestDeployment — newest non-preview deploy per a
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -279,7 +279,7 @@ git commit -m "feat(agent): per-app deploy status on apps API responses
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -416,7 +416,7 @@ git commit -m "feat(relay): liveness — GET /agents/<base> answers from the tun
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -560,7 +560,7 @@ git commit -m "feat(cli): client Liveness() and deploy status in apps responses
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -756,7 +756,7 @@ git commit -m "feat(cli): piper status — box liveness + per-app deploy status
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -816,7 +816,7 @@ git commit -m "test(e2e): liveness + deploy status through the relay
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -871,7 +871,7 @@ git commit -m "docs: piper status + PROGRESS entry for the health/metrics surfac
 
 Part of #75.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

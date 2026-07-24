@@ -19,7 +19,7 @@
 - Read-write, but scoped: **only** new-app, deploy, stop, delete. No link-repo (phase 6), no bulk actions, no auto "offer deploy" after create.
 - TDD: every task writes the failing test first. Run `make verify` before pushing.
 - One commit per task, conventional-commit style, ending with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`
 - Trunk-based: never commit to `main`; one PR into `main` for this phase, squash-merged. Work proceeds on branch `ozykhan/tui-phase4-actions` (already holds the spec).
 
 **Reference — current shapes (already in the codebase, verified on this branch):**
@@ -55,7 +55,7 @@ git commit -m "docs: add TUI phase-4 actions implementation plan
 
 Part of #183
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -365,7 +365,7 @@ adds the intent/result message seam (createAppMsg/stopAppMsg/deleteAppMsg
 
 Part of #P4
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -642,7 +642,7 @@ git commit -m "feat(cli): add new-app form to the TUI
 
 Part of #P4
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -886,7 +886,7 @@ git commit -m "feat(cli): add stop and delete confirms to the TUI
 
 Part of #P4
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1158,7 +1158,7 @@ git commit -m "feat(cli): add deploy action with confirm gate and live build fol
 
 Part of #P4
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1195,7 +1195,7 @@ git commit -m "docs: record TUI actions in PROGRESS.md
 
 Part of #P4
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 4: Push and open the PR**

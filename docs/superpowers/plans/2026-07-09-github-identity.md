@@ -12,7 +12,7 @@
 
 - **No cgo** — everything must build with `CGO_ENABLED=0` (`make cross` proves it).
 - Branch: `ozykhan/github-identity` (already created; the spec is its first commit). Never commit to `main`.
-- Commits: conventional-commit style, one per plan task step-group, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Commits: conventional-commit style, one per plan task step-group, ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 - Reference the issue as `Part of #99` in commit bodies.
 - Run tests with `go test ./internal/relay/ ./cmd/... -count=1` per task; run `make verify` at the end (Task 5).
 - Wire shape of `POST /v1/login/device` and `POST /v1/login/poll` must not change (the CLI depends on it).
@@ -215,7 +215,7 @@ git commit -m "feat(relay): key accounts on github_id, derive usernames from Git
 
 Part of #99
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -713,7 +713,7 @@ no scopes). go-oidc and direct x/oauth2 deps drop out.
 
 Part of #99
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -927,7 +927,7 @@ git commit -m "feat(relay): authorization-code exchange on the GitHub verifier
 
 Part of #99
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1298,7 +1298,7 @@ credential to the dashboard in the URL fragment.
 
 Part of #99
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1345,7 +1345,7 @@ git commit -m "docs: GitHub identity sweep — README, comments, PROGRESS
 
 Part of #99
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 5: Open the PR**

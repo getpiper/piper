@@ -15,7 +15,7 @@
 - `CGO_ENABLED=0` must keep building (no new deps, so automatic — but `make verify` proves it).
 - Module path `github.com/piperbox/piper`.
 - Local defaults unchanged: control API `http://127.0.0.1:8088`, config at `~/.piper/piper/config.json` (0600).
-- Commits: conventional-commit style, one per task, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Commits: conventional-commit style, one per task, ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 - Branch: `faruk/cli-remote-target` (already created off `main`). PR body: `Closes #74`.
 - Test style: table-less house style — one focused `TestXxx` per behavior, `httptest.NewServer` fakes, `t.Setenv("HOME", t.TempDir())` to isolate the config file, assertions inside the fake handler with `t.Errorf`.
 - Error output style: `fmt.Fprintln(stderr, "error:", ...)`, exit codes: 1 = operational failure, 2 = usage error.
@@ -133,7 +133,7 @@ git commit -m "feat(cli): global --remote flag, rejected on local-only commands
 
 Part of #74.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -307,7 +307,7 @@ git commit -m "feat(cli): route control commands through the relay with --remote
 
 Part of #74.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -396,7 +396,7 @@ git commit -m "feat(cli): remote deploy prints no fabricated localhost URL
 
 Part of #74.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -461,7 +461,7 @@ git commit -m "docs: remote CLI usage via --remote/PIPER_REMOTE
 
 Part of #74.
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

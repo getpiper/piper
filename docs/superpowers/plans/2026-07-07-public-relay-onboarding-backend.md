@@ -19,7 +19,7 @@ This is **Plan 1 of 3** for the slice specced in [`docs/superpowers/specs/2026-0
 - **Dependencies already vendored** (indirect today; these tasks promote them to direct — no `go get` of new modules): `golang.org/x/oauth2 v0.36.0`, `github.com/coreos/go-oidc/v3 v3.17.0`, `github.com/google/uuid v1.6.0`.
 - **Secrets are hashed at rest.** Account credentials and enrollment tokens are stored only as `sha256` hex, matching the existing `hashToken` pattern in `internal/relay/store.go`.
 - **Free-tier apex default** `public.getpiper.co`; **default per-account agent cap** `3`.
-- Commit messages are conventional-commit style ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`, and reference `Part of #49`.
+- Commit messages are conventional-commit style ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`, and reference `Part of #49`.
 
 ## File Structure
 
@@ -303,7 +303,7 @@ git commit -m "feat(relay): accounts table + Google-sub-keyed upsert with unique
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -448,7 +448,7 @@ git commit -m "feat(relay): account credentials + operator kill-switch
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -671,7 +671,7 @@ git commit -m "feat(relay): account-bound enrollment with per-account cap
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -837,7 +837,7 @@ git commit -m "feat(relay): Verifier interface + fake IdP for device flow
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1013,7 +1013,7 @@ git commit -m "feat(relay): Google device-flow verifier adapter (oauth2 + oidc)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1224,7 +1224,7 @@ git commit -m "feat(relay): control API login device + poll (Google device flow)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1407,7 +1407,7 @@ git commit -m "feat(relay): control API account-bound enroll endpoint
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1575,7 +1575,7 @@ git commit -m "feat(relay): serve control API + admin disable kill-switch
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

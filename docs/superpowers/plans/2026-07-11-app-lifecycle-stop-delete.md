@@ -15,7 +15,7 @@
 - Branch `ozykhan/app-lifecycle` (already created, spec committed). One commit per task, conventional-commit style, each ending with:
 
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+  Co-Authored-By: Claude {current model} <noreply@anthropic.com>
   ```
 
 - Commits reference the issue: `Part of #103` in the body.
@@ -143,7 +143,7 @@ git commit -m "feat(store): DeleteApp removes an app and its deployment history
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -377,7 +377,7 @@ git commit -m "feat(deploy): Stop retires the running production container
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -639,7 +639,7 @@ git commit -m "feat(deploy): Delete tears down containers, routes, hostname, and
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -792,7 +792,7 @@ git commit -m "feat(agent): POST /v1/apps/{name}/stop and DELETE /v1/apps/{name}
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -898,7 +898,7 @@ git commit -m "feat(cli): client StopApp/DeleteApp wrappers
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1111,7 +1111,7 @@ git commit -m "feat(cli): piper stop and piper delete commands
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1182,7 +1182,7 @@ git commit -m "test(e2e): stop and delete after deploy — hostname stops servin
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1213,7 +1213,7 @@ git commit -m "docs: mark app stop/delete lifecycle done in PROGRESS
 
 Part of #103
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 git push -u origin ozykhan/app-lifecycle
 ```
 

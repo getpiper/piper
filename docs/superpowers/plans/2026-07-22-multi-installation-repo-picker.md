@@ -16,7 +16,7 @@
 - **Deployment status strings** unchanged; not touched here.
 - **Verification gate:** `make verify` (gofmt → `go vet` → `go test ./...` → `make cross`) must pass before the branch is done.
 - Branch already exists: `ozykhan/multi-installation-repo-picker` (design doc committed). Reference `#321` in commits; `Closes #321` goes in the PR body.
-- Commit trailer: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+- Commit trailer: `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 
 ---
 
@@ -139,7 +139,7 @@ feat(relay): enumerate all installations for an account (#321)
 
 Part of #321.
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -271,7 +271,7 @@ fix(relay): mint git tokens from the installation owning the repo (#321)
 
 Part of #321.
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -434,7 +434,7 @@ feat(relay): github status returns all installations by target identity (#321)
 
 Part of #321.
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -599,7 +599,7 @@ feat(relay): github repos selects installation by ?installation_id= (#321)
 
 Part of #321.
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -662,7 +662,7 @@ refactor(relay): drop single-result InstallationForAccount (#321)
 
 Part of #321.
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -692,7 +692,7 @@ chore(relay): note multi-installation picker in progress (#321)
 
 Part of #321.
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>
 EOF
 )"
 ```

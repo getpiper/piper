@@ -17,7 +17,7 @@
 - Layering: `internal/agent` depends only on `internal/tunnel` + stdlib — do NOT import lego there (use a local `"acme-tls/1"` constant). `internal/relay` is not touched at all.
 - DNS-01 behavior must stay byte-for-byte: `NewCloudflareIssuer`, `Manager.Obtain`, account-key handling unchanged.
 - Run `make verify` (gofmt → vet → test → arm64 cross-build) before claiming done.
-- Branch: `faruk/alpn01-certs` (already created; spec is committed on it). One commit per task, conventional-commit style, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Branch: `faruk/alpn01-certs` (already created; spec is committed on it). One commit per task, conventional-commit style, ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 
 ---
 
@@ -136,7 +136,7 @@ git commit -m "feat(certs): require exactly one challenge mode; add TLS-ALPN-01 
 
 Part of #226 (epic #224).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -397,7 +397,7 @@ git commit -m "feat(certs): ALPNSolver — TLS-ALPN-01 provider + loopback answe
 
 Part of #226 (epic #224).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -484,7 +484,7 @@ git commit -m "test(certs): pebble-gated TLS-ALPN-01 exact-host Obtain
 
 Part of #226 (epic #224).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -666,7 +666,7 @@ git commit -m "feat(agent): PeekALPN — detect acme-tls/1 on passthrough stream
 
 Part of #226 (epic #224).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -874,7 +874,7 @@ pipes to Caddy's :443 unchanged.
 
 Part of #226 (epic #224).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -909,7 +909,7 @@ git commit -m "docs: mark TLS-ALPN-01 issuance path built in PROGRESS
 
 Part of #226 (epic #224).
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 git push -u origin faruk/alpn01-certs
 gh pr create --base main --title "feat(certs): TLS-ALPN-01 issuance path — tokenless exact-host certs" --body "$(cat <<'EOF'
 Adds the TLS-ALPN-01 challenge mode to `internal/certs` (exactly one of DNS-01/ALPN per `certs.New`), a combined lego-provider + loopback-answerer `certs.ALPNSolver`, and an ALPN peek on the tunnel passthrough path so `acme-tls/1` validations spliced down from the relay reach the solver while all other traffic keeps flowing to Caddy's `:443` untouched.

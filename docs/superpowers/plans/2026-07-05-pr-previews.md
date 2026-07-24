@@ -16,7 +16,7 @@
 - **Preview host format:** `pr-<N>-<app>.<base>` (single label under `<base>` — no cert/DNS/relay change).
 - **Layering:** `deploy` imports `runtime`/`store` only (never `source`); `webhook` drives `deploy` through an interface.
 - TDD, failing-test-first per step. `make test` and `make cross` green, gofmt clean, `-race` clean.
-- Conventional-commit messages ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Conventional-commit messages ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`.
 
 ---
 
@@ -77,7 +77,7 @@ Expected: PASS.
 
 ```bash
 git add internal/source/source.go internal/source/source_test.go
-git commit -m "$(printf 'feat(source): add StatusInactive for preview teardown\n\nPart of #32.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source): add StatusInactive for preview teardown\n\nPart of #32.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -221,7 +221,7 @@ Expected: PASS (all store tests, including pre-existing).
 
 ```bash
 git add internal/store/store.go internal/store/store_test.go
-git commit -m "$(printf 'feat(store): persist preview deployments keyed by (app, pr)\n\nPart of #32. Adds a pr column, CreatePreviewDeployment and PreviewRunning,\nand scopes LatestRunning to main (pr=0) deployments so preview containers\nare never retired as the main one.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(store): persist preview deployments keyed by (app, pr)\n\nPart of #32. Adds a pr column, CreatePreviewDeployment and PreviewRunning,\nand scopes LatestRunning to main (pr=0) deployments so preview containers\nare never retired as the main one.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -493,7 +493,7 @@ Expected: PASS (new preview tests + all pre-existing `Deploy` tests unchanged).
 
 ```bash
 git add internal/deploy/deploy.go internal/deploy/deploy_test.go
-git commit -m "$(printf 'feat(deploy): DeployPreview and TeardownPreview for PR previews\n\nPart of #32. Extracts a shared buildRunHealthy core; previews route the\nflattened pr-N-app.base host and retire only the prior preview for the\nsame (app, pr), never the app main deployment.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(deploy): DeployPreview and TeardownPreview for PR previews\n\nPart of #32. Extracts a shared buildRunHealthy core; previews route the\nflattened pr-N-app.base host and retire only the prior preview for the\nsame (app, pr), never the app main deployment.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -641,7 +641,7 @@ Expected: PASS (push/ping/bad-signature tests unaffected).
 
 ```bash
 git add internal/source/github/parse.go internal/source/github/parse_test.go internal/source/github/testdata/pr_*.json
-git commit -m "$(printf 'feat(source/github): parse pull_request webhook events\n\nPart of #32. Maps opened/reopened/synchronize/closed to the PR kinds and\npopulates Event.PR plus head ref/sha.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): parse pull_request webhook events\n\nPart of #32. Maps opened/reopened/synchronize/closed to the PR kinds and\npopulates Event.PR plus head ref/sha.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -774,7 +774,7 @@ Expected: PASS (existing pending/success report tests still pass — production 
 
 ```bash
 git add internal/source/github/report.go internal/source/github/report_test.go
-git commit -m "$(printf 'feat(source/github): per-PR deploy environment + inactive status\n\nPart of #32. PR deployments use environment pr-N with transient_environment\nso GitHub auto-inactivates superseded previews; StatusInactive posts the\ninactive state on close.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(source/github): per-PR deploy environment + inactive status\n\nPart of #32. PR deployments use environment pr-N with transient_environment\nso GitHub auto-inactivates superseded previews; StatusInactive posts the\ninactive state on close.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1066,7 +1066,7 @@ Expected: PASS (new PR tests + all pre-existing push tests).
 
 ```bash
 git add internal/webhook/webhook.go internal/webhook/webhook_test.go
-git commit -m "$(printf 'feat(webhook): route pull_request events to preview deploy/teardown\n\nPart of #32. PR opened/synced builds a preview at pr-N-app.base (deduped\non head sha); PR closed tears it down and reports the deployment inactive.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(webhook): route pull_request events to preview deploy/teardown\n\nPart of #32. PR opened/synced builds a preview at pr-N-app.base (deduped\non head sha); PR closed tears it down and reports the deployment inactive.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1283,7 +1283,7 @@ Expected: PASS.
 
 ```bash
 git add internal/webhook/integration_test.go
-git commit -m "$(printf 'test(webhook): end-to-end PR preview lifecycle without Docker\n\nPart of #32. Drives a real github.Provider + deploy.Deployer (fake runtime)\nthrough open then close, asserting the route appears then is removed and the\npreview deployment record is retired.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'test(webhook): end-to-end PR preview lifecycle without Docker\n\nPart of #32. Drives a real github.Provider + deploy.Deployer (fake runtime)\nthrough open then close, asserting the route appears then is removed and the\npreview deployment record is retired.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1326,7 +1326,7 @@ And update the `_Last updated_` line to note PR previews landed.
 
 ```bash
 git add PROGRESS.md
-git commit -m "$(printf 'docs: mark PR previews done in PROGRESS\n\nCloses #32.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git commit -m "$(printf 'docs: mark PR previews done in PROGRESS\n\nCloses #32.\n\nCo-Authored-By: Claude {current model} <noreply@anthropic.com>')"
 ```
 
 - [ ] **Step 4: Push and open the PR**

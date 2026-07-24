@@ -19,7 +19,7 @@ This is **Plan 2 of 3** for the slice specced in [`docs/superpowers/specs/2026-0
 - **Default relay control-API base URL** is `https://api.public.getpiper.co` (overridable with `piper login --relay <url>`).
 - **`piper connect` prints the restart command; it does NOT auto-restart piperd.**
 - **piperd config precedence:** environment variables override the persisted `relay.json` (which overrides built-in defaults).
-- Commit messages are conventional-commit style ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`, and reference `Part of #49`.
+- Commit messages are conventional-commit style ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`, and reference `Part of #49`.
 
 ## Relay control-API contract (from Plan 1 — do not re-implement, only consume)
 
@@ -339,7 +339,7 @@ git commit -m "feat(cli): relay control-API client (device login + enroll)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -417,7 +417,7 @@ git commit -m "feat(cli): persist relay API + account credential in ClientConfig
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -609,7 +609,7 @@ git commit -m "feat(agent): load persisted relay.json at startup (env overrides)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -829,7 +829,7 @@ git commit -m "feat(cli): piper login device flow (relay account credential)
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1015,7 +1015,7 @@ git commit -m "feat(cli): piper connect — claim box, install relay.json
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1076,7 +1076,7 @@ git commit -m "docs: piper login/connect self-service onboarding quickstart
 
 Part of #49
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

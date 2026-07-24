@@ -17,7 +17,7 @@
 - **Deployment status strings** (`"building"`, `"running"`, `"failed"`, `"stopped"`) unchanged; not touched here.
 - **Commits:** conventional-commit style, one per task, `Part of #200` in the body (phase-6 child issue), ending with:
   ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+  Co-Authored-By: Claude {current model} <noreply@anthropic.com>
   ```
 - **Verify gate:** `make verify` (gofmt → vet → test → cross) must pass before the work is done. If gofmt flags files, run `make fmt` and re-run.
 - **Existing test helpers** (in `internal/tui/app_test.go` and `internal/tui/boxes_test.go`, same package — reuse, do not redefine): `keyRunes(r rune) tea.KeyMsg`, `keyEnter()`, `keyBackspace()`, `keyTab()`, `pump(t, m, cmd) Model`, the `fakeAPI` struct + `apiCalls` recorder, `seedConfig(t, config.ClientFile)`, and `fakeDialer(c API, addr string, remote bool, err error) Dialer`.
@@ -169,7 +169,7 @@ git commit -m "feat(cli): TUI apps home hints at login on a 401 poll
 
 Part of #200
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -469,7 +469,7 @@ git commit -m "feat(cli): TUI login wizard — verify a LAN token and save to th
 LAN token only for now; relay login lands later via the target seam.
 Part of #200
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -777,7 +777,7 @@ git commit -m "feat(cli): TUI link-repo form — attach a repo to an app from ap
 
 Part of #200
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1149,7 +1149,7 @@ git commit -m "feat(cli): TUI GitHub setup wizard — manifest flow with a live 
 
 Part of #200
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1226,7 +1226,7 @@ git commit -m "docs: record TUI wizards; add login/github/link keys to help over
 
 Part of #200
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---

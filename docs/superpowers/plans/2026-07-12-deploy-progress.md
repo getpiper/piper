@@ -15,7 +15,7 @@
 - **Deployment status strings** are exactly `"building"`, `"running"`, `"failed"`, `"stopped"`.
 - **Layering:** `store` knows only persistence; `runtime` only Docker; `deploy` orchestrates through interfaces; `api` is transport over `deploy`+`store`; `client` is the CLI's view of `api`. Nothing imports "up".
 - **TDD:** every task is failing-test-first, then minimal implementation.
-- **Commits:** conventional-commit style, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Reference `Part of #140`.
+- **Commits:** conventional-commit style, ending with `Co-Authored-By: Claude {current model} <noreply@anthropic.com>`. Reference `Part of #140`.
 - **Before claiming done / pushing:** run `make verify` (gofmt → vet → test → cross).
 
 ---
@@ -132,7 +132,7 @@ git commit -m "feat(store): building-row log/finalize methods (#140)
 
 Part of #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -275,7 +275,7 @@ git commit -m "feat(runtime): stream live build output to a progress writer (#14
 
 Part of #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -605,7 +605,7 @@ git commit -m "feat(deploy): split Deploy into Begin/Finish with a live log sink
 
 Part of #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -823,7 +823,7 @@ git commit -m "feat(api): async deploy POST returns a building deployment (#140)
 
 Part of #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1040,7 +1040,7 @@ git commit -m "feat(cli): client can follow a deployment by polling (#140)
 
 Part of #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1147,7 +1147,7 @@ git commit -m "feat(cli): piper deploy streams build progress and reports the UR
 
 Closes #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 ---
@@ -1176,7 +1176,7 @@ git commit -m "docs: mark deploy progress streaming built (#140)
 
 Part of #140
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+Co-Authored-By: Claude {current model} <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 4: Push and open the PR**
