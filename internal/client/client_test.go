@@ -312,7 +312,7 @@ func TestDeployFromRepoNotBoundByClientTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	dep, err := New(srv.URL, "").WithTimeout(50*time.Millisecond).DeployFromRepo("blog")
+	dep, err := New(srv.URL, "").WithTimeout(50 * time.Millisecond).DeployFromRepo("blog")
 	if err != nil {
 		t.Fatalf("DeployFromRepo: %v", err)
 	}
