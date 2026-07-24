@@ -16,7 +16,8 @@
 > route and `deploy.finish` never calls one — and Leg D's redirect assertion is
 > absent from the e2e suite. Consequence: `http://<per-app-custom-domain>`
 > reaches the box's plaintext Caddy server, matches no route there, and does not
-> redirect to HTTPS.
+> redirect to HTTPS. Tracked in
+> [#357](https://github.com/piperbox/piper/issues/357).
 >
 > The acceptance criteria below are left exactly as authored, unticked — the
 > first one is genuinely unmet.
