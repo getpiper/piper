@@ -131,6 +131,22 @@ func TestLinkFormPickerFiltersAndFills(t *testing.T) {
 	}
 }
 
+// The root's ~2s poll delivers non-key messages to the top view; they must not
+// wipe the picker selection out from under the user (#334) — enter after a
+// tick must still accept the highlighted repo, not submit the typed filter as
+// free text.
+func TestLinkFormPickerSelectionSurvivesPollTick(t *testing.T) {
+	next, _ := newLinkForm("blog").Update(fixturePickRepos())
+	v := typeLinkRepo(t, next.(linkFormView), "octo")
+	n, _ := v.Update(tea.KeyMsg(tea.Key{Type: tea.KeyDown})) // highlight octo/blog
+	n, _ = n.(linkFormView).Update(tickMsg{})                // a poll tick passes through
+	n, _ = n.(linkFormView).Update(keyEnter())               // must accept the pick
+	v = n.(linkFormView)
+	if got := strings.TrimSpace(v.repo.Value()); got != "octo/blog" {
+		t.Fatalf("selection lost to the tick; repo = %q, want octo/blog", got)
+	}
+}
+
 func TestLinkFormEnterWithoutSelectionSubmitsFreeText(t *testing.T) {
 	next, _ := newLinkForm("blog").Update(fixturePickRepos())
 	v := typeLinkRepo(t, next.(linkFormView), "someone/else")

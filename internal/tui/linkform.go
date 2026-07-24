@@ -173,16 +173,23 @@ func (v linkFormView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v.submit()
 		}
 	}
-	v.err = nil // any keystroke clears a stale banner
 	var cmd tea.Cmd
 	switch v.focus {
 	case 0:
 		v.repo, cmd = v.repo.Update(msg)
-		v.sel = -1 // typing resets the pick; enter now submits free text
 	case 1:
 		v.branch, cmd = v.branch.Update(msg)
 	default:
 		v.rootDir, cmd = v.rootDir.Update(msg)
+	}
+	// Only a keystroke clears a stale banner or resets the pick (typing means
+	// enter now submits free text). Non-key messages — the root's ~2s poll,
+	// cursor blinks — must not wipe the selection out from under the user (#334).
+	if _, ok := msg.(tea.KeyMsg); ok {
+		v.err = nil
+		if v.focus == 0 {
+			v.sel = -1
+		}
 	}
 	return v, cmd
 }
