@@ -80,6 +80,7 @@ Goal: `git push → live HTTPS URL` via a per-user GitHub App; webhook rides the
 - ✅ Relay dashboard endpoints — `GET /v1/github/repos` (repo picker) + `GET /v1/github/status` (App install state + install URL) — [#308](https://github.com/getpiper/piper/issues/308), [#315](https://github.com/getpiper/piper/issues/315); picker enumerates all installations, labels each by target, tokens mint by repo owner — [#321](https://github.com/getpiper/piper/issues/321)
 - ✅ `piper github reset` — give up a box's own App so a brokered one can take over; startup warns when one shadows the other — [#299](https://github.com/getpiper/piper/issues/299)
 - ✅ Manual deploy of a linked app builds from the repo — `POST /v1/apps/{name}/deploy-from-repo`; TUI `d` and pathless `piper deploy` use it — [#331](https://github.com/getpiper/piper/issues/331)
+- ✅ e2e — deploy-failure resilience (failed build keeps the old version serving) + synthetic webhook push → deploy → PR-preview lifecycle through the relay — [#337](https://github.com/getpiper/piper/issues/337)
 
 ## Install & run piperd as a service — epic [#43](https://github.com/getpiper/piper/issues/43) ✅ closed
 

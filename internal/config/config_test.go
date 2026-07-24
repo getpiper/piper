@@ -638,3 +638,12 @@ func TestLoadListenOverride(t *testing.T) {
 		t.Errorf("HTTPSAddr = %q, want :8443", c.HTTPSAddr)
 	}
 }
+
+func TestGitHubAPIBaseFromEnv(t *testing.T) {
+	t.Setenv("PIPER_DATA_DIR", t.TempDir())
+	t.Setenv("PIPER_GITHUB_API_BASE", "http://127.0.0.1:9999")
+	cfg := Load()
+	if cfg.GitHubAPIBase != "http://127.0.0.1:9999" {
+		t.Fatalf("GitHubAPIBase = %q, want the env override", cfg.GitHubAPIBase)
+	}
+}

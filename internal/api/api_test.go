@@ -754,6 +754,33 @@ func TestGetAppIncludesDeployStatus(t *testing.T) {
 	}
 }
 
+func TestAppStatusStaysRunningWhenFailedRedeployLeavesOldVersionServing(t *testing.T) {
+	s := newTestStore(t)
+	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)
+	if _, err := s.CreateApp("blog", 8080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img1", "c1", 40001, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateDeployment("blog", "img2", "c2", 40002, "failed", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/apps/blog", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var app App
+	if err := json.NewDecoder(rr.Body).Decode(&app); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if app.Name != "blog" || app.Status != "running" {
+		t.Errorf("app = %+v, want blog running (old version still serving)", app)
+	}
+}
+
 func TestListDeploymentsEndpoint(t *testing.T) {
 	s := newTestStore(t)
 	h := New(s, &fakeDeployer{store: s}, "piper.localhost", "", nil, nil, nil, nil, nil)

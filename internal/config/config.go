@@ -26,6 +26,7 @@ type Config struct {
 	// needs no App credentials of its own.
 	WebhookSecret  string
 	GitHubBrokered bool
+	GitHubAPIBase  string // GitHub API base URL override (tests); empty ⇒ https://api.github.com
 	ACMEEmail      string // ACME account email
 	ACMECA         string // ACME directory URL; empty ⇒ Let's Encrypt production
 	DNSProvider    string // lego DNS provider name (e.g. "cloudflare")
@@ -65,6 +66,7 @@ func Load() Config {
 		Terminated:     os.Getenv("PIPER_RELAY_TERMINATED") == "1" || rf.Terminated,
 		WebhookSecret:  firstNonEmpty(os.Getenv("PIPER_WEBHOOK_SECRET"), rf.WebhookSecret),
 		GitHubBrokered: os.Getenv("PIPER_GITHUB_BROKERED") == "1" || rf.GitHubBrokered,
+		GitHubAPIBase:  env("PIPER_GITHUB_API_BASE", ""),
 		ACMEEmail:      env("PIPER_ACME_EMAIL", ""),
 		ACMECA:         env("PIPER_ACME_CA", ""),
 		DNSProvider:    env("PIPER_DNS_PROVIDER", ""),
