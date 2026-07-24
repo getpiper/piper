@@ -30,7 +30,9 @@ type Deployerer interface {
 
 // App is the wire shape of an app in API responses: the stored app plus the
 // status of its latest non-preview deployment — exactly one of "building",
-// "running", "failed", "stopped" — or "" when never deployed.
+// "running", "failed", "stopped" — or "" when never deployed; except a
+// "failed" latest deployment still reports "running" when an older
+// deployment is still up and serving.
 type App struct {
 	store.App
 	Status string
@@ -44,6 +46,13 @@ func latestStatus(s *store.Store, app string) (string, error) {
 	}
 	if err != nil {
 		return "", err
+	}
+	if d.Status == "failed" {
+		if _, err := s.LatestRunning(app); err == nil {
+			return "running", nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return "", err
+		}
 	}
 	return d.Status, nil
 }
