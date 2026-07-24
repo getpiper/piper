@@ -67,12 +67,22 @@ type RepoBinder interface {
 	BindRepo(app, repo, branch string) error
 }
 
+// FetchRepoFunc downloads the tree of repo at ref into destDir, so a linked
+// app can be deployed on demand rather than only on a webhook push. Nil (or
+// returning ErrNoGitHubApp) when the box has no GitHub credential source; the
+// deploy-from-repo endpoint then answers 409.
+type FetchRepoFunc func(ctx context.Context, repo, ref, destDir string) error
+
+// ErrNoGitHubApp is returned by a FetchRepoFunc when no GitHub credential
+// source is configured at call time.
+var ErrNoGitHubApp = errors.New("no GitHub App configured — run `piper github setup` first")
+
 // onGitHubApp, if non-nil, is invoked after a GitHub App is configured via the
 // exchange endpoint, so the daemon can start serving webhooks without a restart.
 // nextGitHubProvider, if non-nil, names the webhook credential source the box
 // would pick with no App stored locally; the reset endpoint reports it so the
 // operator learns whether anything takes over. Nil answers "unknown".
-func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager, binder RepoBinder, nextGitHubProvider func() string) http.Handler {
+func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHubApp func(), dom DomainManager, binder RepoBinder, nextGitHubProvider func() string, fetchRepo FetchRepoFunc) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/apps", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -202,6 +212,60 @@ func New(s *store.Store, d Deployerer, baseDomain, githubAPIBase string, onGitHu
 		// Deploy runs past this request: own the temp dir and use a background
 		// context, since r.Context() is cancelled once the 202 is written. The
 		// build outcome is observed by polling the deployment's status + logs.
+		go func() {
+			defer os.RemoveAll(dir)
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("deploy %s: panic: %v", name, r)
+					_ = s.FinalizeDeployment(dep.ID, "", "", 0, "failed", fmt.Sprintf("deploy panicked: %v", r))
+				}
+			}()
+			if err := d.Finish(context.Background(), dep, dir); err != nil {
+				log.Printf("deploy %s: %v", name, err)
+			}
+		}()
+		writeJSON(w, http.StatusAccepted, dep)
+	})
+	mux.HandleFunc("POST /v1/apps/{name}/deploy-from-repo", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		app, err := s.GetApp(name)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "unknown app", http.StatusNotFound)
+			return
+		} else if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if app.Repo == "" {
+			http.Error(w, "app is not linked to a repository — run `piper app link` first", http.StatusConflict)
+			return
+		}
+		if fetchRepo == nil {
+			http.Error(w, ErrNoGitHubApp.Error(), http.StatusConflict)
+			return
+		}
+		dir, err := os.MkdirTemp("", "piper-src-*")
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if err := fetchRepo(r.Context(), app.Repo, app.Branch, dir); err != nil {
+			os.RemoveAll(dir)
+			if errors.Is(err, ErrNoGitHubApp) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Error(w, "fetch "+app.Repo+"@"+app.Branch+": "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		dep, err := d.Begin(name)
+		if err != nil {
+			os.RemoveAll(dir)
+			serverError(w, r, err)
+			return
+		}
+		// Same contract as the tarball deploy above: the build runs past this
+		// request, so own the temp dir and use a background context.
 		go func() {
 			defer os.RemoveAll(dir)
 			defer func() {

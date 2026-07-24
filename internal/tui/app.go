@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/getpiper/piper/internal/store"
 )
 
 const pollInterval = 2 * time.Second
@@ -277,9 +278,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.popN(msg.n)
 		return m, m.refresh()
 	case deployMsg:
-		name, cwd, c := msg.name, msg.cwd, m.client
+		name, cwd, fromRepo, c := msg.name, msg.cwd, msg.fromRepo, m.client
 		return m, func() tea.Msg {
-			dep, err := c.Deploy(name, cwd)
+			var dep store.Deployment
+			var err error
+			if fromRepo {
+				dep, err = c.DeployFromRepo(name)
+			} else {
+				dep, err = c.Deploy(name, cwd)
+			}
 			return deployStartedMsg{app: name, id: dep.ID, err: err}
 		}
 	case deployStartedMsg:

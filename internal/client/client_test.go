@@ -284,6 +284,43 @@ func TestDeployNotBoundByClientTimeout(t *testing.T) {
 	}
 }
 
+func TestDeployFromRepo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/apps/blog/deploy-from-repo" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
+	}))
+	defer srv.Close()
+
+	dep, err := New(srv.URL, "").DeployFromRepo("blog")
+	if err != nil {
+		t.Fatalf("DeployFromRepo: %v", err)
+	}
+	if dep.ID != "dep1" || dep.Status != "building" {
+		t.Errorf("deployment = %+v", dep)
+	}
+}
+
+func TestDeployFromRepoNotBoundByClientTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Outlive the client's overall timeout, like a slow repo fetch on the box.
+		time.Sleep(250 * time.Millisecond)
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "blog", Status: "building"})
+	}))
+	defer srv.Close()
+
+	dep, err := New(srv.URL, "").WithTimeout(50 * time.Millisecond).DeployFromRepo("blog")
+	if err != nil {
+		t.Fatalf("DeployFromRepo: %v", err)
+	}
+	if dep.ID != "dep1" {
+		t.Errorf("deployment = %+v", dep)
+	}
+}
+
 func TestFollowDeployStreamsThenReportsTerminal(t *testing.T) {
 	var polls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

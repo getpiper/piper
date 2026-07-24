@@ -110,6 +110,41 @@ func TestDeployMissingAppSuggestsCreate(t *testing.T) {
 	}
 }
 
+// A github-linked app deploys from its repo when --path isn't given: the CLI
+// asks the agent to fetch and build repo@branch instead of tarring a local
+// directory that may not even hold the source. #331.
+func TestDeployLinkedAppWithoutPathDeploysFromRepo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/web/deploy-from-repo":
+			_ = json.NewEncoder(w).Encode(store.Deployment{ID: "dep1", App: "web", Status: "building"})
+		case r.URL.Path == "/v1/apps/web/deployments/dep1/logs":
+			io.WriteString(w, "")
+		case r.URL.Path == "/v1/apps/web/deployments":
+			_ = json.NewEncoder(w).Encode([]store.Deployment{{ID: "dep1", App: "web", Status: "running"}})
+		case r.URL.Path == "/v1/apps/web":
+			_ = json.NewEncoder(w).Encode(api.App{App: store.App{
+				Name: "web", Hostname: "web.piper.localhost", Repo: "me/web", Branch: "main",
+			}, Status: "running"})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("PIPER_ADDR", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"deploy", "web"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "me/web@main") {
+		t.Errorf("stderr = %q, want the repo@branch being deployed", got)
+	}
+	if got := stdout.String(); !strings.Contains(got, "deployed web: http://web.piper.localhost (running)") {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
 func TestDeployStreamsProgressAndReportsURL(t *testing.T) {
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "Dockerfile"), []byte("FROM alpine\n"), 0o644); err != nil {

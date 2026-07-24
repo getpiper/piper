@@ -14,17 +14,18 @@ import (
 // apiCalls records the mutating calls a test drives, so assertions can check
 // the TUI passed the right arguments through to the client.
 type apiCalls struct {
-	createName  string
-	createPort  int
-	deployName  string
-	deployDir   string
-	stopped     string
-	started     string
-	deleted     string
-	linkName    string
-	linkRepo    string
-	linkBranch  string
-	linkRootDir string
+	createName     string
+	createPort     int
+	deployName     string
+	deployDir      string
+	deployRepoName string
+	stopped        string
+	started        string
+	deleted        string
+	linkName       string
+	linkRepo       string
+	linkBranch     string
+	linkRootDir    string
 
 	addedApp      string
 	addedDomain   string
@@ -73,6 +74,13 @@ func (f fakeAPI) CreateApp(name string, port int) error {
 func (f fakeAPI) Deploy(name, srcDir string) (store.Deployment, error) {
 	if f.rec != nil {
 		f.rec.deployName, f.rec.deployDir = name, srcDir
+	}
+	return f.deployDep, f.deployErr
+}
+
+func (f fakeAPI) DeployFromRepo(name string) (store.Deployment, error) {
+	if f.rec != nil {
+		f.rec.deployRepoName = name
 	}
 	return f.deployDep, f.deployErr
 }

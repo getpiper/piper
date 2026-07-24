@@ -102,6 +102,10 @@ func (v appDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return v, func() tea.Msg { return pushMsg{newLogsView(v.name, d.ID, d.Status)} }
 			}
 		case "d":
+			if v.app.Repo != "" {
+				repo, branch := v.app.Repo, v.app.Branch
+				return v, func() tea.Msg { return pushMsg{newRepoDeployView(v.name, repo, branch)} }
+			}
 			cwd, _ := os.Getwd()
 			_, statErr := os.Stat(filepath.Join(cwd, "Dockerfile"))
 			hasDockerfile := statErr == nil
