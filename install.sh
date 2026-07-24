@@ -51,6 +51,19 @@ fetch() { # fetch URL DEST
 	else die "need curl or wget"; fi
 }
 
+# fetch_archive is fetch with a progress meter, for the only downloads big
+# enough to wait on (~18 MB per binary). Both tools write the meter to stderr,
+# so it survives `curl … | sh`; it is shown only when stderr is a terminal, so
+# CI logs stay clean. busybox wget has no --show-progress — the plain -q path
+# is the fallback there.
+fetch_archive() { # fetch_archive URL DEST
+	if [ ! -t 2 ]; then fetch "$1" "$2"; return; fi
+	if have curl; then curl -fL --progress-bar "$1" -o "$2"
+	elif have wget && wget --help 2>&1 | grep -q -- --show-progress; then
+		wget -q --show-progress -O "$2" "$1"
+	else fetch "$1" "$2"; fi
+}
+
 fetch_stdout() { # fetch URL -> stdout
 	if have curl; then curl -fsSL "$1"
 	elif have wget; then wget -qO- "$1"
@@ -91,7 +104,8 @@ download_verify() {
 	archive="${name}_${ver}_${os}_${arch}.tar.gz"
 	tmp="$(mktemp -d)"
 	trap 'rm -rf "$tmp"' EXIT
-	fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/$archive" "$tmp/$archive" \
+	echo "downloading $name $tag ($os/$arch)…" >&2
+	fetch_archive "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/$archive" "$tmp/$archive" \
 		|| die "download failed: $archive"
 	fetch "$PIPER_BASE_URL/$PIPER_REPO/releases/download/$tag/checksums.txt" "$tmp/checksums.txt" \
 		|| die "download failed: checksums.txt"
