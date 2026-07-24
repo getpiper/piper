@@ -174,6 +174,37 @@ func TestWebhookPushAndPreview(t *testing.T) {
 	if statusPosts.Load() == 0 {
 		t.Fatal("no deployment status was ever reported to the stub GitHub")
 	}
+
+	// PR opened → preview at pr-7-blog.<base> (flattened single label under the
+	// wildcard); the production app keeps serving the push body.
+	prOpened := `{"action":"opened","number":7,"pull_request":{"head":{"ref":"feature","sha":"` + prSHA + `"}},"repository":{"full_name":"` + repo + `"},"installation":{"id":99}}`
+	deliver(t, hc, "https://hooks."+base+"/", "pull_request", secret, prOpened, 30*time.Second)
+	fetchVia(t, hc, "https://pr-7-blog."+base+"/", prBody, 3*time.Minute)
+	fetchVia(t, hc, "https://blog."+base+"/", pushBody, 20*time.Second)
+
+	// PR closed → the preview route is torn down. The box's Caddy then answers
+	// an empty 200 for the host (the route is gone, the TLS splice still
+	// completes under the wildcard), so "gone" = anything but the preview body.
+	prClosed := `{"action":"closed","number":7,"pull_request":{"head":{"ref":"feature","sha":"` + prSHA + `"}},"repository":{"full_name":"` + repo + `"},"installation":{"id":99}}`
+	deliver(t, hc, "https://hooks."+base+"/", "pull_request", secret, prClosed, 30*time.Second)
+	deadline := time.Now().Add(60 * time.Second)
+	gone := false
+	for time.Now().Before(deadline) {
+		resp, err := hc.Get("https://pr-7-blog." + base + "/")
+		if err == nil {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if string(b) != prBody {
+				gone = true
+				break
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !gone {
+		t.Fatal("preview still serves its body after PR close")
+	}
+	fetchVia(t, hc, "https://blog."+base+"/", pushBody, 20*time.Second)
 }
 
 // appTarball is a gzipped tar in GitHub codeload shape — a single top-level
