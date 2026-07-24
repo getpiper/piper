@@ -23,6 +23,7 @@ type API interface {
 	DeploymentLogs(name, id string) (string, error)
 	CreateApp(name string, port int) error
 	Deploy(name, srcDir string) (store.Deployment, error)
+	DeployFromRepo(name string) (store.Deployment, error)
 	StopApp(name string) error
 	StartApp(name string) error
 	DeleteApp(name string) error
@@ -178,10 +179,12 @@ type (
 	// popMsg pops n views off the stack (e.g. a y/n confirm answered "no").
 	popMsg struct{ n int }
 
-	// deployMsg is the deploy confirm's intent; the root kicks off Deploy.
+	// deployMsg is the deploy confirm's intent; the root kicks off Deploy, or
+	// DeployFromRepo when the app is GitHub-linked (fromRepo).
 	deployMsg struct {
-		name string
-		cwd  string
+		name     string
+		cwd      string
+		fromRepo bool
 	}
 
 	// deployStartedMsg is the deploy kickoff's outcome. On success the root

@@ -246,6 +246,27 @@ func TestAppDetailDKeyPushesDeploy(t *testing.T) {
 	}
 }
 
+func TestAppDetailDKeyOnLinkedAppPushesRepoDeploy(t *testing.T) {
+	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
+		app: api.App{App: store.App{Name: "blog", Repo: "me/blog", Branch: "main"}},
+	})
+	_, cmd := m.Update(keyRunes('d'))
+	if cmd == nil {
+		t.Fatal("d should emit a push command")
+	}
+	pm, ok := cmd().(pushMsg)
+	if !ok {
+		t.Fatalf("want pushMsg, got %T", cmd())
+	}
+	out := pm.view.View()
+	if !strings.Contains(out, "me/blog@main") {
+		t.Fatalf("linked app should confirm a deploy from the repo:\n%s", out)
+	}
+	if strings.Contains(out, "Dockerfile") {
+		t.Fatalf("linked app must not offer the local-directory deploy:\n%s", out)
+	}
+}
+
 func TestAppDetailErrorBannerKeepsLastRows(t *testing.T) {
 	m, _ := newAppDetailView("blog", false).Update(appDetailLoadedMsg{
 		app:  api.App{App: store.App{Name: "blog", Hostname: "blog.piper.localhost", Port: 8080, Repo: "me/blog", Branch: "main"}},
